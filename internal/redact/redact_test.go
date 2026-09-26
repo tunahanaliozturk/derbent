@@ -34,6 +34,13 @@ func TestJSONMasksStringValuesAndStaysValid(t *testing.T) {
 	}
 }
 
+func TestJSONMasksObjectKeys(t *testing.T) {
+	r := mustNew(t, nil, []string{"s3cret-header-value"})
+	if out := r.JSON(`{"headers":{"s3cret-header-value":"x"}}`); out != `{"headers":{"[redacted]":"x"}}` {
+		t.Fatalf("JSON = %s", out)
+	}
+}
+
 func TestSecretsAreMaskedLongestFirst(t *testing.T) {
 	r := mustNew(t, nil, []string{"short-secret", "short-secret-and-more", "tiny"})
 	out := r.String("a short-secret-and-more b tiny")

@@ -61,9 +61,9 @@ func (r *Redactor) String(s string) string {
 	return s
 }
 
-// JSON masks secrets inside every string value of a JSON document and returns it compact, with object
-// keys sorted and numbers as written. Keys and other values are kept. Masking values one by one keeps
-// the result valid JSON whatever the patterns match. Text that is not JSON is masked as plain text.
+// JSON masks secrets inside every string of a JSON document, object keys included, and returns it
+// compact, with keys sorted and numbers as written. Masking strings one by one keeps the result valid
+// JSON whatever the patterns match. Text that is not JSON is masked as plain text.
 func (r *Redactor) JSON(doc string) string {
 	if r.empty() {
 		return doc
@@ -93,10 +93,11 @@ func (r *Redactor) walk(v any) any {
 		}
 		return t
 	case map[string]any:
+		out := make(map[string]any, len(t))
 		for k, x := range t {
-			t[k] = r.walk(x)
+			out[r.String(k)] = r.walk(x)
 		}
-		return t
+		return out
 	default:
 		return v
 	}
