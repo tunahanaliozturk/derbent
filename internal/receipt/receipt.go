@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tunahanaliozturk/portcullis/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
 // Genesis is the previous hash recorded on the first receipt.

@@ -16,11 +16,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/goleak"
 
-	"github.com/tunahanaliozturk/portcullis/internal/gate"
-	"github.com/tunahanaliozturk/portcullis/internal/memory"
-	"github.com/tunahanaliozturk/portcullis/internal/receipt"
-	"github.com/tunahanaliozturk/portcullis/internal/rule"
-	"github.com/tunahanaliozturk/portcullis/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/rule"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
 func TestMain(m *testing.M) {

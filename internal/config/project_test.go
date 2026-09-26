@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tunahanaliozturk/portcullis/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/config"
 )
 
 func mustKey(t *testing.T, dir string) string {

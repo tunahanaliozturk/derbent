@@ -15,10 +15,10 @@ func DefaultConfigPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("find config directory: %w", err)
 	}
-	return filepath.Join(dir, "portcullis", "config.toml"), nil
+	return filepath.Join(dir, "derbent", "config.toml"), nil
 }
 
-// DefaultDBPath is portcullis.db in the user state directory: %LocalAppData% on Windows,
+// DefaultDBPath is derbent.db in the user state directory: %LocalAppData% on Windows,
 // $XDG_STATE_HOME or ~/.local/state on Linux, ~/Library/Application Support on macOS. It stays out of
 // roaming and synced folders, where SQLite's file locking cannot be relied on.
 func DefaultDBPath() (string, error) {
@@ -26,7 +26,7 @@ func DefaultDBPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "portcullis", "portcullis.db"), nil
+	return filepath.Join(dir, "derbent", "derbent.db"), nil
 }
 
 func stateDir() (string, error) {

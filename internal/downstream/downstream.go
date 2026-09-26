@@ -205,12 +205,12 @@ func (m *Manager) supervise(ctx context.Context, s Spec) {
 			if ctx.Err() != nil || m.isClosed() {
 				return
 			}
-			m.opts.Logger.Warn("portcullis: downstream server stopped", "server", s.Name, "err", waitErr)
+			m.opts.Logger.Warn("derbent: downstream server stopped", "server", s.Name, "err", waitErr)
 			if time.Since(began) >= 30*time.Second {
 				backoff = m.opts.MinBackoff
 			}
 		case err != nil && ctx.Err() == nil:
-			m.opts.Logger.Warn("portcullis: downstream server could not start", "server", s.Name, "err", err)
+			m.opts.Logger.Warn("derbent: downstream server could not start", "server", s.Name, "err", err)
 		}
 		if ctx.Err() != nil {
 			return
@@ -226,7 +226,7 @@ func (m *Manager) supervise(ctx context.Context, s Spec) {
 }
 
 func (m *Manager) connect(ctx context.Context, s Spec) (*mcp.ClientSession, error) {
-	client := mcp.NewClient(&mcp.Implementation{Name: "portcullis", Version: m.opts.Version}, &mcp.ClientOptions{
+	client := mcp.NewClient(&mcp.Implementation{Name: "derbent", Version: m.opts.Version}, &mcp.ClientOptions{
 		ToolListChangedHandler: func(_ context.Context, req *mcp.ToolListChangedRequest) {
 			m.reload(ctx, s.Name, req.Session)
 		},
@@ -272,7 +272,7 @@ func (m *Manager) reload(ctx context.Context, server string, cs *mcp.ClientSessi
 	go func() {
 		defer m.wg.Done()
 		if err := m.loadTools(ctx, server, cs); err != nil && ctx.Err() == nil {
-			m.opts.Logger.Warn("portcullis: could not reload tools", "server", server, "err", err)
+			m.opts.Logger.Warn("derbent: could not reload tools", "server", server, "err", err)
 		}
 	}()
 }

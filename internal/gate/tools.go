@@ -6,7 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tunahanaliozturk/portcullis/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/memory"
 )
 
 // notice travels with every note an agent reads, because a note is text from another agent and must not

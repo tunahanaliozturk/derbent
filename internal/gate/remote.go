@@ -17,7 +17,7 @@ func ServableName(name string) bool {
 }
 
 // LeftOut says why a downstream tool cannot be offered to agents under the gate name name, or returns ""
-// when it can. SyncTools and `portcullis config check` both use it, so they never disagree.
+// when it can. SyncTools and `derbent config check` both use it, so they never disagree.
 func LeftOut(name string, t *mcp.Tool) string {
 	switch {
 	case !ServableName(name):
@@ -42,7 +42,7 @@ func (g *Gate) SyncTools(server string, tools []*mcp.Tool) {
 	for _, t := range tools {
 		name := server + "__" + t.Name
 		if why := LeftOut(name, t); why != "" {
-			slog.Warn("portcullis: tool left out: "+why, "tool", name)
+			slog.Warn("derbent: tool left out: "+why, "tool", name)
 			continue
 		}
 		if !knobs.skipHiding && g.Rules.Hidden(g.Agent, name) {
@@ -72,11 +72,11 @@ func (g *Gate) SyncTools(server string, tools []*mcp.Tool) {
 func (g *Gate) forward(server, tool string) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if g.Forward == nil {
-			return toolError("portcullis: no downstream servers are configured"), nil
+			return toolError("derbent: no downstream servers are configured"), nil
 		}
 		res, err := g.Forward(ctx, server, tool, req.Params.Arguments)
 		if err != nil {
-			return toolError("portcullis: " + err.Error()), nil
+			return toolError("derbent: " + err.Error()), nil
 		}
 		return res, nil
 	}

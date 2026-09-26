@@ -1,4 +1,4 @@
-// Package config loads the user's configuration and works out where Portcullis keeps its files.
+// Package config loads the user's configuration and works out where Derbent keeps its files.
 package config
 
 import (
@@ -10,8 +10,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/tunahanaliozturk/portcullis/internal/redact"
-	"github.com/tunahanaliozturk/portcullis/internal/rule"
+	"github.com/tunahanaliozturk/derbent/internal/redact"
+	"github.com/tunahanaliozturk/derbent/internal/rule"
 )
 
 // Config is a loaded and validated configuration.

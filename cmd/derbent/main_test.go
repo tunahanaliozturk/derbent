@@ -16,20 +16,20 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/goleak"
 
-	"github.com/tunahanaliozturk/portcullis/internal/receipt"
-	"github.com/tunahanaliozturk/portcullis/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
-// TestMain lets the end-to-end tests start this test binary as the portcullis command, or as a small
+// TestMain lets the end-to-end tests start this test binary as the derbent command, or as a small
 // MCP server standing in for a user's downstream server.
 func TestMain(m *testing.M) {
 	switch {
-	case os.Getenv("PORTCULLIS_TEST_ECHO") == "1":
+	case os.Getenv("DERBENT_TEST_ECHO") == "1":
 		serveEcho()
-	case os.Getenv("PORTCULLIS_TEST_HANG") == "1":
+	case os.Getenv("DERBENT_TEST_HANG") == "1":
 		_, _ = io.Copy(io.Discard, os.Stdin) // a server that never answers, and exits when stdin closes
 		os.Exit(0)
-	case os.Getenv("PORTCULLIS_TEST_MAIN") == "1":
+	case os.Getenv("DERBENT_TEST_MAIN") == "1":
 		main()
 		os.Exit(0)
 	default:
@@ -65,7 +65,7 @@ func writeConfig(t *testing.T, dir string) string {
 	cfg := `
 [servers.echo]
 command = ['` + os.Args[0] + `', '-test.run=^$']
-env     = { PORTCULLIS_TEST_ECHO = "1" }
+env     = { DERBENT_TEST_ECHO = "1" }
 
 [receipts]
 redact = ['ghp_[A-Za-z0-9]{36}']
@@ -121,7 +121,7 @@ func TestMCPNeedsAValidAgent(t *testing.T) {
 func gateCommand(t *testing.T, dir, agent, configPath string) *exec.Cmd {
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "mcp", "--agent", agent,
 		"--db", filepath.Join(dir, "p.db"), "--config", configPath, "--project", dir)
-	cmd.Env = append(os.Environ(), "PORTCULLIS_TEST_MAIN=1")
+	cmd.Env = append(os.Environ(), "DERBENT_TEST_MAIN=1")
 	return cmd
 }
 
@@ -296,7 +296,7 @@ func TestConfigCheckListsServerTools(t *testing.T) {
 func TestConfigCheckFailsForAServerThatDoesNotStart(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	cfg := "[servers.ghost]\ncommand = ['portcullis-test-no-such-command']\n\n[[rule]]\naction = \"allow\"\n"
+	cfg := "[servers.ghost]\ncommand = ['derbent-test-no-such-command']\n\n[[rule]]\naction = \"allow\"\n"
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -315,11 +315,11 @@ func TestSlowServerDoesNotHoldTheAgentsSession(t *testing.T) {
 	cfg := `
 [servers.slow]
 command = ['` + os.Args[0] + `', '-test.run=^$']
-env     = { PORTCULLIS_TEST_HANG = "1" }
+env     = { DERBENT_TEST_HANG = "1" }
 
 [servers.echo]
 command = ['` + os.Args[0] + `', '-test.run=^$']
-env     = { PORTCULLIS_TEST_ECHO = "1" }
+env     = { DERBENT_TEST_ECHO = "1" }
 
 [[rule]]
 action = "allow"

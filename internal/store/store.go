@@ -61,7 +61,7 @@ func OpenExisting(ctx context.Context, path string) (*sql.DB, error) {
 	}
 	if version > len(names) {
 		db.Close()
-		return nil, fmt.Errorf("open database %s: schema version %d is newer than this binary knows (%d): upgrade portcullis", path, version, len(names))
+		return nil, fmt.Errorf("open database %s: schema version %d is newer than this binary knows (%d): upgrade derbent", path, version, len(names))
 	}
 	return db, nil
 }
@@ -110,7 +110,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("read schema version: %w", err)
 		}
 		if current > len(names) {
-			return fmt.Errorf("schema version %d is newer than this binary knows (%d): upgrade portcullis", current, len(names))
+			return fmt.Errorf("schema version %d is newer than this binary knows (%d): upgrade derbent", current, len(names))
 		}
 		if current == len(names) {
 			return nil

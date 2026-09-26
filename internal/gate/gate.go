@@ -16,9 +16,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tunahanaliozturk/portcullis/internal/memory"
-	"github.com/tunahanaliozturk/portcullis/internal/receipt"
-	"github.com/tunahanaliozturk/portcullis/internal/rule"
+	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/rule"
 )
 
 // Gate serves one agent session.
@@ -54,12 +54,12 @@ var knobs struct {
 	skipRedaction bool
 }
 
-const instructions = "Portcullis gates this session's tools. memory_write, memory_search and memory_read " +
+const instructions = "Derbent gates this session's tools. memory_write, memory_search and memory_read " +
 	"share notes with the other agents working on this project."
 
 // Server builds the MCP server for this session.
 func (g *Gate) Server() *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "portcullis", Version: g.Version},
+	s := mcp.NewServer(&mcp.Implementation{Name: "derbent", Version: g.Version},
 		&mcp.ServerOptions{Instructions: instructions})
 	g.server, g.started = s, time.Now()
 	g.addMemoryTools(s)
@@ -119,7 +119,7 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 	case !isObject:
 		// MCP arguments are an object. Rules read named string arguments, so anything else would slip
 		// past an args condition that a deny depends on.
-		res = toolError("portcullis: " + name + " was refused: its arguments are not a JSON object")
+		res = toolError("derbent: " + name + " was refused: its arguments are not a JSON object")
 		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), "gate", "refused"
 	case decision.Action == rule.Allow:
 		res, err = next(ctx, method, req)
@@ -141,11 +141,11 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 // the tool ran, because a tool that ran has left its effect behind and must not simply be retried, and
 // it tells the user through stderr, which is the only other place a gate process can speak.
 func unrecorded(tool, outcome string, err error) error {
-	slog.Error("portcullis: a call could not be recorded", "tool", tool, "outcome", outcome, "err", err)
+	slog.Error("derbent: a call could not be recorded", "tool", tool, "outcome", outcome, "err", err)
 	if outcome == "refused" {
-		return fmt.Errorf("portcullis: %s was refused and did not run, but the refusal could not be recorded: %w", tool, err)
+		return fmt.Errorf("derbent: %s was refused and did not run, but the refusal could not be recorded: %w", tool, err)
 	}
-	return fmt.Errorf("portcullis: %s ran (outcome %s) but could not be recorded; do not repeat it without checking its effect: %w",
+	return fmt.Errorf("derbent: %s ran (outcome %s) but could not be recorded; do not repeat it without checking its effect: %w",
 		tool, outcome, err)
 }
 
@@ -230,7 +230,7 @@ func refusal(tool string, ruleIndex int) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		IsError: true,
 		Content: []mcp.Content{&mcp.TextContent{
-			Text: fmt.Sprintf("portcullis: %s is not allowed for this agent (rule %d)", tool, ruleIndex),
+			Text: fmt.Sprintf("derbent: %s is not allowed for this agent (rule %d)", tool, ruleIndex),
 		}},
 	}
 }

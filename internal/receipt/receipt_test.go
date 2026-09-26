@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tunahanaliozturk/portcullis/internal/receipt"
-	"github.com/tunahanaliozturk/portcullis/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
 // TestMain doubles as the helper process for TestConcurrentProcessesKeepOneChain.
 func TestMain(m *testing.M) {
-	if path := os.Getenv("PORTCULLIS_TEST_APPEND_DB"); path != "" {
+	if path := os.Getenv("DERBENT_TEST_APPEND_DB"); path != "" {
 		if err := appendFromHelper(path); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 }
 
 func appendFromHelper(path string) error {
-	n, err := strconv.Atoi(os.Getenv("PORTCULLIS_TEST_APPEND_N"))
+	n, err := strconv.Atoi(os.Getenv("DERBENT_TEST_APPEND_N"))
 	if err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func appendFromHelper(path string) error {
 	log := receipt.NewLog(db)
 	for i := range n {
 		r := sample(i)
-		r.Agent = os.Getenv("PORTCULLIS_TEST_APPEND_AGENT")
+		r.Agent = os.Getenv("DERBENT_TEST_APPEND_AGENT")
 		if _, err := log.Append(ctx, r); err != nil {
 			return fmt.Errorf("append %d: %w", i, err)
 		}
@@ -174,9 +174,9 @@ func TestConcurrentProcessesKeepOneChain(t *testing.T) {
 	for i := range cmds {
 		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$")
 		cmd.Env = append(os.Environ(),
-			"PORTCULLIS_TEST_APPEND_DB="+path,
-			"PORTCULLIS_TEST_APPEND_N="+strconv.Itoa(each),
-			"PORTCULLIS_TEST_APPEND_AGENT=agent"+strconv.Itoa(i),
+			"DERBENT_TEST_APPEND_DB="+path,
+			"DERBENT_TEST_APPEND_N="+strconv.Itoa(each),
+			"DERBENT_TEST_APPEND_AGENT=agent"+strconv.Itoa(i),
 		)
 		outs[i] = &bytes.Buffer{}
 		cmd.Stdout, cmd.Stderr = outs[i], outs[i]

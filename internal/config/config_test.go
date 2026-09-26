@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tunahanaliozturk/portcullis/internal/config"
-	"github.com/tunahanaliozturk/portcullis/internal/rule"
+	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/rule"
 )
 
 func TestParseRules(t *testing.T) {
@@ -83,7 +83,7 @@ func TestDefaultDBPathFollowsEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(dir, "portcullis", "portcullis.db"); got != want {
+	if want := filepath.Join(dir, "derbent", "derbent.db"); got != want {
 		t.Fatalf("DefaultDBPath = %q, want %q", got, want)
 	}
 }

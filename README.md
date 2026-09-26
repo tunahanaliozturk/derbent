@@ -1,7 +1,12 @@
-# Portcullis
+# Derbent
 
-An agentic gate for coding agents. Claude Code, Codex, GitHub Copilot CLI and Antigravity CLI connect to
-Portcullis as one MCP server, and your other MCP servers sit behind it. Every tool call passes through the
+One guarded pass for all your coding agents.
+
+A derbent was a guarded post on an Ottoman mountain pass: its keepers decided who went through and kept a
+record of everyone who did. Derbent does the same for tool calls.
+
+It is an agentic gate for coding agents. Claude Code, Codex, GitHub Copilot CLI and Antigravity CLI connect to
+Derbent as one MCP server, and your other MCP servers sit behind it. Every tool call passes through the
 gate, which gives the agents one shared memory, writes a hash-chained receipt for each call, holds risky
 calls until you approve them, and decides which agent sees which tool.
 
@@ -12,7 +17,7 @@ only shared state.
 
 Milestone 2 of 5 is done. The gate serves shared memory tools and the tools of your own MCP servers,
 applies allow and deny rules, masks secrets in stored arguments, and writes a hash-chained receipt for
-every call. Approvals and the terminal UI come next. The [design](docs/design.md) covers the whole plan, what Portcullis does not do, and how each
+every call. Approvals and the terminal UI come next. The [design](docs/design.md) covers the whole plan, what Derbent does not do, and how each
 claim is tested. Decisions are recorded in [docs/adr](docs/adr).
 
 ## Try it
@@ -20,25 +25,25 @@ claim is tested. Decisions are recorded in [docs/adr](docs/adr).
 Needs Go 1.27.
 
 ```bash
-go install github.com/tunahanaliozturk/portcullis/cmd/portcullis@latest
+go install github.com/tunahanaliozturk/derbent/cmd/derbent@latest
 
-claude mcp add portcullis -- portcullis mcp --agent claude
-codex mcp add portcullis -- portcullis mcp --agent codex
+claude mcp add derbent -- derbent mcp --agent claude
+codex mcp add derbent -- derbent mcp --agent codex
 ```
 
 Both agents now have `memory_write`, `memory_search` and `memory_read`, and a note one of them writes in
 a repository can be found by the other in the same repository. Every call is recorded:
 
 ```bash
-portcullis verify
+derbent verify
 ```
 
 prints the number of receipts, the hash of the last one, and whether the chain is intact. Keep a copy
 of that hash somewhere else if you want to be able to tell later that nothing was cut off the end.
 
 Without a config file every call is allowed. To refuse an agent a tool, create `config.toml` in your
-user config directory (`%AppData%\portcullis\` on Windows, `~/.config/portcullis/` on Linux,
-`~/Library/Application Support/portcullis/` on macOS):
+user config directory (`%AppData%\derbent\` on Windows, `~/.config/derbent/` on Linux,
+`~/Library/Application Support/derbent/` on macOS):
 
 ```toml
 [[rule]]
@@ -54,7 +59,7 @@ Rules are tried in order and the first match wins. A tool denied without an `arg
 even listed to that agent.
 
 Your other MCP servers go behind the gate in the same file, and each agent then needs only the one
-`portcullis` entry:
+`derbent` entry:
 
 ```toml
 [servers.github]
@@ -71,7 +76,7 @@ leak into errors), and they are masked in stored arguments, as is anything the `
 A server that stops is started again, with a backoff of up to a minute.
 
 ```bash
-portcullis config check
+derbent config check
 ```
 
 starts every server once and prints the tools each would give the agents.

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tunahanaliozturk/portcullis/internal/rule"
+	"github.com/tunahanaliozturk/derbent/internal/rule"
 )
 
 func mustCompile(t *testing.T, specs ...rule.Spec) rule.Set {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tunahanaliozturk/portcullis/internal/memory"
-	"github.com/tunahanaliozturk/portcullis/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
 const shop, blog = "/work/shop", "/work/blog"

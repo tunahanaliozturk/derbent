@@ -1,6 +1,6 @@
-# Portcullis design
+# Derbent design
 
-Portcullis is an agentic gate: the one MCP server that Claude Code, Codex, GitHub Copilot CLI and
+Derbent is an agentic gate: the one MCP server that Claude Code, Codex, GitHub Copilot CLI and
 Antigravity CLI all connect to, with the user's other MCP servers behind it. Every tool call passes
 through it, so it can give all the agents one shared memory, write a receipt for each call, hold risky
 calls until the user approves them, and decide which agent sees which tool.
@@ -26,7 +26,7 @@ differently gets an ADR under `docs/adr/`, listed under Decisions.
 
 - Seeing calls that do not pass through it. Built-in tools of a CLI without a pre-tool hook are outside
   the gate, and the README states per CLI what is covered.
-- Model traffic. Portcullis sits between agents and tools, not between agents and model providers.
+- Model traffic. Derbent sits between agents and tools, not between agents and model providers.
 - Several users or machines. One person, one machine, no network listener.
 - Semantic search. Memory uses full-text search.
 - A web UI.
@@ -35,27 +35,27 @@ differently gets an ADR under `docs/adr/`, listed under Decisions.
 
 ```
  Claude Code ─┐   stdio    ┌───────────────────────────┐   stdio / HTTP
- Codex ───────┤ ─────────> │ portcullis mcp --agent X  │ ──────────────> the user's MCP servers
+ Codex ───────┤ ─────────> │ derbent mcp --agent X  │ ──────────────> the user's MCP servers
  Copilot CLI ─┤  one gate  │   rules, memory, receipts │
  Antigravity ─┘  process   └─────────────┬─────────────┘
                  per agent               │
                  session                 v
-                              portcullis.db (SQLite, WAL)
+                              derbent.db (SQLite, WAL)
                                          ^
                                          │
-                              portcullis (terminal UI): approvals, receipts, memory
+                              derbent (terminal UI): approvals, receipts, memory
 ```
 
-Each agent CLI starts `portcullis mcp --agent <name>` as a stdio MCP server, exactly as it starts any
+Each agent CLI starts `derbent mcp --agent <name>` as a stdio MCP server, exactly as it starts any
 other server. That process reads the config, starts the downstream servers as MCP clients, lists their
 tools together with the memory tools, applies the rules to each call, forwards allowed calls, and
-appends a receipt. Running `portcullis` with no arguments in another terminal opens the UI, which reads
+appends a receipt. Running `derbent` with no arguments in another terminal opens the UI, which reads
 and writes the same database.
 
 There is no daemon (ADR 0001). The gate processes and the UI coordinate only through SQLite in WAL mode,
 so there is nothing to start first or keep alive, and a crash takes down one agent's gate, not everyone's.
 The costs: each agent session starts its own copy of the downstream servers, as it would without
-Portcullis, and a pending approval is noticed by polling every 200 ms.
+Derbent, and a pending approval is noticed by polling every 200 ms.
 
 **Agent identity** is the `--agent` value written in each CLI's MCP config. It is a label, not
 authentication: any process running as the user could claim any name (see Security).
@@ -67,10 +67,10 @@ project of its own.
 
 ## Config
 
-TOML in the user config directory (`%APPDATA%\portcullis\config.toml` on Windows,
-`$XDG_CONFIG_HOME/portcullis/config.toml` or `~/.config/portcullis/config.toml` on Linux,
-`~/Library/Application Support/portcullis/config.toml` on macOS), decoded strictly: an unknown key is an
-error that names the key, and a syntax error names its line. `portcullis config check` validates it and
+TOML in the user config directory (`%APPDATA%\derbent\config.toml` on Windows,
+`$XDG_CONFIG_HOME/derbent/config.toml` or `~/.config/derbent/config.toml` on Linux,
+`~/Library/Application Support/derbent/config.toml` on macOS), decoded strictly: an unknown key is an
+error that names the key, and a syntax error names its line. `derbent config check` validates it and
 starts each downstream server once to list its tools.
 
 ```toml
@@ -131,7 +131,7 @@ redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
 - Downstream tools are listed as `<server>__<tool>`, so two servers can never collide. Server names
   are lower-case letters, digits and dashes, so the name splits one way only. A gate tool name must be
   1 to 64 letters, digits, underscores or dashes; a tool that does not fit, or whose input schema is not
-  an object, is left out with a warning on stderr and marked by `portcullis config check`, never
+  an object, is left out with a warning on stderr and marked by `derbent config check`, never
   truncated.
 - A downstream `notifications/tools/list_changed` is passed on to the agent after the rules are applied
   to the new list.
@@ -171,12 +171,12 @@ receipt's hash, and this receipt's hash.
 - Results are stored as size and hash only. What a tool returned can be large or private, and the hash
   is enough to show later that a given result was the one returned. It is taken over a form of the
   result that can be rebuilt from what the agent received (ADR 0004).
-- `portcullis verify` opens the database read-only, never creates or migrates it, walks the chain and
+- `derbent verify` opens the database read-only, never creates or migrates it, walks the chain and
   names the first sequence number whose hash, predecessor or position is wrong. It prints the head
   hash. Someone able to write the database could rewrite the whole chain consistently, or delete the
   newest receipts and leave a shorter chain that still verifies, and keeping a copy of the head hash
   elsewhere is what catches both (ADR 0004).
-- `portcullis receipts` lists and filters receipts by agent, tool, project and time, as a table or as
+- `derbent receipts` lists and filters receipts by agent, tool, project and time, as a table or as
   JSON lines.
 
 ## Approvals
@@ -187,7 +187,7 @@ rings.
 
 - `a` approves once, `d` denies, and `A` approves this tool for the rest of that agent's gate session.
   Nothing the UI does changes the config file.
-- `portcullis approve <id>` and `portcullis deny <id>` do the same without the UI.
+- `derbent approve <id>` and `derbent deny <id>` do the same without the UI.
 - If no decision arrives within `approvals.timeout`, the call is denied with an error that tells the
   agent the approval timed out. The default of 50 seconds sits below the shortest default tool timeout
   among the four CLIs, which is checked against their documentation when the repository is scaffolded,
@@ -195,13 +195,13 @@ rings.
 
 ## Built-in tools
 
-`portcullis gate --agent claude` is installed as a Claude Code `PreToolUse` hook matching every tool. It
+`derbent gate --agent claude` is installed as a Claude Code `PreToolUse` hook matching every tool. It
 reads the hook's JSON from standard input, treats the call as tool `native__<tool_name>` with the tool's
 input as arguments, applies the same rules, waits for an approval when a rule says `ask`, and appends a
 receipt. Its gate session is the hook input's `session_id`, so `A` covers the rest of that Claude Code
 session.
 
-- Calls to the gate's own tools (`mcp__portcullis__*`) get no decision and no receipt from the hook.
+- Calls to the gate's own tools (`mcp__derbent__*`) get no decision and no receipt from the hook.
   The gate already decides and records them, and would otherwise ask for and record each one twice.
 - A call allowed by a rule gets no decision from the hook, so Claude Code's own permission settings
   still apply on top.
@@ -222,8 +222,8 @@ running agents: their calls that need an approval wait for the timeout and are d
 
 ## State
 
-`%LOCALAPPDATA%\portcullis\portcullis.db` on Windows, `$XDG_STATE_HOME/portcullis/portcullis.db` or
-`~/.local/state/portcullis/portcullis.db` on Linux, and `~/Library/Application Support/portcullis/` on
+`%LOCALAPPDATA%\derbent\derbent.db` on Windows, `$XDG_STATE_HOME/derbent/derbent.db` or
+`~/.local/state/derbent/derbent.db` on Linux, and `~/Library/Application Support/derbent/` on
 macOS, never inside a synced folder.
 `modernc.org/sqlite` needs no cgo, so the Windows binary builds without a C toolchain (ADR 0008); FTS5
 support in it is confirmed when the repository is scaffolded. WAL mode with a thirty-second busy timeout
@@ -262,13 +262,13 @@ database migrates it inside `BEGIN IMMEDIATE`.
   and reports p50, p99 and calls per second, compared with `benchstat` over ten runs, on Windows and
   Linux. Results live under `docs/benchmark-results/`, and the README states only numbers in those files.
 - **Demo.** A recorded session: Claude Code writes a decision to memory, Codex finds it, then asks for
-  `github__create_issue` and the user approves it from the UI; `portcullis verify` ends clean.
+  `github__create_issue` and the user approves it from the UI; `derbent verify` ends clean.
 
 ## Repository layout
 
 ```
-portcullis/
-├── cmd/portcullis/               wiring: subcommands, config, signals
+derbent/
+├── cmd/derbent/               wiring: subcommands, config, signals
 ├── internal/config/              TOML decoding and validation
 ├── internal/rule/                matching and decisions
 ├── internal/gate/                the MCP server facing agents, tool listing, forwarding
@@ -314,7 +314,7 @@ portcullis/
 | 0007 | Memory search is FTS5, without embeddings. |
 | 0008 | SQLite through `modernc.org/sqlite`, with no cgo. |
 | 0009 | Downstream servers are supervised from the moment the gate starts. |
-| 0010 | Portcullis is written in Go. |
+| 0010 | Derbent is written in Go. |
 
 ## Milestones
 

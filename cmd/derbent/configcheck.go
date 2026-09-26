@@ -13,9 +13,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tunahanaliozturk/portcullis/internal/config"
-	"github.com/tunahanaliozturk/portcullis/internal/downstream"
-	"github.com/tunahanaliozturk/portcullis/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/downstream"
+	"github.com/tunahanaliozturk/derbent/internal/gate"
 )
 
 var errCheckFailed = errors.New("config check failed")

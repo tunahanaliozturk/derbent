@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tunahanaliozturk/portcullis/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
 func open(t *testing.T, path string) *sql.DB {

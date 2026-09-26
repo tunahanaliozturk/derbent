@@ -29,7 +29,7 @@ CLI shows or logs; nothing a server prints can reach the agent's stdout.
 A server that keeps crashing is restarted at most once a minute rather than on every call, and is
 restarted even when nobody is calling it. Every agent session runs its own copy of every server, which
 is the price of having no daemon (ADR 0001). Tools whose names do not fit the 64-character limit, or whose
-input schema is not an object, are left out with a warning; `portcullis config check` shows them. The
+input schema is not an object, are left out with a warning; `derbent config check` shows them. The
 session of a server that has gone is closed explicitly, because the SDK keeps a goroutine for its
 notification subscription until then; the leak test found this. Closing the gate closes every session
 first, so a command server can exit on its own when its stdin closes, and only then cancels what is still

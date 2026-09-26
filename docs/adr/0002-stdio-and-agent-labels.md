@@ -11,7 +11,7 @@ to know which agent a call comes from, for the rules and for the receipts.
 
 ## Decision
 
-The gate speaks stdio only. Each CLI's MCP entry runs `portcullis mcp --agent <name>`, and that name,
+The gate speaks stdio only. Each CLI's MCP entry runs `derbent mcp --agent <name>`, and that name,
 1 to 32 lower-case letters, digits, dashes or underscores, is the agent's identity for rules and
 receipts.
 
@@ -20,5 +20,5 @@ receipts.
 Setting up a CLI is one line in its MCP config, the same for all four. The name is a label, not
 authentication: any process running as the user could start a gate with any name. That is consistent
 with the trust boundary of the whole tool, which is the user's account, and the security section of the
-design says so. If Portcullis ever serves more than one user, identity has to come from somewhere
+design says so. If Derbent ever serves more than one user, identity has to come from somewhere
 else, and that is a new decision.

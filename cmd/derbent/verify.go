@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tunahanaliozturk/portcullis/internal/config"
-	"github.com/tunahanaliozturk/portcullis/internal/receipt"
-	"github.com/tunahanaliozturk/portcullis/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
 var errChainBroken = errors.New("the receipt chain is broken")
@@ -19,7 +19,7 @@ var errChainBroken = errors.New("the receipt chain is broken")
 func runVerify(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	dbPath := flags.String("db", "", "database file (default: portcullis.db in the user state directory)")
+	dbPath := flags.String("db", "", "database file (default: derbent.db in the user state directory)")
 	var err error
 	if err = flags.Parse(args); err != nil {
 		return err

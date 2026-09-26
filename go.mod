@@ -1,4 +1,4 @@
-module github.com/tunahanaliozturk/portcullis
+module github.com/tunahanaliozturk/derbent
 
 go 1.27
 

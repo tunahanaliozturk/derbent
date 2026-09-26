@@ -1,4 +1,4 @@
-// Command portcullis is an agentic gate: the one MCP server that several coding agents connect to.
+// Command derbent is an agentic gate: the one MCP server that several coding agents connect to.
 package main
 
 import (
@@ -14,14 +14,14 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-var errUsage = errors.New("usage: portcullis mcp --agent <name> | portcullis verify | portcullis config check | portcullis version")
+var errUsage = errors.New("usage: derbent mcp --agent <name> | derbent verify | derbent config check | derbent version")
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 	stop()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "portcullis:", err)
+		fmt.Fprintln(os.Stderr, "derbent:", err)
 		os.Exit(1)
 	}
 }

@@ -13,7 +13,7 @@ keeping them in full would make the database both big and sensitive.
 
 Each receipt stores the hash of the one before it, and its own hash is SHA-256 over its stored fields
 in a fixed order, each prefixed with its length. Appends run inside `BEGIN IMMEDIATE`, which serialises
-gate processes appending at the same moment, so the chain never forks. `portcullis verify` walks the
+gate processes appending at the same moment, so the chain never forks. `derbent verify` walks the
 chain and names the first sequence number whose position, previous hash or own hash is wrong, and it
 prints the head hash.
 

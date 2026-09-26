@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tunahanaliozturk/portcullis/internal/redact"
+	"github.com/tunahanaliozturk/derbent/internal/redact"
 )
 
 func mustNew(t *testing.T, patterns, secrets []string) *redact.Redactor {

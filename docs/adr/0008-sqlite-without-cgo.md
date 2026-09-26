@@ -5,7 +5,7 @@ Status: accepted
 
 ## Context
 
-Portcullis is one binary that has to build and run on Windows without extra tools, and every gate
+Derbent is one binary that has to build and run on Windows without extra tools, and every gate
 process and the UI share state through one database file. The usual Go SQLite driver,
 `mattn/go-sqlite3`, wraps the C library and needs cgo, which means a C compiler on every machine that
 builds the binary and a harder cross-compile.

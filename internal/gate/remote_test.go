@@ -12,9 +12,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tunahanaliozturk/portcullis/internal/gate"
-	"github.com/tunahanaliozturk/portcullis/internal/redact"
-	"github.com/tunahanaliozturk/portcullis/internal/rule"
+	"github.com/tunahanaliozturk/derbent/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/redact"
+	"github.com/tunahanaliozturk/derbent/internal/rule"
 )
 
 type forwarded struct{ server, tool, args string }

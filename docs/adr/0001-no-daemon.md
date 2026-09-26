@@ -12,7 +12,7 @@ authentication.
 
 ## Decision
 
-There is no hub process. Each agent CLI starts `portcullis mcp` as an ordinary stdio MCP server, and
+There is no hub process. Each agent CLI starts `derbent mcp` as an ordinary stdio MCP server, and
 every gate process opens the same SQLite database in WAL mode. Writes that must not interleave run in
 `BEGIN IMMEDIATE`. The terminal UI in milestone 3 is one more process on the same file, and pending
 approvals are noticed by polling.
@@ -21,6 +21,6 @@ approvals are noticed by polling.
 
 Nothing needs to be running before an agent starts, and a crash takes down one agent's gate, not
 everyone's. There is no network listener to secure. The costs: every agent session starts its own
-copies of the downstream servers, as it would without Portcullis, approvals are seen within the polling
+copies of the downstream servers, as it would without Derbent, approvals are seen within the polling
 interval rather than at once, and everything depends on SQLite's file locking, which is why the database
 lives in the local state directory and never in a synced folder.

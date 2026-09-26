@@ -19,12 +19,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/goleak"
 
-	"github.com/tunahanaliozturk/portcullis/internal/downstream"
+	"github.com/tunahanaliozturk/derbent/internal/downstream"
 )
 
-// TestMain doubles as a stdio MCP server when PORTCULLIS_TEST_SERVER is set.
+// TestMain doubles as a stdio MCP server when DERBENT_TEST_SERVER is set.
 func TestMain(m *testing.M) {
-	if os.Getenv("PORTCULLIS_TEST_SERVER") != "" {
+	if os.Getenv("DERBENT_TEST_SERVER") != "" {
 		serveTestServer()
 		return
 	}
@@ -57,35 +57,35 @@ func newTestServer() *mcp.Server {
 }
 
 func serveTestServer() {
-	if marker := os.Getenv("PORTCULLIS_TEST_FAIL_ONCE"); marker != "" {
+	if marker := os.Getenv("DERBENT_TEST_FAIL_ONCE"); marker != "" {
 		if _, err := os.Stat(marker); err != nil {
 			_ = os.WriteFile(marker, nil, 0o600)
 			os.Exit(1)
 		}
 	}
 	switch {
-	case os.Getenv("PORTCULLIS_TEST_HANG") != "":
+	case os.Getenv("DERBENT_TEST_HANG") != "":
 		_, _ = io.Copy(io.Discard, os.Stdin) // reads, never answers, and exits when stdin closes
 		os.Exit(0)
-	case os.Getenv("PORTCULLIS_TEST_JUNK") != "":
+	case os.Getenv("DERBENT_TEST_JUNK") != "":
 		fmt.Println("starting up, not a JSON-RPC message")
 	}
 	s := newTestServer()
-	if os.Getenv("PORTCULLIS_TEST_NO_TOOLS") != "" {
+	if os.Getenv("DERBENT_TEST_NO_TOOLS") != "" {
 		s = mcp.NewServer(&mcp.Implementation{Name: "no-tools", Version: "0"}, nil)
 	}
 	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		os.Exit(1)
 	}
 	// Run returns once stdin is closed: the client shut the session down properly.
-	if marker := os.Getenv("PORTCULLIS_TEST_EXIT_MARKER"); marker != "" {
+	if marker := os.Getenv("DERBENT_TEST_EXIT_MARKER"); marker != "" {
 		_ = os.WriteFile(marker, nil, 0o600)
 	}
 	os.Exit(0)
 }
 
 func stdioSpec(name string, env map[string]string) downstream.Spec {
-	e := map[string]string{"PORTCULLIS_TEST_SERVER": "1"}
+	e := map[string]string{"DERBENT_TEST_SERVER": "1"}
 	for k, v := range env {
 		e[k] = v
 	}
@@ -170,14 +170,14 @@ func eventually(t *testing.T, what string, ok func() bool) {
 }
 
 func TestStdioServerIsListedAndCalled(t *testing.T) {
-	m, lists := start(t, stdioSpec("test", map[string]string{"PORTCULLIS_TEST_VALUE": "passed-through"}))
+	m, lists := start(t, stdioSpec("test", map[string]string{"DERBENT_TEST_VALUE": "passed-through"}))
 	if names, _ := lists.get("test"); !slices.Equal(names, []string{"crash", "echo", "env", "grow"}) {
 		t.Fatalf("tools = %v", names)
 	}
 	if got, err := callText(t, m, "test", "echo", `{"text":"hi"}`); err != nil || got != "echo:hi" {
 		t.Fatalf("echo = %q, %v", got, err)
 	}
-	if got, err := callText(t, m, "test", "env", `{"text":"PORTCULLIS_TEST_VALUE"}`); err != nil || got != "passed-through" {
+	if got, err := callText(t, m, "test", "env", `{"text":"DERBENT_TEST_VALUE"}`); err != nil || got != "passed-through" {
 		t.Fatalf("env = %q, %v", got, err)
 	}
 }
@@ -210,7 +210,7 @@ func TestListChangedReloadsTools(t *testing.T) {
 
 func TestServerThatFailsToStartIsRetried(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "failed-once")
-	m, _ := start(t, stdioSpec("test", map[string]string{"PORTCULLIS_TEST_FAIL_ONCE": marker}))
+	m, _ := start(t, stdioSpec("test", map[string]string{"DERBENT_TEST_FAIL_ONCE": marker}))
 	eventually(t, "the second start to succeed", func() bool {
 		got, err := callText(t, m, "test", "echo", `{"text":"up"}`)
 		return err == nil && got == "echo:up"
@@ -219,7 +219,7 @@ func TestServerThatFailsToStartIsRetried(t *testing.T) {
 
 func TestMissingServerIsUnavailableButOthersWork(t *testing.T) {
 	m, _ := start(t,
-		downstream.Spec{Name: "ghost", Command: []string{"portcullis-test-no-such-command"}},
+		downstream.Spec{Name: "ghost", Command: []string{"derbent-test-no-such-command"}},
 		stdioSpec("test", nil),
 	)
 	if _, err := callText(t, m, "ghost", "anything", `{}`); !errors.Is(err, downstream.ErrUnavailable) {
@@ -291,7 +291,7 @@ func TestRedirectIsRefusedAndHeadersStayHome(t *testing.T) {
 // Start must not hold the gate for a server that is slow to come up: the agent's session starts at
 // once, other servers work, and Close still ends the attempt that is connecting.
 func TestSlowServerHoldsNothingButItsOwnStart(t *testing.T) {
-	m, _ := newManager(t, stdioSpec("slow", map[string]string{"PORTCULLIS_TEST_HANG": "1"}), stdioSpec("test", nil))
+	m, _ := newManager(t, stdioSpec("slow", map[string]string{"DERBENT_TEST_HANG": "1"}), stdioSpec("test", nil))
 	began := time.Now()
 	m.Start(t.Context())
 	if took := time.Since(began); took > time.Second {
@@ -315,7 +315,7 @@ func TestSlowServerHoldsNothingButItsOwnStart(t *testing.T) {
 
 func TestCloseLetsServersExitOnTheirOwn(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "exited")
-	m, _ := start(t, stdioSpec("test", map[string]string{"PORTCULLIS_TEST_EXIT_MARKER": marker}))
+	m, _ := start(t, stdioSpec("test", map[string]string{"DERBENT_TEST_EXIT_MARKER": marker}))
 	if _, err := callText(t, m, "test", "echo", `{"text":"up"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestCloseLetsServersExitOnTheirOwn(t *testing.T) {
 }
 
 func TestServerWithoutToolsIsUpWithNone(t *testing.T) {
-	_, lists := start(t, stdioSpec("bare", map[string]string{"PORTCULLIS_TEST_NO_TOOLS": "1"}))
+	_, lists := start(t, stdioSpec("bare", map[string]string{"DERBENT_TEST_NO_TOOLS": "1"}))
 	names, loads := lists.get("bare")
 	if loads != 1 || len(names) != 0 {
 		t.Fatalf("tools = %v after %d loads, want an empty list once", names, loads)
@@ -338,7 +338,7 @@ func TestServerWithoutToolsIsUpWithNone(t *testing.T) {
 }
 
 func TestServerPrintingJunkToStdoutHarmsOnlyItself(t *testing.T) {
-	m, _ := start(t, stdioSpec("junk", map[string]string{"PORTCULLIS_TEST_JUNK": "1"}), stdioSpec("test", nil))
+	m, _ := start(t, stdioSpec("junk", map[string]string{"DERBENT_TEST_JUNK": "1"}), stdioSpec("test", nil))
 	if got, err := callText(t, m, "test", "echo", `{"text":"fine"}`); err != nil || got != "echo:fine" {
 		t.Fatalf("echo = %q, %v", got, err)
 	}

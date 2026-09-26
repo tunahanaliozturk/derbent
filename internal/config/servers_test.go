@@ -4,21 +4,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tunahanaliozturk/portcullis/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/config"
 )
 
 const rulesTail = "\n[[rule]]\naction = \"allow\"\n"
 
 func TestParseServers(t *testing.T) {
-	t.Setenv("PORTCULLIS_TEST_TOKEN", "ghp_0123456789abcdef")
+	t.Setenv("DERBENT_TEST_TOKEN", "ghp_0123456789abcdef")
 	cfg, err := config.Parse("test.toml", `
 [servers.github]
 command = ["github-mcp-server", "stdio"]
-env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "${env:PORTCULLIS_TEST_TOKEN}" }
+env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "${env:DERBENT_TEST_TOKEN}" }
 
 [servers.docs]
 url     = "https://docs.example.com/mcp"
-headers = { Authorization = "Bearer ${env:PORTCULLIS_TEST_TOKEN}" }
+headers = { Authorization = "Bearer ${env:DERBENT_TEST_TOKEN}" }
 
 [servers.local]
 url = "http://127.0.0.1:8080/mcp"
@@ -52,14 +52,14 @@ func TestParseRedactPatterns(t *testing.T) {
 
 func TestParseRejectsBadServers(t *testing.T) {
 	tests := map[string]struct{ toml, wantInError string }{
-		"missing variable":           {"[servers.a]\ncommand = [\"x\"]\nenv = { T = \"${env:PORTCULLIS_TEST_UNSET}\" }\n", "PORTCULLIS_TEST_UNSET"},
+		"missing variable":           {"[servers.a]\ncommand = [\"x\"]\nenv = { T = \"${env:DERBENT_TEST_UNSET}\" }\n", "DERBENT_TEST_UNSET"},
 		"both command and url":       {"[servers.a]\ncommand = [\"x\"]\nurl = \"https://a.example\"\n", "exactly one"},
 		"neither command nor url":    {"[servers.a]\nenv = { A = \"b\" }\n", "exactly one"},
 		"plain http to a remote":     {"[servers.a]\nurl = \"http://mcp.example.com\"\n", "https"},
 		"headers on a command":       {"[servers.a]\ncommand = [\"x\"]\nheaders = { A = \"b\" }\n", "headers"},
 		"env on a url":               {"[servers.a]\nurl = \"https://a.example\"\nenv = { A = \"b\" }\n", "env"},
-		"env reference in a url":     {"[servers.a]\nurl = \"https://a.example/mcp?key=${env:PORTCULLIS_TEST_TOKEN}\"\n", "headers"},
-		"env reference in a command": {"[servers.a]\ncommand = [\"srv\", \"--token=${env:PORTCULLIS_TEST_TOKEN}\"]\n", "pass secrets to the server in env"},
+		"env reference in a url":     {"[servers.a]\nurl = \"https://a.example/mcp?key=${env:DERBENT_TEST_TOKEN}\"\n", "headers"},
+		"env reference in a command": {"[servers.a]\ncommand = [\"srv\", \"--token=${env:DERBENT_TEST_TOKEN}\"]\n", "pass secrets to the server in env"},
 		"underscore in name":         {"[servers.git_hub]\ncommand = [\"x\"]\n", "git_hub"},
 		"reserved name":              {"[servers.native]\ncommand = [\"x\"]\n", "reserved"},
 		"bad redact pattern":         {"[receipts]\nredact = ['(']\n", "redact"},
@@ -76,11 +76,11 @@ func TestParseRejectsBadServers(t *testing.T) {
 }
 
 func TestMissingVariableErrorNeverShowsOtherValues(t *testing.T) {
-	t.Setenv("PORTCULLIS_TEST_TOKEN", "ghp_0123456789abcdef")
+	t.Setenv("DERBENT_TEST_TOKEN", "ghp_0123456789abcdef")
 	_, err := config.Parse("test.toml", `
 [servers.a]
 command = ["x"]
-env = { A = "${env:PORTCULLIS_TEST_TOKEN}", B = "${env:PORTCULLIS_TEST_UNSET}" }
+env = { A = "${env:DERBENT_TEST_TOKEN}", B = "${env:DERBENT_TEST_UNSET}" }
 `+rulesTail)
 	if err == nil || strings.Contains(err.Error(), "ghp_0123456789abcdef") {
 		t.Fatalf("err = %v, want an error without the resolved value", err)

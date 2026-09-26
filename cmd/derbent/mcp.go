@@ -15,12 +15,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tunahanaliozturk/portcullis/internal/config"
-	"github.com/tunahanaliozturk/portcullis/internal/downstream"
-	"github.com/tunahanaliozturk/portcullis/internal/gate"
-	"github.com/tunahanaliozturk/portcullis/internal/memory"
-	"github.com/tunahanaliozturk/portcullis/internal/receipt"
-	"github.com/tunahanaliozturk/portcullis/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/downstream"
+	"github.com/tunahanaliozturk/derbent/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
 var agentName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
@@ -38,7 +38,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	agent := flags.String("agent", "", "name of the agent this gate serves, such as claude or codex")
 	projectDir := flags.String("project", "", "project directory (default: the git root of the working directory)")
 	configPath := flags.String("config", "", "config file (default: config.toml in the user config directory)")
-	dbPath := flags.String("db", "", "database file (default: portcullis.db in the user state directory)")
+	dbPath := flags.String("db", "", "database file (default: derbent.db in the user state directory)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
