@@ -59,7 +59,9 @@ Portcullis, and a pending approval is noticed by polling every 200 ms.
 **Agent identity** is the `--agent` value written in each CLI's MCP config. It is a label, not
 authentication: any process running as the user could claim any name (see Security).
 
-**Project** is the git root of the directory the gate was started in, or `--project <path>`.
+**Project** is the git root of the directory the gate was started in, or `--project <path>`. A linked
+worktree counts as the repository it was added from, so agents working in separate worktrees of one
+repository share notes; a submodule is a project of its own.
 
 ## Config
 
@@ -144,9 +146,10 @@ receipt's hash, and this receipt's hash.
   `BEGIN IMMEDIATE` transaction that reads the current head, so gate processes appending at the same
   moment are serialised by SQLite and the chain has no forks.
 - Results are stored as size and hash only. What a tool returned can be large or private, and the hash
-  is enough to show later that a given result was the one returned.
-- `portcullis verify` walks the chain and names the first sequence number whose hash, predecessor or
-  position is wrong. It prints the head hash. Someone able to write the database could rewrite the
+  is enough to show later that a given result was the one returned. It is taken over a form of the
+  result that can be rebuilt from what the agent received (ADR 0004).
+- `portcullis verify` opens the database read-only, never creates or migrates it, walks the chain and
+  names the first sequence number whose hash, predecessor or position is wrong. It prints the head hash. Someone able to write the database could rewrite the
   whole chain consistently, and keeping a copy of the head hash elsewhere is what catches that
   (ADR 0004).
 - `portcullis receipts` lists and filters receipts by agent, tool, project and time, as a table or as

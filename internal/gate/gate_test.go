@@ -1,7 +1,10 @@
 package gate_test
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -198,6 +201,93 @@ func TestEveryCallGetsAReceipt(t *testing.T) {
 	res, err := e.receipts.Verify(t.Context())
 	if err != nil || res.FirstBad != 0 || res.Count != 3 {
 		t.Fatalf("Verify = %+v, err %v", res, err)
+	}
+}
+
+// canonicalResult is how anyone holding a result the agent received recomputes the bytes its receipt
+// hashed (ADR 0004): the content, structuredContent and isError fields, keys sorted, numbers as
+// written, no HTML escaping.
+func canonicalResult(t *testing.T, res *mcp.CallToolResult) []byte {
+	t.Helper()
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var full map[string]any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&full); err != nil {
+		t.Fatal(err)
+	}
+	picked := map[string]any{}
+	for _, k := range []string{"content", "structuredContent", "isError"} {
+		if v, ok := full[k]; ok {
+			picked[k] = v
+		}
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(picked); err != nil {
+		t.Fatal(err)
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+}
+
+func TestResultHashCanBeRecomputedFromWhatTheAgentReceived(t *testing.T) {
+	e := newEnv(t)
+	cs := connect(t, e.gate(t, "claude"))
+	results := []*mcp.CallToolResult{
+		call(t, cs, "memory_write", map[string]any{"title": "Escaping <b> & co", "body": "a <tag> & an ampersand"}),
+		call(t, cs, "memory_search", map[string]any{"query": "ampersand"}),
+		call(t, cs, "memory_write", map[string]any{"title": "no body"}),
+	}
+	for i, res := range results {
+		var size int64
+		var sum string
+		if err := e.db.QueryRowContext(t.Context(), `SELECT result_size, result_sha256 FROM receipts WHERE seq = ?`, i+1).
+			Scan(&size, &sum); err != nil {
+			t.Fatal(err)
+		}
+		b := canonicalResult(t, res)
+		got := sha256.Sum256(b)
+		if hex.EncodeToString(got[:]) != sum || int64(len(b)) != size {
+			t.Errorf("receipt %d: hash %s size %d, recomputed %x size %d from %s", i+1, sum, size, got, len(b), b)
+		}
+	}
+}
+
+func breakReceipts(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.ExecContext(t.Context(), `CREATE TRIGGER no_receipts BEFORE INSERT ON receipts
+		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A tool that ran but whose receipt failed has left its effect behind. The agent must hear that, or
+// it retries and does the thing twice.
+func TestCallThatRanButWasNotRecordedSaysSo(t *testing.T) {
+	e := newEnv(t)
+	breakReceipts(t, e.db)
+	cs := connect(t, e.gate(t, "claude"))
+	_, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "memory_write", Arguments: map[string]any{"title": "t", "body": "b"}})
+	if err == nil || !strings.Contains(err.Error(), "memory_write ran") || !strings.Contains(err.Error(), "do not repeat") {
+		t.Fatalf("err = %v, want it to say the call ran and must not be repeated", err)
+	}
+	var n int
+	if err := e.db.QueryRowContext(t.Context(), `SELECT count(*) FROM memories`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("notes = %d, err %v, want the write to have happened", n, err)
+	}
+}
+
+func TestRefusedCallThatWasNotRecordedSaysItDidNotRun(t *testing.T) {
+	e := newEnv(t)
+	breakReceipts(t, e.db)
+	cs := connect(t, e.gate(t, "claude", rule.Spec{Tool: "memory_write", Action: rule.Deny}, rule.Spec{Action: rule.Allow}))
+	_, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "memory_write", Arguments: map[string]any{"title": "t", "body": "b"}})
+	if err == nil || !strings.Contains(err.Error(), "did not run") {
+		t.Fatalf("err = %v, want it to say the call did not run", err)
 	}
 }
 

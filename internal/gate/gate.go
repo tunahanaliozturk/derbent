@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -90,9 +91,21 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 	rec.Duration = time.Since(start)
 	// The receipt is written even when the agent has given up on the call.
 	if _, appendErr := g.Receipts.Append(context.WithoutCancel(ctx), rec); appendErr != nil {
-		return nil, fmt.Errorf("portcullis could not record this call, so it is reported as failed: %w", appendErr)
+		return nil, unrecorded(name, rec.Outcome, appendErr)
 	}
 	return res, err
+}
+
+// unrecorded is the error for a call whose receipt could not be written. It tells the agent whether
+// the tool ran, because a tool that ran has left its effect behind and must not simply be retried, and
+// it tells the user through stderr, which is the only other place a gate process can speak.
+func unrecorded(tool, outcome string, err error) error {
+	slog.Error("portcullis: a call could not be recorded", "tool", tool, "outcome", outcome, "err", err)
+	if outcome == "refused" {
+		return fmt.Errorf("portcullis: %s was refused and did not run, but the refusal could not be recorded: %w", tool, err)
+	}
+	return fmt.Errorf("portcullis: %s ran (outcome %s) but could not be recorded; do not repeat it without checking its effect: %w",
+		tool, outcome, err)
 }
 
 // decodeArgs returns the arguments as a map for the rules, or nil when they are not a JSON object, and
@@ -122,15 +135,47 @@ func outcome(res mcp.Result, err error) string {
 	return "ok"
 }
 
+// resultDigest returns the size and SHA-256 of the bytes a receipt keeps for a call's outcome: the
+// error text for a protocol error, and otherwise resultBytes.
 func resultDigest(res mcp.Result, err error) (int64, string) {
 	var b []byte
 	switch {
 	case err != nil:
 		b = []byte(err.Error())
 	case res != nil:
-		b, _ = json.Marshal(res)
+		b = resultBytes(res)
 	}
 	return int64(len(b)), sha256Hex(b)
+}
+
+// resultBytes is the form of a result that receipts hash, chosen so that anyone holding what the agent
+// received can recompute it (ADR 0004): a JSON object with the result's content, structuredContent and
+// isError fields, object keys sorted, numbers as written, and no HTML escaping. The SDK adds _meta and
+// resultType after the gate has run, so those are not part of it.
+func resultBytes(res mcp.Result) []byte {
+	raw, err := json.Marshal(res)
+	if err != nil {
+		return []byte(err.Error())
+	}
+	var full map[string]any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err = dec.Decode(&full); err != nil {
+		return raw
+	}
+	picked := make(map[string]any, 3)
+	for _, k := range []string{"content", "structuredContent", "isError"} {
+		if v, ok := full[k]; ok {
+			picked[k] = v
+		}
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err = enc.Encode(picked); err != nil {
+		return raw
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 }
 
 func refusal(tool string, ruleIndex int) *mcp.CallToolResult {

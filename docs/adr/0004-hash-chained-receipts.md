@@ -17,11 +17,15 @@ gate processes appending at the same moment, so the chain never forks. `portcull
 chain and names the first sequence number whose position, previous hash or own hash is wrong, and it
 prints the head hash.
 
-A result is stored as its size and SHA-256. Arguments are stored in full (redacted from milestone 2 on)
-together with the SHA-256 of the original arguments.
+A result is stored as its size and SHA-256, taken over bytes that anyone holding what the agent received
+can rebuild: a JSON object with the result's `content`, `structuredContent` and `isError` fields, object
+keys sorted, numbers as written, and no HTML escaping. The `_meta` and `resultType` fields the SDK adds
+on the way out are left out. For a protocol error the hashed bytes are the error text. Arguments are
+stored in full (redacted from milestone 2 on) together with the SHA-256 of the original arguments.
 
-When a receipt cannot be written, the call is reported to the agent as failed, even if the tool already
-ran, so an agent never sees a success that the receipts do not show.
+When a receipt cannot be written, the agent gets an error instead of the result, and the error says
+whether the tool ran. A tool that ran is reported as "ran but could not be recorded; do not repeat it
+without checking its effect", so the agent does not simply retry it. The same line goes to stderr.
 
 ## Consequences
 
@@ -30,3 +34,6 @@ found by the chain alone: a tail cut off after the last receipt someone checked,
 as a whole by someone with write access to the database. Comparing the head hash with a copy kept
 elsewhere catches both, and the README says so. A tool that ran but whose receipt failed can leave its
 effect behind, which the agent is told about through the error.
+
+A test recomputes the hash of every kind of result from what an MCP client received and compares it
+with the receipt.
