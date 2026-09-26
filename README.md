@@ -10,9 +10,9 @@ only shared state.
 
 ## Status
 
-Milestone 1 of 5 is done. The gate serves shared memory tools, applies allow and deny rules, and
-writes a hash-chained receipt for every call. Downstream MCP servers, approvals and the terminal UI come
-next. The [design](docs/design.md) covers the whole plan, what Portcullis does not do, and how each
+Milestone 2 of 5 is done. The gate serves shared memory tools and the tools of your own MCP servers,
+applies allow and deny rules, masks secrets in stored arguments, and writes a hash-chained receipt for
+every call. Approvals and the terminal UI come next. The [design](docs/design.md) covers the whole plan, what Portcullis does not do, and how each
 claim is tested. Decisions are recorded in [docs/adr](docs/adr).
 
 ## Try it
@@ -51,6 +51,28 @@ action = "allow"
 
 Rules are tried in order and the first match wins. A tool denied without an `args` condition is not
 even listed to that agent.
+
+Your other MCP servers go behind the gate in the same file, and each agent then needs only the one
+`portcullis` entry:
+
+```toml
+[servers.github]
+command = ["github-mcp-server", "stdio"]
+env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "${env:GITHUB_TOKEN}" }
+
+[receipts]
+redact = ['ghp_[A-Za-z0-9]{36}']
+```
+
+Their tools appear as `github__get_me` and so on, under the same rules and receipts. Values taken from
+the environment are masked in stored arguments, and so is anything the `redact` patterns match. A
+server that stops is started again, with a backoff of up to a minute.
+
+```bash
+portcullis config check
+```
+
+starts every server once and prints the tools each would give the agents.
 
 ## Licence
 

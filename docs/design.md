@@ -111,15 +111,26 @@ redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
 - A `deny` rule with no `args` condition hides the tool from that agent's tool list. With an `args`
   condition the tool stays listed and matching calls are refused.
 - `${env:NAME}` is resolved when the gate starts. Resolved values never reach receipts or logs.
+- A `url` server must use `https`, except on `localhost`, `127.0.0.1` or `::1`. `env` belongs to command
+  servers and `headers` to url servers.
+- Every value that came from `${env:...}` in `env` or `headers` and is at least eight characters long is
+  masked in stored arguments, as well as whatever the `redact` patterns match. Masking works on each
+  string value, so the stored arguments stay valid JSON.
+- An `args` condition that meets a value it cannot read (not a string) matches a `deny` and never an
+  `allow` (ADR 0003).
 
 ## Tools
 
-- Downstream tools are listed as `<server>__<tool>`, so two servers can never collide. A name longer
-  than the four CLIs accept is a config error that names the tool, rather than a silent truncation.
+- Downstream tools are listed as `<server>__<tool>`, so two servers can never collide. Server names
+  are lower-case letters, digits and dashes, so the name splits one way only. A gate tool name must be
+  1 to 64 letters, digits, underscores or dashes; a tool that does not fit, or whose input schema is not
+  an object, is left out with a warning on stderr and marked by `portcullis config check`, never
+  truncated.
 - A downstream `notifications/tools/list_changed` is passed on to the agent after the rules are applied
   to the new list.
-- A downstream server that crashes turns its tools' calls into errors. The gate keeps serving everything
-  else, and restarts the server on the next call with a backoff.
+- A downstream server is supervised from the moment the gate starts (ADR 0009): it is started again
+  after it stops, with a backoff from one second to one minute, and calls to its tools while it is down
+  are tool errors. The gate keeps serving everything else.
 - v1 forwards tools only. Downstream resources and prompts are not exposed.
 
 Memory tools:
@@ -283,6 +294,7 @@ portcullis/
 | 0006 | Built-in tools are gated through each CLI's pre-tool hook where one exists, with coverage stated per CLI. |
 | 0007 | Memory search is FTS5, without embeddings. |
 | 0008 | SQLite through `modernc.org/sqlite`, with no cgo. |
+| 0009 | Downstream servers are supervised from the moment the gate starts. |
 
 ## Milestones
 
