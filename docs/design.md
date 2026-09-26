@@ -9,13 +9,14 @@ It runs on the user's machine, on Windows as well as macOS and Linux, as one bin
 A SQLite file is the only shared state.
 
 This document is the contract for the build. Each decision that someone could reasonably have made
-differently has an ADR under `docs/adr/`.
+differently gets an ADR under `docs/adr/`, listed under Decisions.
 
 ## Goals
 
 - One MCP entry in each agent CLI, instead of one entry per server per CLI.
 - Memory that any agent can write and any agent can search, kept per project.
-- A receipt for every call through the gate, hash-chained so that an edited or deleted receipt is found.
+- A receipt for every call through the gate, hash-chained so that an edited or deleted receipt is found
+  (the newest receipts only against a copy of the head hash, see Receipts).
 - Rules that allow, deny or ask by agent, tool and argument, with the user approving from one terminal.
 - Tools an agent may not use are not listed to that agent at all.
 - Claude Code's built-in tools (shell, file edits) pass the same rules and get the same receipts, through
@@ -59,16 +60,18 @@ Portcullis, and a pending approval is noticed by polling every 200 ms.
 **Agent identity** is the `--agent` value written in each CLI's MCP config. It is a label, not
 authentication: any process running as the user could claim any name (see Security).
 
-**Project** is the git root of the directory the gate was started in, or `--project <path>`. A linked
-worktree counts as the repository it was added from, so agents working in separate worktrees of one
-repository share notes; a submodule is a project of its own.
+**Project** is the git root of the directory the gate was started in, that directory itself when it is
+not inside a git repository, or `--project <path>`. A linked worktree counts as the repository it was
+added from, so agents working in separate worktrees of one repository share notes; a submodule is a
+project of its own.
 
 ## Config
 
 TOML in the user config directory (`%APPDATA%\portcullis\config.toml` on Windows,
-`$XDG_CONFIG_HOME/portcullis/config.toml` on Linux), decoded strictly: an unknown key is an error that names
-the key, and a syntax error names its line. `portcullis config check`
-validates it and starts each downstream server once to list its tools.
+`$XDG_CONFIG_HOME/portcullis/config.toml` or `~/.config/portcullis/config.toml` on Linux,
+`~/Library/Application Support/portcullis/config.toml` on macOS), decoded strictly: an unknown key is an
+error that names the key, and a syntax error names its line. `portcullis config check` validates it and
+starts each downstream server once to list its tools.
 
 ```toml
 [servers.github]
@@ -108,8 +111,9 @@ redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
 
 - Rules are tried in order and the first match wins. A rule matches on `agent` and `tool` as globs, and
   on `args` as globs over top-level string arguments. The last rule must have no condition.
-- A `deny` rule with no `args` condition hides the tool from that agent's tool list. With an `args`
-  condition the tool stays listed and matching calls are refused.
+- A tool is hidden from an agent's tool list when no call to it can be allowed: among the rules matching
+  that agent and tool, a `deny` with no `args` condition comes before any `allow` (ADR 0003). A `deny`
+  with an `args` condition refuses the matching calls and leaves the rest to later rules.
 - `${env:NAME}` is resolved when the gate starts. Resolved values never reach receipts or logs.
 - A `url` server must use `https`, except on `localhost`, `127.0.0.1` or `::1`. `env` belongs to command
   servers and `headers` to url servers.
@@ -153,16 +157,18 @@ arguments after redaction, SHA-256 of the arguments before redaction, the decisi
 rule index or the user), the outcome, the size and SHA-256 of the result, the duration, the previous
 receipt's hash, and this receipt's hash.
 
-- The hash is SHA-256 over the previous hash and the stored bytes of the row's fields. Appends run in a
-  `BEGIN IMMEDIATE` transaction that reads the current head, so gate processes appending at the same
-  moment are serialised by SQLite and the chain has no forks.
+- The hash is SHA-256 over the previous hash and the stored bytes of the row's fields, each field
+  prefixed with its length so that moving bytes from one field to the next changes the hash. Appends
+  run in a `BEGIN IMMEDIATE` transaction that reads the current head, so gate processes appending at
+  the same moment are serialised by SQLite and the chain has no forks.
 - Results are stored as size and hash only. What a tool returned can be large or private, and the hash
   is enough to show later that a given result was the one returned. It is taken over a form of the
   result that can be rebuilt from what the agent received (ADR 0004).
 - `portcullis verify` opens the database read-only, never creates or migrates it, walks the chain and
-  names the first sequence number whose hash, predecessor or position is wrong. It prints the head hash. Someone able to write the database could rewrite the
-  whole chain consistently, and keeping a copy of the head hash elsewhere is what catches that
-  (ADR 0004).
+  names the first sequence number whose hash, predecessor or position is wrong. It prints the head
+  hash. Someone able to write the database could rewrite the whole chain consistently, or delete the
+  newest receipts and leave a shorter chain that still verifies, and keeping a copy of the head hash
+  elsewhere is what catches both (ADR 0004).
 - `portcullis receipts` lists and filters receipts by agent, tool, project and time, as a table or as
   JSON lines.
 
@@ -185,8 +191,11 @@ rings.
 `portcullis gate --agent claude` is installed as a Claude Code `PreToolUse` hook matching every tool. It
 reads the hook's JSON from standard input, treats the call as tool `native__<tool_name>` with the tool's
 input as arguments, applies the same rules, waits for an approval when a rule says `ask`, and appends a
-receipt.
+receipt. Its gate session is the hook input's `session_id`, so `A` covers the rest of that Claude Code
+session.
 
+- Calls to the gate's own tools (`mcp__portcullis__*`) get no decision and no receipt from the hook.
+  The gate already decides and records them, and would otherwise ask for and record each one twice.
 - A call allowed by a rule gets no decision from the hook, so Claude Code's own permission settings
   still apply on top.
 - A call the user approved gets `allow`.
@@ -206,11 +215,13 @@ running agents: their calls that need an approval wait for the timeout and are d
 
 ## State
 
-`%LOCALAPPDATA%\portcullis\portcullis.db` on Windows and `$XDG_STATE_HOME/portcullis/portcullis.db`
-elsewhere, never inside a synced folder. `modernc.org/sqlite` needs no cgo, so the Windows binary builds
-without a C toolchain (ADR 0008); FTS5 support in it is confirmed when the repository is scaffolded. WAL
-mode with a thirty-second busy timeout (ADR 0008). Migrations are embedded, numbered and forward only, and the first
-process to open an older database migrates it inside `BEGIN IMMEDIATE`.
+`%LOCALAPPDATA%\portcullis\portcullis.db` on Windows, `$XDG_STATE_HOME/portcullis/portcullis.db` or
+`~/.local/state/portcullis/portcullis.db` on Linux, and `~/Library/Application Support/portcullis/` on
+macOS, never inside a synced folder.
+`modernc.org/sqlite` needs no cgo, so the Windows binary builds without a C toolchain (ADR 0008); FTS5
+support in it is confirmed when the repository is scaffolded. WAL mode with a thirty-second busy timeout
+(ADR 0008). Migrations are embedded, numbered and forward only, and the first process to open an older
+database migrates it inside `BEGIN IMMEDIATE`.
 
 ## Security
 
@@ -238,11 +249,12 @@ process to open an older database migrates it inside `BEGIN IMMEDIATE`.
   through. The timeout path denies.
 - **MCP behaviour.** The SDK's client drives the gate end to end: initialize, tool listing, calls,
   forwarded `list_changed`, and a downstream server killed in the middle of a session.
-- **Hook.** Golden standard input and output for the Claude Code hook.
+- **Hook.** Golden standard input and output for the Claude Code hook, including a call to the gate's
+  own tools that passes with no decision and no receipt.
 - **Overhead.** A benchmark calls an echo MCP server directly and through the gate with an allow rule,
   and reports p50, p99 and calls per second, compared with `benchstat` over ten runs, on Windows and
   Linux. Results live under `docs/benchmark-results/`, and the README states only numbers in those files.
-- **Demo.** A recorded session: Claude Code writes a decision to memory, Codex finds it; Copilot asks for
+- **Demo.** A recorded session: Claude Code writes a decision to memory, Codex finds it, then asks for
   `github__create_issue` and the user approves it from the UI; `portcullis verify` ends clean.
 
 ## Repository layout
@@ -278,7 +290,7 @@ portcullis/
 - `go mod tidy` leaves `go.mod` and `go.sum` unchanged, and `go test ./... -race -count=1` passes with
   `goleak` in every package that starts goroutines.
 - A licence check reads the licence each module in the build graph ships and fails on anything outside
-  the folder allow list.
+  an allow list kept in the repository.
 - GitHub Actions runs every gate on `windows-latest` and `ubuntu-latest`, and builds on `macos-latest`.
   Release binaries are built with `-trimpath` and CGO off, and two builds must produce the same `sha256`.
 
@@ -339,8 +351,10 @@ Not in v1, in rough order of value:
   a hook, and other MCP servers configured in that CLI directly.
 - Every agent session starts its own downstream servers. A server that keeps state in memory does not
   share it between agents.
-- The chain shows edits made without rewriting everything after them. A full rewrite is caught only by
-  comparing the head hash with a copy kept elsewhere.
+- The chain shows edits made without rewriting everything after them. A full rewrite, or deleting the
+  newest receipts, is caught only by comparing the head hash with a copy kept elsewhere.
+- Argument globs match strings, not meaning. `git push*` does not match `cd repo && git push`, so an
+  `args` rule on a shell tool is a convenience, not a boundary.
 - Approvals depend on the user watching. Unattended, `ask` means denied after the timeout.
 - Go and the Codex, Copilot and Antigravity CLIs are not installed on the development machine yet.
   Milestone 1 needs only Go.
