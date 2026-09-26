@@ -31,6 +31,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return errUsage
 	}
 	switch args[0] {
+	case "mcp":
+		return runMCP(ctx, args[1:], stdin, stdout, stderr)
+	case "verify":
+		return runVerify(ctx, args[1:], stdout, stderr)
 	case "version":
 		_, err := fmt.Fprintln(stdout, version)
 		return err
