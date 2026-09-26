@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/downstream"
 	"github.com/tunahanaliozturk/derbent/internal/gate"
@@ -70,7 +71,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	g := &gate.Gate{
 		Agent: *agent, Project: project, Session: session, Version: version,
 		Rules: cfg.Rules, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
-		Redact: cfg.Redact.JSON,
+		Redact: cfg.Redact.JSON, Approvals: approval.NewQueue(db), ApprovalTimeout: cfg.ApprovalTimeout,
 	}
 	srv := g.Server()
 	if len(cfg.Servers) > 0 {

@@ -33,7 +33,8 @@ type Gate struct {
 	Receipts *receipt.Log
 	// Forward sends a call to a downstream server. It may be nil when no servers are configured.
 	Forward func(ctx context.Context, server, tool string, args json.RawMessage) (*mcp.CallToolResult, error)
-	// Redact masks secrets in arguments before they are stored in a receipt. Nil stores them as they are.
+	// Redact masks secrets in arguments before they are stored in a receipt or in the approvals table.
+	// Nil stores them as they are.
 	Redact func(string) string
 	// Approvals holds the calls a rule sends to the user. Nil refuses them.
 	Approvals *approval.Queue
@@ -185,7 +186,7 @@ func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest,
 		return run("user:" + ref)
 	case out.By == approval.ByTimeout:
 		return refuse("timeout:"+ref, fmt.Sprintf("%s needs the user's approval and none came within %s, so it was denied. "+
-			"Ask the user to approve it in the derbent UI, then try again.", name, g.ApprovalTimeout))
+			"Try again and ask the user to approve it in the derbent UI while it waits.", name, g.ApprovalTimeout))
 	default:
 		return refuse("user:"+ref, "the user denied "+name)
 	}

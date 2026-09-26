@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -131,6 +132,114 @@ func (l *Log) Verify(ctx context.Context) (Result, error) {
 		return Result{}, fmt.Errorf("read receipts: %w", err)
 	}
 	return res, nil
+}
+
+// Filter selects receipts. Empty fields match everything.
+type Filter struct {
+	Agent   string
+	Tool    string // a glob: * matches any run of characters, ? exactly one
+	Project string
+	// Since keeps receipts from this second on.
+	Since time.Time
+	// AfterSeq keeps receipts with a greater sequence number, for following new ones.
+	AfterSeq int64
+	// Limit keeps the newest matches; 0 means 100.
+	Limit int
+}
+
+// List returns the newest receipts matching f, oldest first.
+func (l *Log) List(ctx context.Context, f Filter) ([]Receipt, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	since := ""
+	if !f.Since.IsZero() {
+		since = sinceBound(f.Since)
+	}
+	rows, err := l.db.QueryContext(ctx, `SELECT seq, at, project, agent, session, tool, args, args_sha256,
+		decision, decided_by, outcome, result_size, result_sha256, duration_ms, prev_hash, hash
+		FROM receipts
+		WHERE seq > ?1 AND (?2 = '' OR agent = ?2) AND (?3 = '' OR tool GLOB ?3)
+			AND (?4 = '' OR project = ?4) AND (?5 = '' OR at >= ?5)
+		ORDER BY seq DESC LIMIT ?6`, f.AfterSeq, f.Agent, f.Tool, f.Project, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list receipts: %w", err)
+	}
+	defer rows.Close()
+	var out []Receipt
+	for rows.Next() {
+		var w row
+		var hash string
+		if err = rows.Scan(&w.seq, &w.at, &w.project, &w.agent, &w.session, &w.tool, &w.args, &w.argsSHA256,
+			&w.decision, &w.decidedBy, &w.outcome, &w.resultSize, &w.resultSHA256, &w.durationMS,
+			&w.prevHash, &hash); err != nil {
+			return nil, fmt.Errorf("list receipts: %w", err)
+		}
+		var r Receipt
+		if r, err = w.receipt(hash); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("list receipts: %w", err)
+	}
+	slices.Reverse(out)
+	return out, nil
+}
+
+// AgentSeen is an agent and the time of its latest receipt.
+type AgentSeen struct {
+	Agent string
+	Last  time.Time
+}
+
+// Agents returns the agents with a receipt since the given time, by name.
+func (l *Log) Agents(ctx context.Context, since time.Time) ([]AgentSeen, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT agent, max(at) FROM receipts WHERE at >= ? GROUP BY agent ORDER BY agent`,
+		sinceBound(since))
+	if err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+	defer rows.Close()
+	var out []AgentSeen
+	for rows.Next() {
+		var a AgentSeen
+		var at string
+		if err = rows.Scan(&a.Agent, &at); err != nil {
+			return nil, fmt.Errorf("list agents: %w", err)
+		}
+		if a.Last, err = time.Parse(time.RFC3339Nano, at); err != nil {
+			return nil, fmt.Errorf("list agents: time %q: %w", at, err)
+		}
+		out = append(out, a)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+	return out, nil
+}
+
+// sinceBound writes t so that it compares correctly as text against stored times, which are UTC RFC
+// 3339 with a fraction of any length: to the second, without the zone, so that every time in that
+// second sorts after it.
+func sinceBound(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05")
+}
+
+// receipt turns a stored row back into a Receipt.
+func (w row) receipt(hash string) (Receipt, error) {
+	at, err := time.Parse(time.RFC3339Nano, w.at)
+	if err != nil {
+		return Receipt{}, fmt.Errorf("receipt %d: time %q: %w", w.seq, w.at, err)
+	}
+	return Receipt{
+		Seq: w.seq, At: at, Project: w.project, Agent: w.agent, Session: w.session, Tool: w.tool, Args: w.args,
+		ArgsSHA256: w.argsSHA256, Decision: w.decision, DecidedBy: w.decidedBy, Outcome: w.outcome,
+		ResultSize: w.resultSize, ResultSHA256: w.resultSHA256, Duration: time.Duration(w.durationMS) * time.Millisecond,
+		PrevHash: w.prevHash, Hash: hash,
+	}, nil
 }
 
 // row is a receipt exactly as stored. Hashes are computed over these values, so verification never

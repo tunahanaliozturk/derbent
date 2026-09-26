@@ -14,7 +14,8 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-var errUsage = errors.New("usage: derbent mcp --agent <name> | derbent verify | derbent config check | derbent version")
+var errUsage = errors.New("usage: derbent [--db path] | derbent mcp --agent <name> | derbent approve [--session] <id> | " +
+	"derbent deny <id> | derbent receipts | derbent verify | derbent config check | derbent version")
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -33,6 +34,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	switch args[0] {
 	case "mcp":
 		return runMCP(ctx, args[1:], stdin, stdout, stderr)
+	case "approve", "deny":
+		return runDecide(ctx, args[0], args[1:], stdout, stderr)
+	case "receipts":
+		return runReceipts(ctx, args[1:], stdout, stderr)
 	case "verify":
 		return runVerify(ctx, args[1:], stdout, stderr)
 	case "config":

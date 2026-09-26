@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -211,5 +212,92 @@ func TestConcurrentProcessesKeepOneChain(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestListFiltersAndKeepsTheNewest(t *testing.T) {
+	log := receipt.NewLog(openDB(t, filepath.Join(t.TempDir(), "p.db")))
+	base := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	for i, r := range []struct{ agent, tool string }{
+		{"claude", "memory_write"},
+		{"codex", "github__get_me"},
+		{"codex", "memory_search"},
+		{"claude", "github__create_issue"},
+		{"codex", "github__create_issue"},
+	} {
+		rec := sample(i)
+		rec.Agent, rec.Tool = r.agent, r.tool
+		rec.At = base.Add(time.Duration(i)*time.Minute + 500*time.Millisecond)
+		if _, err := log.Append(t.Context(), rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seqs := func(f receipt.Filter) []int64 {
+		t.Helper()
+		got, err := log.List(t.Context(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make([]int64, 0, len(got))
+		for _, r := range got {
+			out = append(out, r.Seq)
+		}
+		return out
+	}
+	tests := map[string]struct {
+		f    receipt.Filter
+		want []int64
+	}{
+		"everything, oldest first":  {receipt.Filter{}, []int64{1, 2, 3, 4, 5}},
+		"by agent":                  {receipt.Filter{Agent: "codex"}, []int64{2, 3, 5}},
+		"by tool glob":              {receipt.Filter{Tool: "github__*"}, []int64{2, 4, 5}},
+		"agent and tool":            {receipt.Filter{Agent: "claude", Tool: "github__*"}, []int64{4}},
+		"newest two":                {receipt.Filter{Limit: 2}, []int64{4, 5}},
+		"after a sequence number":   {receipt.Filter{AfterSeq: 3}, []int64{4, 5}},
+		"since includes its second": {receipt.Filter{Since: base.Add(2 * time.Minute)}, []int64{3, 4, 5}},
+		"by project":                {receipt.Filter{Project: "/elsewhere"}, nil},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := seqs(tc.f); !slices.Equal(got, tc.want) {
+				t.Fatalf("List = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	got, err := log.List(t.Context(), receipt.Filter{AfterSeq: 4})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("List = %+v, %v", got, err)
+	}
+	if r := got[0]; r.Agent != "codex" || r.Tool != "github__create_issue" || !r.At.Equal(base.Add(4*time.Minute+500*time.Millisecond)) ||
+		r.Duration != 4*time.Millisecond || r.Hash == "" {
+		t.Fatalf("receipt read back as %+v", r)
+	}
+}
+
+func TestAgentsSeenSince(t *testing.T) {
+	log := receipt.NewLog(openDB(t, filepath.Join(t.TempDir(), "p.db")))
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	for i, r := range []struct {
+		agent string
+		ago   time.Duration
+	}{{"copilot", 3 * time.Hour}, {"codex", 30 * time.Minute}, {"claude", 10 * time.Minute}, {"codex", time.Minute}} {
+		rec := sample(i)
+		rec.Agent, rec.At = r.agent, now.Add(-r.ago)
+		if _, err := log.Append(t.Context(), rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen, err := log.Agents(t.Context(), now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []receipt.AgentSeen{{Agent: "claude", Last: now.Add(-10 * time.Minute)}, {Agent: "codex", Last: now.Add(-time.Minute)}}
+	if len(seen) != len(want) {
+		t.Fatalf("Agents = %+v, want %+v", seen, want)
+	}
+	for i := range want {
+		if seen[i].Agent != want[i].Agent || !seen[i].Last.Equal(want[i].Last) {
+			t.Fatalf("Agents = %+v, want %+v", seen, want)
+		}
 	}
 }
