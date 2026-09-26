@@ -7,11 +7,13 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
@@ -44,14 +46,17 @@ type Model struct {
 
 	width, height int
 	pending       []approval.Pending
-	selected      int // index into pending
-	feed          []receipt.Receipt
-	lastSeq       int64
-	agents        []receipt.AgentSeen
-	status        string // the outcome of the last action
-	filter        string
-	editing       bool // typing a filter
-	help          bool
+	// selected is the ID of the highlighted call, 0 for none. It is an ID, not a position, so that a
+	// key never lands on a call the user did not highlight when the list changes under it.
+	selected int64
+	feed     []receipt.Receipt
+	lastSeq  int64
+	agents   []receipt.AgentSeen
+	status   string // the outcome of the last action
+	pollErr  string // why the last poll failed, until one succeeds
+	filter   string
+	editing  bool // typing a filter
+	help     bool
 }
 
 // New returns the UI over the shared database's approvals, receipts and memory.
@@ -112,12 +117,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // apply takes in a snapshot, rings the bell when a call has started waiting since the last one, and
 // schedules the next poll. Only one load is ever in flight: the next is scheduled here.
+//
+// When the highlighted call leaves (decided elsewhere, expired, its gate gone) nothing is highlighted
+// until the user picks a call again. The first call is highlighted only when nothing was waiting
+// before, so a single call takes one key.
 func (m Model) apply(s snapshotMsg) (tea.Model, tea.Cmd) {
 	next := tea.Tick(m.poll, func(time.Time) tea.Msg { return tickMsg{} })
 	if s.err != nil {
-		m.status = "error: " + s.err.Error()
+		m.pollErr = s.err.Error()
 		return m, next
 	}
+	m.pollErr = ""
 	known := make(map[int64]bool, len(m.pending))
 	for _, p := range m.pending {
 		known[p.ID] = true
@@ -126,15 +136,14 @@ func (m Model) apply(s snapshotMsg) (tea.Model, tea.Cmd) {
 	for _, p := range s.pending {
 		ring = ring || !known[p.ID]
 	}
-	var keep int64
-	if m.selected < len(m.pending) {
-		keep = m.pending[m.selected].ID
-	}
-	m.pending, m.selected = s.pending, 0
-	for i, p := range m.pending {
-		if p.ID == keep {
-			m.selected = i
-		}
+	wasEmpty := len(m.pending) == 0
+	m.pending = s.pending
+	switch {
+	case m.selected != 0 && m.index() < 0:
+		m.status = fmt.Sprintf("#%d is no longer waiting", m.selected)
+		m.selected = 0
+	case m.selected == 0 && wasEmpty && len(m.pending) > 0:
+		m.selected = m.pending[0].ID
 	}
 	m.feed = append(m.feed, s.feed...)
 	if over := len(m.feed) - feedSize; over > 0 {
@@ -150,9 +159,16 @@ func (m Model) apply(s snapshotMsg) (tea.Model, tea.Cmd) {
 	return m, next
 }
 
+// index is the position of the highlighted call in pending, or -1 when none is highlighted.
+func (m Model) index() int {
+	return slices.IndexFunc(m.pending, func(p approval.Pending) bool { return p.ID == m.selected })
+}
+
 // key handles a key on the main screen.
 func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case k.String() == "ctrl+c":
+		return m, tea.Quit
 	case m.editing:
 		return m.editFilter(k), nil
 	case m.help:
@@ -160,7 +176,7 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch k.String() {
-	case "q", "ctrl+c":
+	case "q":
 		return m, tea.Quit
 	case "?":
 		m.help = true
@@ -169,15 +185,19 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.filter = ""
 	case "up":
-		m.selected = max(m.selected-1, 0)
+		if len(m.pending) > 0 {
+			m.selected = m.pending[max(m.index()-1, 0)].ID
+		}
 	case "down":
-		m.selected = min(m.selected+1, max(len(m.pending)-1, 0))
+		if len(m.pending) > 0 {
+			m.selected = m.pending[min(m.index()+1, len(m.pending)-1)].ID
+		}
 	case "a":
-		return m, m.decide(approval.ApproveOnce)
+		return m.decide(approval.ApproveOnce)
 	case "A":
-		return m, m.decide(approval.ApproveSession)
+		return m.decide(approval.ApproveSession)
 	case "d":
-		return m, m.decide(approval.Deny)
+		return m.decide(approval.Deny)
 	case "v":
 		m.status = "verifying the receipt chain..."
 		return m, m.verify
@@ -202,13 +222,20 @@ func (m Model) editFilter(k tea.KeyPressMsg) Model {
 	return m
 }
 
-// decide sends the user's verdict on the selected call.
-func (m Model) decide(v approval.Verdict) tea.Cmd {
-	if len(m.pending) == 0 {
-		return nil
+// decide sends the user's verdict on the highlighted call, and on no other.
+func (m Model) decide(v approval.Verdict) (tea.Model, tea.Cmd) {
+	i := m.index()
+	switch {
+	case len(m.pending) == 0:
+		m.status = "no call is waiting"
+		return m, nil
+	case i < 0:
+		m.status = "pick a waiting call with up or down first"
+		return m, nil
 	}
-	p := m.pending[m.selected]
-	return func() tea.Msg {
+	p := m.pending[i]
+	m.selected = 0 // the call is about to leave the list; that is no news to report
+	return m, func() tea.Msg {
 		if err := m.approvals.Decide(m.ctx, p.ID, v); err != nil {
 			return statusMsg(fmt.Sprintf("#%d: %v", p.ID, err))
 		}
@@ -286,9 +313,15 @@ func (l *lines) String() string {
 	return strings.Join(l.out, "\n")
 }
 
-// main draws the header, the waiting calls, the receipt feed and the status line.
+// main draws the header, the waiting calls, the agents, the receipt feed and the status line.
 func (m Model) main() string {
 	l := &lines{width: m.width}
+	l.add(titleStyle, fmt.Sprintf("derbent   %d waiting   ? keys", len(m.pending)))
+	l.blank()
+	if len(m.pending) > 0 {
+		m.drawWaiting(l)
+		l.blank()
+	}
 	agents := make([]string, 0, len(m.agents))
 	for _, a := range m.agents {
 		agents = append(agents, clean(a.Agent)+" "+a.Last.Local().Format("15:04"))
@@ -297,20 +330,8 @@ func (m Model) main() string {
 	if seen == "" {
 		seen = "none"
 	}
-	l.add(titleStyle, fmt.Sprintf("derbent   %d waiting   agents in the last hour: %s   ? keys", len(m.pending), seen))
+	l.add(plainStyle, "agents in the last hour: "+seen)
 	l.blank()
-	if len(m.pending) > 0 {
-		l.add(pendingStyle, "WAITING FOR YOU   a approve   A approve for this session   d deny")
-		for i, p := range m.pending {
-			left := max(p.Deadline.Sub(m.now()), 0).Round(time.Second)
-			style := plainStyle
-			if i == m.selected {
-				style = selectedStyle
-			}
-			l.add(style, fmt.Sprintf("#%d  %s  %s  %s left  %s", p.ID, clean(p.Agent), clean(p.Tool), left, clean(p.Args)))
-		}
-		l.blank()
-	}
 	title := "RECEIPTS"
 	if m.filter != "" || m.editing {
 		title += "   filter: " + clean(m.filter)
@@ -333,8 +354,62 @@ func (m Model) main() string {
 			clean(r.Agent), clean(r.Tool), clean(r.Decision), clean(r.DecidedBy), clean(r.Outcome), r.Duration.Milliseconds()))
 	}
 	l.blank()
-	l.add(faintStyle, clean(m.status))
+	status := m.status
+	if m.pollErr != "" {
+		status = "error: " + m.pollErr
+	}
+	l.add(faintStyle, clean(status))
 	return l.String()
+}
+
+// drawWaiting draws the calls waiting for the user, one line each, with the highlighted call's
+// arguments wrapped below it. When the window is too short for all of them it draws the rows around
+// the highlighted one and a count of the rest, so the highlighted call and the status line stay on
+// screen.
+func (m Model) drawWaiting(l *lines) {
+	l.add(pendingStyle, "WAITING FOR YOU   a approve   A approve for this session   d deny")
+	var args []string
+	i := m.index()
+	if i >= 0 {
+		args = m.argLines(m.pending[i].Args)
+	}
+	// What is drawn below the rows: the arguments, the count of hidden calls, a blank line, the
+	// agents, a blank line, the feed title, a blank line and the status line.
+	room := max(m.height-len(l.out)-len(args)-7, 1)
+	rows := m.pending
+	if len(rows) > room {
+		start := min(max(i-room/2, 0), len(rows)-room)
+		rows = rows[start : start+room]
+	}
+	for _, p := range rows {
+		left := max(p.Deadline.Sub(m.now()), 0).Round(time.Second)
+		if p.ID != m.selected {
+			l.add(plainStyle, fmt.Sprintf("#%d  %s  %s  %s left  %s", p.ID, clean(p.Agent), clean(p.Tool), left, clean(p.Args)))
+			continue
+		}
+		l.add(selectedStyle, fmt.Sprintf("#%d  %s  %s  %s left", p.ID, clean(p.Agent), clean(p.Tool), left))
+		for _, a := range args {
+			l.add(plainStyle, a)
+		}
+	}
+	if hidden := len(m.pending) - len(rows); hidden > 0 {
+		l.add(faintStyle, fmt.Sprintf("+%d more waiting", hidden))
+	}
+}
+
+// argLines wraps the highlighted call's arguments, which the agent controls, over up to a third of
+// the window and at least three lines, so the user sees what they approve rather than a prefix of it.
+// The text is cleaned before it is wrapped; lines.add clips each line again.
+func (m Model) argLines(args string) []string {
+	const indent = "    "
+	out := strings.Split(ansi.Hardwrap(clean(args), max(m.width-len(indent), 1), true), "\n")
+	if most := max(m.height/3, 3); len(out) > most {
+		out = append(out[:most], fmt.Sprintf("+%d more lines", len(out)-most))
+	}
+	for i := range out {
+		out[i] = indent + out[i]
+	}
+	return out
 }
 
 // visibleFeed is the feed narrowed by the filter, which matches agent or tool names, ignoring case.
