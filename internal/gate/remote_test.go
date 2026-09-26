@@ -211,3 +211,81 @@ func TestServableName(t *testing.T) {
 		}
 	}
 }
+
+func TestLeftOutSaysWhy(t *testing.T) {
+	tests := map[string]struct {
+		name string
+		tool *mcp.Tool
+		want string
+	}{
+		"servable":         {"x__fine", objectTool("fine"), ""},
+		"bad name":         {"x__has space", objectTool("has space"), "not a tool name"},
+		"string schema":    {"x__s", &mcp.Tool{Name: "s", InputSchema: map[string]any{"type": "string"}}, "not an object"},
+		"no schema at all": {"x__n", &mcp.Tool{Name: "n"}, "not an object"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := gate.LeftOut(tc.name, tc.tool)
+			if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+				t.Fatalf("LeftOut = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Rules read named string arguments. Arguments that are not an object would pass a deny whose args
+// condition cannot see them, so they are refused before any rule is consulted.
+func TestArgumentsThatAreNotAnObjectAreRefused(t *testing.T) {
+	e := newEnv(t)
+	remote := &fakeRemote{}
+	g, cs := remoteGate(t, e, "codex", remote,
+		rule.Spec{Tool: "x__run", Args: map[string]string{"command": "git push*"}, Action: rule.Deny},
+		rule.Spec{Action: rule.Allow},
+	)
+	g.SyncTools("x", []*mcp.Tool{objectTool("run")})
+	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "x__run", Arguments: []any{"git push --force"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(text(res), "not a JSON object") {
+		t.Fatalf("result = %s", text(res))
+	}
+	if len(remote.calls) != 0 {
+		t.Fatalf("forwarded %v", remote.calls)
+	}
+	if got := receipts(t, e.db); len(got) != 1 || got[0].decision != "deny" || got[0].outcome != "refused" {
+		t.Fatalf("receipts = %+v", got)
+	}
+}
+
+func TestToolListWaitsForServersStartingUp(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "claude")
+	g.Forward = (&fakeRemote{}).forward
+	ready := make(chan struct{})
+	g.ToolsReady, g.ToolsWait = ready, 10*time.Second
+	cs := connect(t, g) // initialize is answered at once
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		g.SyncTools("x", []*mcp.Tool{objectTool("late")})
+		close(ready)
+	}()
+	if got := toolNames(t, cs); !slices.Equal(got, []string{"x__late"}) {
+		t.Fatalf("tools = %v, want the server that came up during the wait", got)
+	}
+}
+
+func TestToolListWaitsForASlowServerOnlySoLong(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "claude")
+	g.ToolsReady, g.ToolsWait = make(chan struct{}), 300*time.Millisecond
+	cs := connect(t, g)
+	began := time.Now()
+	res, err := cs.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(began); took > 5*time.Second || len(res.Tools) != 3 {
+		t.Fatalf("listed %d tools after %s; want the memory tools after at most the wait", len(res.Tools), took)
+	}
+}

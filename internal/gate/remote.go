@@ -16,6 +16,18 @@ func ServableName(name string) bool {
 	return toolName.MatchString(name)
 }
 
+// LeftOut says why a downstream tool cannot be offered to agents under the gate name name, or returns ""
+// when it can. SyncTools and `portcullis config check` both use it, so they never disagree.
+func LeftOut(name string, t *mcp.Tool) string {
+	switch {
+	case !ServableName(name):
+		return "not a tool name of at most 64 letters, digits, underscores or dashes"
+	case !objectSchema(t.InputSchema):
+		return "its input schema is not an object" // the SDK serves only tools with object schemas
+	}
+	return ""
+}
+
 // SyncTools makes one downstream server's tools available to the agent as <server>__<tool>. It leaves
 // out tools the rules hide from this agent, tools whose name cannot be served, and tools whose input
 // schema is not an object (the SDK refuses those), and it removes the server's tools that are gone.
@@ -29,14 +41,11 @@ func (g *Gate) SyncTools(server string, tools []*mcp.Tool) {
 	keep := map[string]bool{}
 	for _, t := range tools {
 		name := server + "__" + t.Name
-		switch {
-		case !ServableName(name):
-			slog.Warn("portcullis: tool left out: not a tool name of at most 64 letters, digits, underscores or dashes", "tool", name)
+		if why := LeftOut(name, t); why != "" {
+			slog.Warn("portcullis: tool left out: "+why, "tool", name)
 			continue
-		case !objectSchema(t.InputSchema):
-			slog.Warn("portcullis: tool left out: its input schema is not an object", "tool", name)
-			continue
-		case !knobs.skipHiding && g.Rules.Hidden(g.Agent, name):
+		}
+		if !knobs.skipHiding && g.Rules.Hidden(g.Agent, name) {
 			continue
 		}
 		keep[name] = true

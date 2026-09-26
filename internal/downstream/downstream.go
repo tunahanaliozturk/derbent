@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -20,6 +21,11 @@ import (
 
 // ErrUnavailable is returned by Call for a server that is not connected at the moment.
 var ErrUnavailable = errors.New("server is not running")
+
+// errRedirect refuses a redirect from a url server. The configured headers, credentials included,
+// would follow it to wherever it points, even over plain http, and a streamable HTTP server has no
+// reason to redirect.
+var errRedirect = errors.New("url servers may not redirect, because the configured headers would follow the redirect")
 
 // Spec describes one server. Exactly one of Command and URL is set.
 type Spec struct {
@@ -36,12 +42,12 @@ type ToolsFunc func(server string, tools []*mcp.Tool)
 
 // Options tune a Manager. Zero values get the defaults noted on each field.
 type Options struct {
-	Version      string
-	Stderr       io.Writer     // a command server's stderr; nil discards it
-	StartTimeout time.Duration // how long Start waits for every server's first attempt; default 10s
-	MinBackoff   time.Duration // wait before the first retry; default 1s
-	MaxBackoff   time.Duration // longest wait between retries; default 60s
-	Logger       *slog.Logger  // default slog.Default()
+	Version        string
+	Stderr         io.Writer     // a command server's stderr; nil discards it
+	ConnectTimeout time.Duration // how long one attempt to start and initialise a server may take; default 60s
+	MinBackoff     time.Duration // wait before the first retry; default 1s
+	MaxBackoff     time.Duration // longest wait between retries; default 60s
+	Logger         *slog.Logger  // default slog.Default()
 }
 
 // Manager supervises the servers. Its zero value is not usable; call New.
@@ -52,6 +58,12 @@ type Manager struct {
 	// http is shared by the url servers and owned by the Manager, so Close can drop its idle
 	// connections instead of leaving them to the process-wide default transport.
 	http *http.Transport
+	// listing serialises the tool list loads of each server, so a load that starts later also
+	// finishes later and the newest list is the one handed on.
+	listing map[string]*sync.Mutex
+	// started is closed once every server has finished its first connection attempt.
+	started   chan struct{}
+	remaining atomic.Int64
 
 	mu       sync.Mutex
 	sessions map[string]*mcp.ClientSession
@@ -62,8 +74,8 @@ type Manager struct {
 
 // New returns a Manager for specs. Nothing starts until Start.
 func New(specs []Spec, onTools ToolsFunc, opts Options) *Manager {
-	if opts.StartTimeout <= 0 {
-		opts.StartTimeout = 10 * time.Second
+	if opts.ConnectTimeout <= 0 {
+		opts.ConnectTimeout = time.Minute
 	}
 	if opts.MinBackoff <= 0 {
 		opts.MinBackoff = time.Second
@@ -78,54 +90,60 @@ func New(specs []Spec, onTools ToolsFunc, opts Options) *Manager {
 	if !ok {
 		transport = &http.Transport{}
 	}
+	listing := make(map[string]*sync.Mutex, len(specs))
+	for _, s := range specs {
+		listing[s.Name] = &sync.Mutex{}
+	}
 	return &Manager{
-		specs: specs, onTools: onTools, opts: opts, http: transport.Clone(),
-		sessions: map[string]*mcp.ClientSession{},
+		specs: specs, onTools: onTools, opts: opts, http: transport.Clone(), listing: listing,
+		started: make(chan struct{}), sessions: map[string]*mcp.ClientSession{},
 	}
 }
 
-// Start begins supervising every server and returns once each has finished its first connection
-// attempt, or StartTimeout has passed, so that the agent's first tool list already holds the servers
-// that came up. Supervision goes on until Close.
+// Start begins supervising every server and returns at once. Started tells when every server has had
+// its first attempt. Supervision goes on until Close.
 func (m *Manager) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
 	m.cancel = cancel
 	m.mu.Unlock()
-	ready := make(chan struct{}, len(m.specs))
+	m.remaining.Store(int64(len(m.specs)))
+	if len(m.specs) == 0 {
+		close(m.started)
+	}
 	for _, s := range m.specs {
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			m.supervise(ctx, s, ready)
+			m.supervise(ctx, s)
 		}()
-	}
-	timer := time.NewTimer(m.opts.StartTimeout)
-	defer timer.Stop()
-	for range m.specs {
-		select {
-		case <-ready:
-		case <-timer.C:
-			return
-		case <-ctx.Done():
-			return
-		}
 	}
 }
 
-// Close stops supervision, disconnects every server, ends command servers' processes, and waits for
-// every goroutine the Manager started. Calling it more than once is harmless.
+// Started is closed once every server has finished its first connection attempt, whether or not it
+// came up.
+func (m *Manager) Started() <-chan struct{} {
+	return m.started
+}
+
+// Close shuts every server down and waits for every goroutine the Manager started. Sessions are closed
+// first, which lets a command server exit on its own once its stdin closes (it is killed if it has not
+// within five seconds); then supervision is cancelled, which also ends attempts still connecting.
+// Calling it more than once is harmless.
 func (m *Manager) Close() {
 	m.mu.Lock()
 	m.closed = true
-	if m.cancel != nil {
-		m.cancel()
-	}
+	cancel := m.cancel
 	sessions := m.sessions
 	m.sessions = map[string]*mcp.ClientSession{}
 	m.mu.Unlock()
+	var closing sync.WaitGroup
 	for _, cs := range sessions {
-		cs.Close()
+		closing.Go(func() { cs.Close() })
+	}
+	closing.Wait()
+	if cancel != nil {
+		cancel()
 	}
 	m.wg.Wait()
 	m.http.CloseIdleConnections()
@@ -154,7 +172,7 @@ func (m *Manager) Call(ctx context.Context, server, tool string, args json.RawMe
 // supervise keeps one server connected until ctx ends: connect, load tools, wait for the session to
 // end, back off, and go again. The backoff doubles on every failure up to MaxBackoff, and starts over
 // after a session that lasted at least 30 seconds.
-func (m *Manager) supervise(ctx context.Context, s Spec, ready chan<- struct{}) {
+func (m *Manager) supervise(ctx context.Context, s Spec) {
 	backoff := m.opts.MinBackoff
 	first := true
 	timer := time.NewTimer(time.Hour)
@@ -169,7 +187,9 @@ func (m *Manager) supervise(ctx context.Context, s Spec, ready chan<- struct{}) 
 			}
 		}
 		if first {
-			ready <- struct{}{}
+			if m.remaining.Add(-1) == 0 {
+				close(m.started)
+			}
 			first = false
 		}
 		switch {
@@ -179,7 +199,7 @@ func (m *Manager) supervise(ctx context.Context, s Spec, ready chan<- struct{}) 
 			// A session whose server has gone still holds a goroutine for its notification
 			// subscription until it is closed.
 			cs.Close()
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || m.isClosed() {
 				return
 			}
 			m.opts.Logger.Warn("portcullis: downstream server stopped", "server", s.Name, "err", waitErr)
@@ -204,13 +224,18 @@ func (m *Manager) supervise(ctx context.Context, s Spec, ready chan<- struct{}) 
 
 func (m *Manager) connect(ctx context.Context, s Spec) (*mcp.ClientSession, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "portcullis", Version: m.opts.Version}, &mcp.ClientOptions{
-		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) { m.reload(ctx, s.Name) },
+		ToolListChangedHandler: func(_ context.Context, req *mcp.ToolListChangedRequest) {
+			m.reload(ctx, s.Name, req.Session)
+		},
 	})
 	var transport mcp.Transport
 	if s.URL != "" {
 		transport = &mcp.StreamableClientTransport{
-			Endpoint:   s.URL,
-			HTTPClient: &http.Client{Transport: headerTransport{headers: s.Headers, base: m.http}},
+			Endpoint: s.URL,
+			HTTPClient: &http.Client{
+				Transport:     headerTransport{headers: s.Headers, base: m.http},
+				CheckRedirect: func(*http.Request, []*http.Request) error { return errRedirect },
+			},
 		}
 	} else {
 		cmd := exec.CommandContext(ctx, s.Command[0], s.Command[1:]...) //nolint:gosec // the command is the user's own configured server
@@ -221,7 +246,7 @@ func (m *Manager) connect(ctx context.Context, s Spec) (*mcp.ClientSession, erro
 		cmd.Stderr = m.opts.Stderr
 		transport = &mcp.CommandTransport{Command: cmd}
 	}
-	connectCtx, cancel := context.WithTimeout(ctx, m.opts.StartTimeout)
+	connectCtx, cancel := context.WithTimeout(ctx, m.opts.ConnectTimeout)
 	defer cancel()
 	cs, err := client.Connect(connectCtx, transport, nil)
 	if err != nil {
@@ -230,12 +255,12 @@ func (m *Manager) connect(ctx context.Context, s Spec) (*mcp.ClientSession, erro
 	return cs, nil
 }
 
-// reload lists a connected server's tools again after it said they changed. It runs on its own
-// goroutine because it makes a request from inside a notification handler.
-func (m *Manager) reload(ctx context.Context, server string) {
+// reload lists a server's tools again after its session cs said they changed. It runs on its own
+// goroutine because it makes a request from inside a notification handler. It uses the session that
+// sent the notice, which is not recorded yet when the notice arrives during the first load.
+func (m *Manager) reload(ctx context.Context, server string, cs *mcp.ClientSession) {
 	m.mu.Lock()
-	cs := m.sessions[server]
-	if m.closed || cs == nil {
+	if m.closed {
 		m.mu.Unlock()
 		return
 	}
@@ -249,7 +274,16 @@ func (m *Manager) reload(ctx context.Context, server string) {
 	}()
 }
 
+// loadTools lists a server's tools and hands them on. A server that does not offer tools is up with
+// none, not broken.
 func (m *Manager) loadTools(ctx context.Context, server string, cs *mcp.ClientSession) error {
+	lock := m.listing[server]
+	lock.Lock()
+	defer lock.Unlock()
+	if res := cs.InitializeResult(); res != nil && res.Capabilities != nil && res.Capabilities.Tools == nil {
+		m.onTools(server, nil)
+		return nil
+	}
 	var tools []*mcp.Tool
 	for t, err := range cs.Tools(ctx, nil) {
 		if err != nil {
@@ -265,13 +299,21 @@ func (m *Manager) loadTools(ctx context.Context, server string, cs *mcp.ClientSe
 // already been closed, so a connection that finishes during Close is not leaked.
 func (m *Manager) setSession(server string, cs *mcp.ClientSession) bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed {
-		cs.Close()
-		return false
+	closed := m.closed
+	if !closed {
+		m.sessions[server] = cs
 	}
-	m.sessions[server] = cs
-	return true
+	m.mu.Unlock()
+	if closed {
+		cs.Close()
+	}
+	return !closed
+}
+
+func (m *Manager) isClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed
 }
 
 func (m *Manager) clearSession(server string, cs *mcp.ClientSession) {

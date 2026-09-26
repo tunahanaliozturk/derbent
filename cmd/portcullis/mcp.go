@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -23,6 +24,11 @@ import (
 )
 
 var agentName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// firstListWait is how long the agent's first tool listing waits for downstream servers to come up. It
+// stays well below Codex's default MCP startup timeout of ten seconds, which covers initialize and the
+// first listing.
+const firstListWait = 5 * time.Second
 
 // runMCP serves one agent session over stdin and stdout until the agent disconnects. Nothing but MCP
 // frames may be written to stdout.
@@ -70,6 +76,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if len(cfg.Servers) > 0 {
 		mgr := downstream.New(specsOf(cfg.Servers), g.SyncTools, downstream.Options{Version: version, Stderr: stderr})
 		g.Forward = mgr.Call
+		g.ToolsReady, g.ToolsWait = mgr.Started(), firstListWait
 		mgr.Start(ctx)
 		defer mgr.Close()
 	}

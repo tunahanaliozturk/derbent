@@ -14,8 +14,11 @@ list changed, so a server whose tools are unknown at that moment is invisible un
 Each gate process runs one supervisor goroutine per configured server. It connects, loads the tool
 list, hands it to the gate, and waits for the session to end; then it waits and connects again. The
 wait starts at one second, doubles on every failure up to a minute, and starts over after a session that
-lasted at least thirty seconds. The gate waits up to ten seconds for every server's first attempt
-before it answers the agent, so a working server is in the first tool list. A server's tools stay listed
+lasted at least thirty seconds. One attempt to start and initialise a server may take a minute, so a cold
+start such as a first `npx` download still comes up. The agent's initialize is answered at once, and its
+tool listings and calls wait up to five seconds from the start of the session for servers still on their
+first attempt: a working server is in the first tool list, and a slow one cannot use up Codex's ten-second
+startup timeout; it appears later through list_changed. A server's tools stay listed
 while it is down, and calls to them are tool errors that say so. A list_changed notification from a
 server reloads its list, and the SDK passes the change on to the agent. A command server inherits the
 gate's environment plus its configured `env`, and its stderr goes to the gate's stderr, which the agent
@@ -28,4 +31,7 @@ restarted even when nobody is calling it. Every agent session runs its own copy 
 is the price of having no daemon (ADR 0001). Tools whose names do not fit the 64-character limit, or whose
 input schema is not an object, are left out with a warning; `portcullis config check` shows them. The
 session of a server that has gone is closed explicitly, because the SDK keeps a goroutine for its
-notification subscription until then; the leak test found this.
+notification subscription until then; the leak test found this. Closing the gate closes every session
+first, so a command server can exit on its own when its stdin closes, and only then cancels what is still
+running. A url server that answers with a redirect is refused, because the configured headers would
+follow it to another host, even over plain http.

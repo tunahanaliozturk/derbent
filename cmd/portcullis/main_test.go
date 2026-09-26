@@ -11,8 +11,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.uber.org/goleak"
 
 	"github.com/tunahanaliozturk/portcullis/internal/receipt"
 	"github.com/tunahanaliozturk/portcullis/internal/store"
@@ -24,11 +26,14 @@ func TestMain(m *testing.M) {
 	switch {
 	case os.Getenv("PORTCULLIS_TEST_ECHO") == "1":
 		serveEcho()
+	case os.Getenv("PORTCULLIS_TEST_HANG") == "1":
+		_, _ = io.Copy(io.Discard, os.Stdin) // a server that never answers, and exits when stdin closes
+		os.Exit(0)
 	case os.Getenv("PORTCULLIS_TEST_MAIN") == "1":
 		main()
 		os.Exit(0)
 	default:
-		os.Exit(m.Run())
+		goleak.VerifyTestMain(m)
 	}
 }
 
@@ -42,6 +47,10 @@ func serveEcho() {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "echo:" + in.Text}}}, nil, nil
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "secret_tool"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return nil, nil, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "crash"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		os.Exit(3)
 		return nil, nil, nil
 	})
 	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
@@ -277,7 +286,7 @@ func TestConfigCheckListsServerTools(t *testing.T) {
 	if err := run(t.Context(), []string{"config", "check", "--config", writeConfig(t, dir)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatalf("config check: %v\n%s", err, out.String())
 	}
-	for _, want := range []string{"rules: 2", "server echo: 2 tools", "echo__echo", "echo__secret_tool"} {
+	for _, want := range []string{"rules: 2", "server echo: 3 tools", "echo__crash", "echo__echo", "echo__secret_tool"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
@@ -295,5 +304,72 @@ func TestConfigCheckFailsForAServerThatDoesNotStart(t *testing.T) {
 	err := run(t.Context(), []string{"config", "check", "--config", path}, strings.NewReader(""), &out, io.Discard)
 	if !errors.Is(err, errCheckFailed) || !strings.Contains(out.String(), "server ghost: not running") {
 		t.Fatalf("err = %v, output:\n%s", err, out.String())
+	}
+}
+
+// Codex gives an MCP server ten seconds to initialise and list its tools. A downstream server that
+// never answers must not use them up: the agent's session starts at once and the tool list comes
+// after the gate's own short wait, with every server that did come up.
+func TestSlowServerDoesNotHoldTheAgentsSession(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+[servers.slow]
+command = ['` + os.Args[0] + `', '-test.run=^$']
+env     = { PORTCULLIS_TEST_HANG = "1" }
+
+[servers.echo]
+command = ['` + os.Args[0] + `', '-test.run=^$']
+env     = { PORTCULLIS_TEST_ECHO = "1" }
+
+[[rule]]
+action = "allow"
+`
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now()
+	codex := connectProcess(t, dir, "codex", path)
+	defer codex.Close()
+	tools, err := codex.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(began); took > 8*time.Second {
+		t.Fatalf("initialize and the first tool list took %s", took)
+	}
+	var names []string
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
+	}
+	if !slices.Contains(names, "echo__echo") || !slices.Contains(names, "memory_write") {
+		t.Fatalf("tools = %v, want the memory tools and the server that came up", names)
+	}
+}
+
+func TestServerCrashingMidCallGivesAToolErrorAndAReceipt(t *testing.T) {
+	dir := t.TempDir()
+	codex := connectProcess(t, dir, "codex", writeConfig(t, dir))
+	res, err := codex.CallTool(t.Context(), &mcp.CallToolParams{Name: "echo__crash", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatalf("err %v; want a tool error the agent can read", err)
+	}
+	if !res.IsError {
+		t.Fatalf("result %q; want a tool error", resultText(res))
+	}
+	if err = codex.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.OpenExisting(t.Context(), filepath.Join(dir, "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var outcome string
+	if err = db.QueryRowContext(t.Context(), `SELECT outcome FROM receipts WHERE tool = 'echo__crash'`).Scan(&outcome); err != nil {
+		t.Fatal(err)
+	}
+	if outcome != "error" {
+		t.Fatalf("outcome = %q, want error", outcome)
 	}
 }

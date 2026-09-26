@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -61,8 +63,23 @@ func serveTestServer() {
 			os.Exit(1)
 		}
 	}
-	if err := newTestServer().Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+	switch {
+	case os.Getenv("PORTCULLIS_TEST_HANG") != "":
+		_, _ = io.Copy(io.Discard, os.Stdin) // reads, never answers, and exits when stdin closes
+		os.Exit(0)
+	case os.Getenv("PORTCULLIS_TEST_JUNK") != "":
+		fmt.Println("starting up, not a JSON-RPC message")
+	}
+	s := newTestServer()
+	if os.Getenv("PORTCULLIS_TEST_NO_TOOLS") != "" {
+		s = mcp.NewServer(&mcp.Implementation{Name: "no-tools", Version: "0"}, nil)
+	}
+	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		os.Exit(1)
+	}
+	// Run returns once stdin is closed: the client shut the session down properly.
+	if marker := os.Getenv("PORTCULLIS_TEST_EXIT_MARKER"); marker != "" {
+		_ = os.WriteFile(marker, nil, 0o600)
 	}
 	os.Exit(0)
 }
@@ -103,14 +120,26 @@ func (l *toolLists) get(server string) ([]string, int) {
 	return l.lists[server], l.calls
 }
 
-func start(t *testing.T, specs ...downstream.Spec) (*downstream.Manager, *toolLists) {
+func newManager(t *testing.T, specs ...downstream.Spec) (*downstream.Manager, *toolLists) {
 	t.Helper()
 	lists := &toolLists{}
 	m := downstream.New(specs, lists.record, downstream.Options{
-		Version: "test", StartTimeout: 20 * time.Second, MinBackoff: 20 * time.Millisecond, MaxBackoff: 200 * time.Millisecond,
+		Version: "test", ConnectTimeout: 20 * time.Second, MinBackoff: 20 * time.Millisecond, MaxBackoff: 200 * time.Millisecond,
 	})
-	m.Start(t.Context())
 	t.Cleanup(m.Close)
+	return m, lists
+}
+
+// start starts the servers and waits until each has had its first attempt.
+func start(t *testing.T, specs ...downstream.Spec) (*downstream.Manager, *toolLists) {
+	t.Helper()
+	m, lists := newManager(t, specs...)
+	m.Start(t.Context())
+	select {
+	case <-m.Started():
+	case <-time.After(30 * time.Second):
+		t.Fatal("the servers' first attempts did not finish")
+	}
 	return m, lists
 }
 
@@ -229,5 +258,93 @@ func TestCloseStopsServers(t *testing.T) {
 	m.Close()
 	if _, err := callText(t, m, "test", "echo", `{"text":"x"}`); !errors.Is(err, downstream.ErrUnavailable) {
 		t.Fatalf("err = %v after Close, want ErrUnavailable", err)
+	}
+}
+
+// A redirect would carry the configured headers to wherever it points, so it is refused.
+func TestRedirectIsRefusedAndHeadersStayHome(t *testing.T) {
+	var mu sync.Mutex
+	var leaked []string
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		leaked = append(leaked, r.Header.Get("Authorization"))
+		mu.Unlock()
+		http.Error(w, "nothing here", http.StatusNotFound)
+	}))
+	defer elsewhere.Close()
+	redirecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL, http.StatusTemporaryRedirect)
+	}))
+	defer redirecting.Close()
+	m, _ := start(t, downstream.Spec{Name: "web", URL: redirecting.URL, Headers: map[string]string{"Authorization": "Bearer t0ken-value"}})
+	if _, err := callText(t, m, "web", "echo", `{"text":"x"}`); !errors.Is(err, downstream.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable for a server that only redirects", err)
+	}
+	m.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(leaked) > 0 {
+		t.Fatalf("the redirect target received %d requests, Authorization %q", len(leaked), leaked)
+	}
+}
+
+// Start must not hold the gate for a server that is slow to come up: the agent's session starts at
+// once, other servers work, and Close still ends the attempt that is connecting.
+func TestSlowServerHoldsNothingButItsOwnStart(t *testing.T) {
+	m, _ := newManager(t, stdioSpec("slow", map[string]string{"PORTCULLIS_TEST_HANG": "1"}), stdioSpec("test", nil))
+	began := time.Now()
+	m.Start(t.Context())
+	if took := time.Since(began); took > time.Second {
+		t.Fatalf("Start took %s", took)
+	}
+	eventually(t, "the other server to work", func() bool {
+		got, err := callText(t, m, "test", "echo", `{"text":"meanwhile"}`)
+		return err == nil && got == "echo:meanwhile"
+	})
+	select {
+	case <-m.Started():
+		t.Fatal("Started closed while a server was still on its first attempt")
+	default:
+	}
+	began = time.Now()
+	m.Close()
+	if took := time.Since(began); took > 10*time.Second {
+		t.Fatalf("Close took %s with a server still connecting", took)
+	}
+}
+
+func TestCloseLetsServersExitOnTheirOwn(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "exited")
+	m, _ := start(t, stdioSpec("test", map[string]string{"PORTCULLIS_TEST_EXIT_MARKER": marker}))
+	if _, err := callText(t, m, "test", "echo", `{"text":"up"}`); err != nil {
+		t.Fatal(err)
+	}
+	m.Close()
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("the server was killed instead of being let to exit when its stdin closed")
+	}
+}
+
+func TestServerWithoutToolsIsUpWithNone(t *testing.T) {
+	_, lists := start(t, stdioSpec("bare", map[string]string{"PORTCULLIS_TEST_NO_TOOLS": "1"}))
+	names, loads := lists.get("bare")
+	if loads != 1 || len(names) != 0 {
+		t.Fatalf("tools = %v after %d loads, want an empty list once", names, loads)
+	}
+	time.Sleep(300 * time.Millisecond) // many backoffs, if it were being restarted
+	if _, again := lists.get("bare"); again != 1 {
+		t.Fatalf("the server was loaded %d times; one without tools is not broken", again)
+	}
+}
+
+func TestServerPrintingJunkToStdoutHarmsOnlyItself(t *testing.T) {
+	m, _ := start(t, stdioSpec("junk", map[string]string{"PORTCULLIS_TEST_JUNK": "1"}), stdioSpec("test", nil))
+	if got, err := callText(t, m, "test", "echo", `{"text":"fine"}`); err != nil || got != "echo:fine" {
+		t.Fatalf("echo = %q, %v", got, err)
+	}
+	// Whether the SDK skips the line or drops the session, the junk server must take nothing else down.
+	_, _ = callText(t, m, "junk", "echo", `{"text":"x"}`)
+	if got, err := callText(t, m, "test", "echo", `{"text":"still"}`); err != nil || got != "echo:still" {
+		t.Fatalf("echo after the junk server = %q, %v", got, err)
 	}
 }

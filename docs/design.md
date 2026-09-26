@@ -115,8 +115,9 @@ redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
   that agent and tool, a `deny` with no `args` condition comes before any `allow` (ADR 0003). A `deny`
   with an `args` condition refuses the matching calls and leaves the rest to later rules.
 - `${env:NAME}` is resolved when the gate starts. Resolved values never reach receipts or logs. A `url`
-  cannot hold one, because HTTP errors quote the url to stderr and to the agent; a secret for a url
-  server goes in `headers`.
+  cannot hold one, because HTTP errors quote the url to stderr and to the agent, and neither can a
+  `command`, which shows up in process listings and start errors; a secret goes in `headers` for a url
+  server and in `env` for a command server.
 - A `url` server must use `https`, except on `localhost`, `127.0.0.1` or `::1`. `env` belongs to command
   servers and `headers` to url servers.
 - Every value that came from `${env:...}` in `env` or `headers` and is at least eight characters long is
@@ -136,7 +137,11 @@ redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
   to the new list.
 - A downstream server is supervised from the moment the gate starts (ADR 0009): it is started again
   after it stops, with a backoff from one second to one minute, and calls to its tools while it is down
-  are tool errors. The gate keeps serving everything else.
+  are tool errors. The gate keeps serving everything else. The agent's initialize is answered at once;
+  its tool listings and calls wait up to five seconds for servers still starting, and a slower server
+  appears later through `list_changed`.
+- Arguments that are not a JSON object are refused before any rule is read, since `args` conditions
+  read named arguments and could not see into anything else.
 - v1 forwards tools only. Downstream resources and prompts are not exposed.
 
 Memory tools:
@@ -309,6 +314,7 @@ portcullis/
 | 0007 | Memory search is FTS5, without embeddings. |
 | 0008 | SQLite through `modernc.org/sqlite`, with no cgo. |
 | 0009 | Downstream servers are supervised from the moment the gate starts. |
+| 0010 | Portcullis is written in Go. |
 
 ## Milestones
 

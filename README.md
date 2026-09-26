@@ -65,9 +65,10 @@ env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "${env:GITHUB_TOKEN}" }
 redact = ['ghp_[A-Za-z0-9]{36}']
 ```
 
-Their tools appear as `github__get_me` and so on, under the same rules and receipts. Values taken from
-the environment are masked in stored arguments, and so is anything the `redact` patterns match. A
-server that stops is started again, with a backoff of up to a minute.
+Their tools appear as `github__get_me` and so on, under the same rules and receipts. Secrets come from
+the environment through `${env:...}` in `env` or `headers` (never in `command` or `url`, where they could
+leak into errors), and they are masked in stored arguments, as is anything the `redact` patterns match.
+A server that stops is started again, with a backoff of up to a minute.
 
 ```bash
 portcullis config check
