@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/derbent-lockup-on-dark.svg">
+  <img alt="Derbent" src="docs/assets/derbent-lockup-on-light.svg" height="64">
+</picture>
+
 # Derbent
 
 One guarded pass for all your coding agents.
