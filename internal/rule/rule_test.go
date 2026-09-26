@@ -78,9 +78,10 @@ func TestHidden(t *testing.T) {
 		agent, tool string
 		want        bool
 	}{
-		"plain deny hides":            {"copilot", "memory_write", true},
-		"args deny keeps tool listed": {"copilot", "memory_search", false},
-		"allowed tool is listed":      {"claude", "memory_write", false},
+		"plain deny hides":                          {"copilot", "memory_write", true},
+		"args deny before a plain deny still hides": {"copilot", "memory_search", true},
+		"args deny before an allow keeps it listed": {"claude", "memory_search", false},
+		"allowed tool is listed":                    {"claude", "memory_write", false},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -88,6 +89,17 @@ func TestHidden(t *testing.T) {
 				t.Fatalf("Hidden = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAllowWithArgsKeepsToolListed(t *testing.T) {
+	set := mustCompile(t,
+		rule.Spec{Tool: "memory_search", Args: map[string]string{"query": "public*"}, Action: rule.Allow},
+		rule.Spec{Tool: "memory_search", Action: rule.Deny},
+		rule.Spec{Action: rule.Allow},
+	)
+	if set.Hidden("claude", "memory_search") {
+		t.Fatal("a tool that some calls may use is hidden")
 	}
 }
 
@@ -107,6 +119,8 @@ func TestCompileRejects(t *testing.T) {
 		"conditional last rule":  {{Tool: "x", Action: rule.Allow}},
 		"unknown action":         {{Action: "maybe"}},
 		"ask before milestone 3": {{Action: "ask"}},
+		"agent with upper case":  {{Agent: "Copilot", Action: rule.Deny}, {Action: rule.Allow}},
+		"agent with a space":     {{Agent: "claude code", Action: rule.Deny}, {Action: rule.Allow}},
 	}
 	for name, specs := range tests {
 		t.Run(name, func(t *testing.T) {

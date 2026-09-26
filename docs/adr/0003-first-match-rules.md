@@ -20,8 +20,14 @@ condition, so the file always states what happens to everything else. `*` and `?
 wildcards; everything else in a pattern is literal, and `*` spans newlines so a multi-line argument
 cannot slip past a pattern.
 
-A `deny` rule without an `args` condition removes the tool from that agent's tool list. A rule with an
-`args` condition keeps the tool listed, because calls with other arguments may still be allowed.
+A tool is left out of an agent's tool list when no call to it can be allowed. Reading the rules that
+match the agent and the tool in order, a `deny` with an `args` condition only refuses some calls and is
+passed over, the first `allow` (with or without `args`) keeps the tool listed, and a plain `deny`
+hides it.
+
+Agent patterns may only hold the characters an agent name can have, plus the wildcards. A rule for
+`Copilot` is refused when the config loads, because agent names are lower-case and it would otherwise
+never match anything.
 
 ## Consequences
 

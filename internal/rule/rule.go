@@ -36,6 +36,10 @@ type Decision struct {
 // ErrInvalid marks a rule list that cannot be compiled.
 var ErrInvalid = errors.New("invalid rules")
 
+// agentPattern admits the characters an agent name can have, plus the wildcards, so that a rule
+// written for "Copilot" is refused instead of silently never matching the agent "copilot".
+var agentPattern = regexp.MustCompile(`^[a-z0-9_*?-]*$`)
+
 // Set is a compiled, ordered list of rules. The zero Set denies every call and hides every tool.
 type Set struct {
 	rules []compiled
@@ -63,6 +67,9 @@ func Compile(specs []Spec) (Set, error) {
 		default:
 			return Set{}, fmt.Errorf("%w: rule %d: action %q is not allow or deny", ErrInvalid, i+1, sp.Action)
 		}
+		if !agentPattern.MatchString(sp.Agent) {
+			return Set{}, fmt.Errorf("%w: rule %d: agent %q can never match: agent names are lower-case letters, digits, dashes and underscores", ErrInvalid, i+1, sp.Agent)
+		}
 		c := compiled{agent: newGlob(sp.Agent), tool: newGlob(sp.Tool), action: sp.Action}
 		if len(sp.Args) > 0 {
 			c.args = make(map[string]glob, len(sp.Args))
@@ -86,13 +93,22 @@ func (s Set) Decide(agent, tool string, args map[string]any) Decision {
 	return Decision{Action: Deny}
 }
 
-// Hidden reports whether tool should be left out of agent's tool list: the first rule matching agent
-// and tool, whatever its args condition, is a deny without an args condition. A rule with an args
-// condition keeps the tool listed, because calls with other arguments may still be allowed.
+// Hidden reports whether tool should be left out of agent's tool list, which is when no call to it
+// can be allowed. Rules matching agent and tool are read in order: a deny with an args condition can
+// only refuse some calls, so it is passed over; the first allow, with or without args, means some
+// calls get through and the tool is listed; a plain deny means none do.
 func (s Set) Hidden(agent, tool string) bool {
 	for _, r := range s.rules {
-		if r.agent.match(agent) && r.tool.match(tool) {
-			return r.action == Deny && len(r.args) == 0
+		if !r.agent.match(agent) || !r.tool.match(tool) {
+			continue
+		}
+		switch r.action {
+		case Allow:
+			return false
+		case Deny:
+			if len(r.args) == 0 {
+				return true
+			}
 		}
 	}
 	return true
