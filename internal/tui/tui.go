@@ -57,6 +57,7 @@ type Model struct {
 	filter   string
 	editing  bool // typing a filter
 	help     bool
+	notes    *browser // the memory browser while it is open
 }
 
 // New returns the UI over the shared database's approvals, receipts and memory.
@@ -109,6 +110,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.apply(msg)
 	case statusMsg:
 		m.status = string(msg)
+	case hitsMsg, entryMsg:
+		return m.browsed(msg)
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
@@ -169,6 +172,8 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case k.String() == "ctrl+c":
 		return m, tea.Quit
+	case m.notes != nil:
+		return m.browseKey(k)
 	case m.editing:
 		return m.editFilter(k), nil
 	case m.help:
@@ -182,6 +187,8 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.help = true
 	case "/":
 		m.editing = true
+	case "m":
+		m.notes = &browser{typing: true}
 	case "esc":
 		m.filter = ""
 	case "up":
@@ -271,8 +278,11 @@ func (m Model) verify() tea.Msg {
 // View draws the screen.
 func (m Model) View() tea.View {
 	content := m.main()
-	if m.help {
+	switch {
+	case m.help:
 		content = helpText
+	case m.notes != nil:
+		content = m.notesView()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
@@ -341,7 +351,8 @@ func (m Model) main() string {
 	}
 	l.add(titleStyle, title)
 	rows := m.visibleFeed()
-	room := max(m.height-len(l.out)-2, 0) // a blank line and the status line stay
+	status := m.statusLines()
+	room := max(m.height-len(l.out)-1-len(status), 0) // a blank line and the status lines stay
 	if len(rows) > room {
 		rows = rows[len(rows)-room:]
 	}
@@ -354,28 +365,37 @@ func (m Model) main() string {
 			clean(r.Agent), clean(r.Tool), clean(r.Decision), clean(r.DecidedBy), clean(r.Outcome), r.Duration.Milliseconds()))
 	}
 	l.blank()
-	status := m.status
-	if m.pollErr != "" {
-		status = "error: " + m.pollErr
+	for _, s := range status {
+		l.add(faintStyle, clean(s))
 	}
-	l.add(faintStyle, clean(status))
 	return l.String()
+}
+
+// statusLines is the bottom of the screen: the outcome of the user's last action and, while polls
+// fail, why on a line of its own above it, so a failing poll never hides what the user's key did.
+func (m Model) statusLines() []string {
+	if m.pollErr == "" {
+		return []string{m.status}
+	}
+	return []string{"error: " + m.pollErr, m.status}
 }
 
 // drawWaiting draws the calls waiting for the user, one line each, with the highlighted call's
 // arguments wrapped below it. When the window is too short for all of them it draws the rows around
 // the highlighted one and a count of the rest, so the highlighted call and the status line stay on
-// screen.
+// screen. After a decision nothing is highlighted, and the header says so.
 func (m Model) drawWaiting(l *lines) {
-	l.add(pendingStyle, "WAITING FOR YOU   a approve   A approve for this session   d deny")
 	var args []string
 	i := m.index()
 	if i >= 0 {
+		l.add(pendingStyle, "WAITING FOR YOU   a approve   A approve for this session   d deny")
 		args = m.argLines(m.pending[i].Args)
+	} else {
+		l.add(pendingStyle, "WAITING FOR YOU   nothing highlighted   up, down pick a call")
 	}
 	// What is drawn below the rows: the arguments, the count of hidden calls, a blank line, the
-	// agents, a blank line, the feed title, a blank line and the status line.
-	room := max(m.height-len(l.out)-len(args)-7, 1)
+	// agents, a blank line, the feed title, a blank line and the status lines.
+	room := max(m.height-len(l.out)-len(args)-6-len(m.statusLines()), 1)
 	rows := m.pending
 	if len(rows) > room {
 		start := min(max(i-room/2, 0), len(rows)-room)

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -99,13 +100,6 @@ func TestRunVersion(t *testing.T) {
 
 func TestRunRejectsUnknownCommand(t *testing.T) {
 	err := run(t.Context(), []string{"nope"}, strings.NewReader(""), io.Discard, io.Discard)
-	if !errors.Is(err, errUsage) {
-		t.Fatalf("err = %v, want errUsage", err)
-	}
-}
-
-func TestRunWithoutArgumentsShowsUsage(t *testing.T) {
-	err := run(t.Context(), nil, strings.NewReader(""), io.Discard, io.Discard)
 	if !errors.Is(err, errUsage) {
 		t.Fatalf("err = %v, want errUsage", err)
 	}
@@ -576,6 +570,42 @@ func TestReceiptsTableEscapesStoredText(t *testing.T) {
 	}
 }
 
+// encoding/json escapes only the C0 controls, so JSON lines need the same care as the table: an agent
+// writes the args, and DEL, a C1 control or a bidirectional override must not reach a terminal raw.
+func TestReceiptsJSONEscapesWhatATerminalActsOn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, args := "gh\u009b2Jissue\u202e", "{\"x\":\"\u009b2J\u202egnp.exe\x7f\u2066\"}"
+	_, err = receipt.NewLog(db).Append(t.Context(), receipt.Receipt{
+		Project: "p", Agent: "codex", Session: "s", Tool: tool, Args: args, Decision: "deny", DecidedBy: "rule:2", Outcome: "refused",
+	})
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err = run(t.Context(), []string{"receipts", "--db", path, "--json"}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	line := out.String()
+	if strings.ContainsAny(line, "\u009b\u202e\x7f\u2066") {
+		t.Fatalf("raw control characters reached the JSON line: %q", line)
+	}
+	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {
+		t.Fatalf("want exactly one line: %q", line)
+	}
+	var got receiptLine
+	if err = json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatalf("the line is not JSON: %v: %q", err, line)
+	}
+	if got.Tool != tool || got.Args != args {
+		t.Fatalf("decoded tool %q, args %q; want %q, %q", got.Tool, got.Args, tool, args)
+	}
+}
+
 func TestReceiptsCommand(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
 	db, err := store.Open(t.Context(), path)
@@ -623,5 +653,16 @@ func TestReceiptsCommand(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), `"`+args[3]+`"`) {
 			t.Errorf("run %v: err = %v, want one naming %q", args, err, args[3])
 		}
+	}
+}
+
+func TestUIOpensAndQuits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	var out bytes.Buffer
+	if err := run(t.Context(), []string{"--db", path}, strings.NewReader("q"), &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "RECEIPTS") {
+		t.Fatalf("the UI drew nothing recognisable: %q", out.String())
 	}
 }

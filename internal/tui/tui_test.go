@@ -414,6 +414,44 @@ func TestAPollErrorClearsWhenAPollSucceeds(t *testing.T) {
 	}
 }
 
+// A failing poll must not hide what the user's own last key did.
+func TestAPollErrorKeepsTheUsersStatus(t *testing.T) {
+	m, _ := newModel(t)
+	m, _ = update(m, tea.WindowSizeMsg{Width: 100, Height: 20})
+	m, _ = update(m, snapshotMsg{pending: pendingCalls(15)})
+	m, _ = update(m, statusMsg("#7 approved once: codex x"))
+	m, _ = update(m, snapshotMsg{err: errors.New("database is locked")})
+	s := screen(m)
+	if !strings.Contains(s, "error: database is locked") || !strings.Contains(s, "#7 approved once") {
+		t.Fatalf("the poll error and the user's status should both show:\n%s", s)
+	}
+	if n := len(strings.Split(s, "\n")); n > 20 {
+		t.Fatalf("%d lines in a 20-line window:\n%s", n, s)
+	}
+}
+
+// After a decision nothing is highlighted, and the next a, A or d would do nothing; the screen says so
+// before the user presses one.
+func TestTheScreenSaysToPickACallAfterADecision(t *testing.T) {
+	m, d := newModel(t)
+	first, second := askReq, askReq
+	second.Tool = "github__create_pull_request"
+	waiting(t, d.q, first)
+	waitPending(t, d.q, 1)
+	waiting(t, d.q, second)
+	waitPending(t, d.q, 2)
+	m, _ = refresh(m)
+	if strings.Contains(screen(m), "nothing highlighted") {
+		t.Fatalf("the first call is highlighted, yet the screen says nothing is:\n%s", screen(m))
+	}
+	m, cmd := press(m, "a")
+	m = settle(m, cmd)
+	m, _ = refresh(m)
+	if s := screen(m); !strings.Contains(s, "nothing highlighted") || !strings.Contains(s, "up, down pick a call") {
+		t.Fatalf("the screen does not say to pick a call:\n%s", s)
+	}
+}
+
 func TestPollingTwiceDoesNotDuplicateTheFeed(t *testing.T) {
 	m, d := newModel(t)
 	appendReceipt(t, d.log, "claude", "memory_write", "allow")

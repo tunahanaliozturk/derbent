@@ -74,13 +74,16 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
 		for _, r := range list {
-			if err = enc.Encode(receiptLine{
+			line, err := json.Marshal(receiptLine{
 				Seq: r.Seq, At: r.At.Format(time.RFC3339Nano), Project: r.Project, Agent: r.Agent, Session: r.Session,
 				Tool: r.Tool, Args: r.Args, Decision: r.Decision, DecidedBy: r.DecidedBy, Outcome: r.Outcome,
 				ResultSize: r.ResultSize, ResultSHA256: r.ResultSHA256, DurationMS: r.Duration.Milliseconds(), Hash: r.Hash,
-			}); err != nil {
+			})
+			if err != nil {
+				return err
+			}
+			if _, err = fmt.Fprintln(stdout, escapeRaw(string(line))); err != nil {
 				return err
 			}
 		}
@@ -101,11 +104,28 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 // unknown tool is recorded under the name the agent sent), and it must not add rows, move the cursor
 // or send an escape sequence to the user's terminal.
 func printable(s string) string {
-	needsEscape := func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) }
 	if strings.ContainsFunc(s, needsEscape) || !utf8.ValidString(s) {
 		return strconv.Quote(s)
 	}
 	return s
+}
+
+func needsEscape(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) }
+
+// escapeRaw writes \u escapes for the runes encoding/json leaves raw that a terminal still acts on:
+// DEL, the C1 controls and bidirectional overrides. In a JSON line they can only stand inside a
+// string, where the escape decodes to the same rune; every one of them is in the Basic Multilingual
+// Plane, so four hex digits hold it.
+func escapeRaw(line string) string {
+	var b strings.Builder
+	for _, r := range line {
+		if needsEscape(r) {
+			fmt.Fprintf(&b, `\u%04x`, r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // parseSince reads --since as a duration back from now or as an RFC 3339 time. Empty means no bound.

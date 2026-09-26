@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -28,8 +29,8 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	if len(args) == 0 {
-		return errUsage
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return runUI(ctx, args, stdin, stdout, stderr)
 	}
 	switch args[0] {
 	case "mcp":
