@@ -37,7 +37,8 @@ prints the number of receipts, the hash of the last one, and whether the chain i
 of that hash somewhere else if you want to be able to tell later that nothing was cut off the end.
 
 Without a config file every call is allowed. To refuse an agent a tool, create `config.toml` in your
-user config directory (`%AppData%\portcullis\` on Windows, `~/.config/portcullis/` on Linux):
+user config directory (`%AppData%\portcullis\` on Windows, `~/.config/portcullis/` on Linux,
+`~/Library/Application Support/portcullis/` on macOS):
 
 ```toml
 [[rule]]
