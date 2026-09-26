@@ -209,7 +209,7 @@ running agents: their calls that need an approval wait for the timeout and are d
 `%LOCALAPPDATA%\portcullis\portcullis.db` on Windows and `$XDG_STATE_HOME/portcullis/portcullis.db`
 elsewhere, never inside a synced folder. `modernc.org/sqlite` needs no cgo, so the Windows binary builds
 without a C toolchain (ADR 0008); FTS5 support in it is confirmed when the repository is scaffolded. WAL
-mode with a five-second busy timeout. Migrations are embedded, numbered and forward only, and the first
+mode with a thirty-second busy timeout (ADR 0008). Migrations are embedded, numbered and forward only, and the first
 process to open an older database migrates it inside `BEGIN IMMEDIATE`.
 
 ## Security
