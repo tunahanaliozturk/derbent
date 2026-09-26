@@ -25,7 +25,7 @@ func open(t *testing.T, path string) *sql.DB {
 
 func TestOpenCreatesDirectoryAndSchema(t *testing.T) {
 	db := open(t, filepath.Join(t.TempDir(), "dir with space", "nested", "p.db"))
-	for _, name := range []string{"receipts", "memories", "memories_fts"} {
+	for _, name := range []string{"receipts", "memories", "memories_fts", "approvals", "grants"} {
 		var n int
 		err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE name = ?`, name).Scan(&n)
 		if err != nil || n != 1 {
@@ -61,7 +61,7 @@ func TestOpenTwiceKeepsVersion(t *testing.T) {
 	first.Close()
 	db := open(t, path)
 	var v int
-	if err := db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&v); err != nil || v != 1 {
+	if err := db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&v); err != nil || v != 2 {
 		t.Fatalf("user_version = %d, err %v", v, err)
 	}
 }
