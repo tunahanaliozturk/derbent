@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,6 +115,9 @@ func TestDeny(t *testing.T) {
 	if a := result(t, done); a.err != nil || a.out != (approval.Outcome{ID: p.ID, By: approval.ByUser}) {
 		t.Fatalf("Ask = %+v, %v", a.out, a.err)
 	}
+	if _, ok, err := q.Granted(t.Context(), req.Agent, req.Session, req.Tool); err != nil || ok {
+		t.Fatalf("a denial left a grant (ok %v, err %v)", ok, err)
+	}
 	noneLeft(t, q)
 }
 
@@ -213,6 +217,7 @@ func TestApprovalLeftBehindByAStoppedGateIsNotOffered(t *testing.T) {
 // the same thing: a decision the user was told succeeded is the one the call gets.
 func TestDecisionRacingTheDeadlineHasOneWinner(t *testing.T) {
 	q, _ := open(t)
+	var decided, timedOut int
 	for i := range 20 {
 		timeout := 60 * time.Millisecond
 		done := ask(t.Context(), q, req, timeout)
@@ -227,6 +232,55 @@ func TestDecisionRacingTheDeadlineHasOneWinner(t *testing.T) {
 			t.Fatalf("round %d: Decide was refused but the call got %+v", i, a.out)
 		case decideErr != nil && !errors.Is(decideErr, approval.ErrNotPending):
 			t.Fatalf("round %d: %v", i, decideErr)
+		}
+		if decideErr == nil {
+			decided++
+		} else {
+			timedOut++
+		}
+	}
+	t.Logf("Decide won %d/20 rounds, the deadline won %d/20", decided, timedOut)
+}
+
+// Two decisions on the same pending approval, arriving at once, must still leave exactly one winner:
+// SQLite's BEGIN IMMEDIATE serializes them, so the second always finds the row no longer pending.
+func TestConcurrentDecisionsOnOneApprovalHaveOneWinner(t *testing.T) {
+	q, _ := open(t)
+	for i := range 20 {
+		done := ask(t.Context(), q, req, 10*time.Second)
+		p := waitPending(t, q)
+		var approveErr, denyErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			approveErr = q.Decide(t.Context(), p.ID, approval.ApproveOnce)
+		}()
+		go func() {
+			defer wg.Done()
+			denyErr = q.Decide(t.Context(), p.ID, approval.Deny)
+		}()
+		wg.Wait()
+		a := result(t, done)
+		switch {
+		case approveErr == nil && denyErr == nil:
+			t.Fatalf("round %d: both decisions succeeded", i)
+		case approveErr != nil && denyErr != nil:
+			t.Fatalf("round %d: both decisions failed: approve %v, deny %v", i, approveErr, denyErr)
+		case approveErr == nil:
+			if !errors.Is(denyErr, approval.ErrNotPending) {
+				t.Fatalf("round %d: losing deny err = %v, want ErrNotPending", i, denyErr)
+			}
+			if !a.out.Approved || a.out.By != approval.ByUser {
+				t.Fatalf("round %d: approve won but Ask got %+v", i, a.out)
+			}
+		default: // denyErr == nil
+			if !errors.Is(approveErr, approval.ErrNotPending) {
+				t.Fatalf("round %d: losing approve err = %v, want ErrNotPending", i, approveErr)
+			}
+			if a.out.Approved || a.out.By != approval.ByUser {
+				t.Fatalf("round %d: deny won but Ask got %+v", i, a.out)
+			}
 		}
 	}
 }

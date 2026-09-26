@@ -1,6 +1,8 @@
--- A call a rule sends to the user. It leaves 'pending' exactly once: approved or denied by the user,
--- expired by its gate at the deadline, or withdrawn when the agent gave up. Times are Unix milliseconds
--- so that deadlines compare as numbers.
+-- A call a rule sends to the user. A row moves out of 'pending' when the user approves or denies it,
+-- when its gate expires it at the deadline, or when the agent gives up and it is withdrawn. A gate
+-- that stops while a row waits leaves it pending forever; nothing offers or decides it once its
+-- deadline has passed, so it is simply ignored from then on. Times are Unix milliseconds so that
+-- deadlines compare as numbers.
 CREATE TABLE approvals (
     id          INTEGER PRIMARY KEY,
     created_ms  INTEGER NOT NULL,

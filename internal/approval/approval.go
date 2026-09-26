@@ -92,28 +92,76 @@ func (q *Queue) Ask(ctx context.Context, r Request, timeout time.Duration) (Outc
 	defer expire.Stop()
 	poll := time.NewTicker(pollEvery)
 	defer poll.Stop()
+	// Every exit below either has already read a final state or closes the row itself before
+	// returning: none can leave it pending.
 	for {
 		select {
 		case <-ctx.Done():
-			if _, err := q.end(context.WithoutCancel(ctx), id, "withdrawn"); err != nil {
-				return Outcome{ID: id}, errors.Join(ctx.Err(), err)
-			}
-			return Outcome{ID: id}, ctx.Err()
+			return q.closeForCtx(ctx, id)
+
 		case <-expire.C:
-			ended, err := q.end(ctx, id, "expired")
+			// A cancel landing in the same instant must not stop this write from completing, or the
+			// row is left pending after Ask has already returned.
+			ectx := context.WithoutCancel(ctx)
+			ended, err := q.end(ectx, id, "expired")
 			if err != nil || ended {
 				return Outcome{ID: id, By: ByTimeout}, err
 			}
 			// The user decided in the same instant, and was told it worked: that decision stands.
-			out, _, err := q.outcome(ctx, id)
+			out, _, err := q.outcome(ectx, id)
 			return out, err
+
 		case <-poll.C:
 			out, decided, err := q.outcome(ctx, id)
-			if err != nil || decided {
-				return out, err
+			if err == nil {
+				if decided {
+					return out, nil
+				}
+				continue
 			}
+			// The read failed. A ctx that is already gone is the same exit as above. Otherwise this
+			// was a transient failure with the agent still waiting: close the row so it cannot be
+			// decided out from under a call about to fail, unless the user's decision had already
+			// landed, in which case that decision wins instead of the read error.
+			if ctx.Err() != nil {
+				return q.closeForCtx(ctx, id)
+			}
+			fout, withdrawn, ferr := q.finish(ctx, id)
+			if ferr != nil {
+				return fout, ferr
+			}
+			if withdrawn {
+				return fout, err
+			}
+			return fout, nil
 		}
 	}
+}
+
+// finish closes id as withdrawn if it is still pending, using a context immune to ctx's cancellation,
+// and reports whether it did. If the approval had already been decided or had expired, it reads back
+// that outcome instead of overwriting it.
+func (q *Queue) finish(ctx context.Context, id int64) (out Outcome, withdrawn bool, err error) {
+	ctx = context.WithoutCancel(ctx)
+	ended, err := q.end(ctx, id, "withdrawn")
+	if err != nil {
+		return Outcome{ID: id}, false, err
+	}
+	if ended {
+		return Outcome{ID: id}, true, nil
+	}
+	out, _, err = q.outcome(ctx, id)
+	return out, false, err
+}
+
+// closeForCtx withdraws id, or reports the decision that beat it there, and returns ctx's own error.
+// It is used by the two exits from Ask's loop that end because ctx did.
+func (q *Queue) closeForCtx(ctx context.Context, id int64) (Outcome, error) {
+	out, _, err := q.finish(ctx, id)
+	if err != nil {
+		return out, errors.Join(ctx.Err(), err)
+	}
+	return out, ctx.Err()
 }
 
 // Decide records the user's verdict on a pending approval. ApproveSession also lets every later call
@@ -128,8 +176,8 @@ func (q *Queue) Decide(ctx context.Context, id int64, v Verdict) error {
 	default:
 		return fmt.Errorf("decide approval %d: unknown verdict %q", id, v)
 	}
-	now := q.now().UnixMilli()
 	return store.Immediate(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
+		now := q.now().UnixMilli()
 		res, err := conn.ExecContext(ctx, `UPDATE approvals SET state = ?, decided_ms = ?
 			WHERE id = ? AND state = 'pending' AND deadline_ms > ?`, state, now, id, now)
 		if err != nil {
