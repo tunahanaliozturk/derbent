@@ -63,8 +63,9 @@ authentication: any process running as the user could claim any name (see Securi
 
 ## Config
 
-TOML at `%APPDATA%\portcullis\config.toml` on Windows and `$XDG_CONFIG_HOME/portcullis/config.toml`
-elsewhere, decoded strictly: an unknown key is an error with its line number. `portcullis config check`
+TOML in the user config directory (`%APPDATA%\portcullis\config.toml` on Windows,
+`$XDG_CONFIG_HOME/portcullis/config.toml` on Linux), decoded strictly: an unknown key is an error that names
+the key, and a syntax error names its line. `portcullis config check`
 validates it and starts each downstream server once to list its tools.
 
 ```toml
@@ -127,7 +128,8 @@ Memory tools:
 | `memory_search` | query, limit, optional `all_projects` | id, title, snippet, author, time |
 | `memory_read` | id | the full entry |
 
-Entries belong to a project and record the agent that wrote them and the receipt of the write.
+Entries belong to a project and record the agent and the gate session that wrote them, which ties them to
+that session's receipts.
 Superseded entries drop out of search results but stay readable by id. Search is SQLite FTS5 ranked by
 bm25 (ADR 0007).
 
@@ -246,7 +248,7 @@ portcullis/
 ├── internal/tui/                 Bubble Tea UI
 ├── testdata/                     golden files, fuzz corpus, echo server
 ├── docs/adr/  docs/benchmark-results/  docs/design.md
-├── .golangci.yml  go.mod  go.sum  Makefile
+├── .golangci.yml  go.mod  go.sum
 └── README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md  LICENSE
 ```
 
