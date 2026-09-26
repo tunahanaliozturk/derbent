@@ -58,6 +58,7 @@ func TestParseRejectsBadServers(t *testing.T) {
 		"plain http to a remote":  {"[servers.a]\nurl = \"http://mcp.example.com\"\n", "https"},
 		"headers on a command":    {"[servers.a]\ncommand = [\"x\"]\nheaders = { A = \"b\" }\n", "headers"},
 		"env on a url":            {"[servers.a]\nurl = \"https://a.example\"\nenv = { A = \"b\" }\n", "env"},
+		"env reference in a url":  {"[servers.a]\nurl = \"https://a.example/mcp?key=${env:PORTCULLIS_TEST_TOKEN}\"\n", "headers"},
 		"underscore in name":      {"[servers.git_hub]\ncommand = [\"x\"]\n", "git_hub"},
 		"reserved name":           {"[servers.native]\ncommand = [\"x\"]\n", "reserved"},
 		"bad redact pattern":      {"[receipts]\nredact = ['(']\n", "redact"},

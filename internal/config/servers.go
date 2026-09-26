@@ -57,12 +57,14 @@ func servers(files map[string]serverFile) ([]Server, []string, error) {
 		if f.URL != "" && len(f.Env) > 0 {
 			return nil, nil, fmt.Errorf("server %s: env applies only to a command server", name)
 		}
-		s := Server{Name: name}
+		// HTTP errors quote the url, and they reach stderr and the agent, so a value resolved into
+		// the url would not stay secret. Headers never appear in errors.
+		if envRef.MatchString(f.URL) {
+			return nil, nil, fmt.Errorf("server %s: url cannot use ${env:...}; send secrets in headers", name)
+		}
+		s := Server{Name: name, URL: f.URL}
 		var err error
 		if s.Command, err = expandAll(name, f.Command); err != nil {
-			return nil, nil, err
-		}
-		if s.URL, err = expand(name, f.URL, nil); err != nil {
 			return nil, nil, err
 		}
 		if s.URL != "" {
