@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -53,6 +54,43 @@ func TestProjectKeyAcceptsWorktreeGitFile(t *testing.T) {
 	}
 	if got, want := mustKey(t, filepath.Join(wt, "cmd")), mustKey(t, wt); got != want {
 		t.Fatalf("key %q, want %q", got, want)
+	}
+}
+
+// Agents often work in linked worktrees of one repository. They must share one project key, or a note
+// written in one worktree is invisible from the others.
+func TestProjectKeyJoinsLinkedWorktrees(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	base := t.TempDir()
+	repo := filepath.Join(base, "shop")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), git, append([]string{"-c", "commit.gpgsign=false"}, args...)...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	sibling := filepath.Join(base, "shop-feature")
+	nested := filepath.Join(repo, ".claude", "worktrees", "agent1")
+	runGit("init", "-q")
+	runGit("commit", "-q", "--allow-empty", "-m", "start")
+	runGit("worktree", "add", "-q", sibling)
+	runGit("worktree", "add", "-q", nested)
+
+	want := mustKey(t, repo)
+	for name, dir := range map[string]string{"sibling worktree": sibling, "worktree inside the repository": nested} {
+		if got := mustKey(t, dir); got != want {
+			t.Errorf("%s: key %q, want %q", name, got, want)
+		}
 	}
 }
 
