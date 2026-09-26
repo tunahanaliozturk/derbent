@@ -186,6 +186,9 @@ func (m *Manager) supervise(ctx context.Context, s Spec) {
 				cs.Close()
 			}
 		}
+		up := err == nil && m.setSession(s.Name, cs)
+		// The first attempt counts as finished only once its session is recorded, so a call made as
+		// soon as Started closes finds the server.
 		if first {
 			if m.remaining.Add(-1) == 0 {
 				close(m.started)
@@ -193,7 +196,7 @@ func (m *Manager) supervise(ctx context.Context, s Spec) {
 			first = false
 		}
 		switch {
-		case err == nil && m.setSession(s.Name, cs):
+		case up:
 			waitErr := cs.Wait()
 			m.clearSession(s.Name, cs)
 			// A session whose server has gone still holds a goroutine for its notification
