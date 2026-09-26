@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tunahanaliozturk/portcullis/internal/config"
+	"github.com/tunahanaliozturk/portcullis/internal/downstream"
 	"github.com/tunahanaliozturk/portcullis/internal/gate"
 	"github.com/tunahanaliozturk/portcullis/internal/memory"
 	"github.com/tunahanaliozturk/portcullis/internal/receipt"
@@ -63,12 +64,28 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	g := &gate.Gate{
 		Agent: *agent, Project: project, Session: session, Version: version,
 		Rules: cfg.Rules, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
+		Redact: cfg.Redact.JSON,
+	}
+	srv := g.Server()
+	if len(cfg.Servers) > 0 {
+		mgr := downstream.New(specsOf(cfg.Servers), g.SyncTools, downstream.Options{Version: version, Stderr: stderr})
+		g.Forward = mgr.Call
+		mgr.Start(ctx)
+		defer mgr.Close()
 	}
 	transport := &mcp.IOTransport{Reader: io.NopCloser(stdin), Writer: nopWriteCloser{stdout}}
-	if err := g.Server().Run(ctx, transport); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
+	if err := srv.Run(ctx, transport); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
+}
+
+func specsOf(servers []config.Server) []downstream.Spec {
+	specs := make([]downstream.Spec, 0, len(servers))
+	for _, s := range servers {
+		specs = append(specs, downstream.Spec{Name: s.Name, Command: s.Command, Env: s.Env, URL: s.URL, Headers: s.Headers})
+	}
+	return specs
 }
 
 type nopWriteCloser struct{ io.Writer }

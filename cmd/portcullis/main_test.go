@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,13 +18,62 @@ import (
 	"github.com/tunahanaliozturk/portcullis/internal/store"
 )
 
-// TestMain lets the end-to-end tests start this test binary as the portcullis command.
+// TestMain lets the end-to-end tests start this test binary as the portcullis command, or as a small
+// MCP server standing in for a user's downstream server.
 func TestMain(m *testing.M) {
-	if os.Getenv("PORTCULLIS_TEST_MAIN") == "1" {
+	switch {
+	case os.Getenv("PORTCULLIS_TEST_ECHO") == "1":
+		serveEcho()
+	case os.Getenv("PORTCULLIS_TEST_MAIN") == "1":
 		main()
 		os.Exit(0)
+	default:
+		os.Exit(m.Run())
 	}
-	os.Exit(m.Run())
+}
+
+type echoIn struct {
+	Text string `json:"text"`
+}
+
+func serveEcho() {
+	s := mcp.NewServer(&mcp.Implementation{Name: "echo", Version: "0"}, nil)
+	mcp.AddTool(s, &mcp.Tool{Name: "echo"}, func(_ context.Context, _ *mcp.CallToolRequest, in echoIn) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "echo:" + in.Text}}}, nil, nil
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "secret_tool"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return nil, nil, nil
+	})
+	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+// writeConfig writes a config with the echo stand-in as a downstream server and returns its path.
+func writeConfig(t *testing.T, dir string) string {
+	t.Helper()
+	cfg := `
+[servers.echo]
+command = ['` + os.Args[0] + `', '-test.run=^$']
+env     = { PORTCULLIS_TEST_ECHO = "1" }
+
+[receipts]
+redact = ['ghp_[A-Za-z0-9]{36}']
+
+[[rule]]
+agent  = "codex"
+tool   = "echo__secret_tool"
+action = "deny"
+
+[[rule]]
+action = "allow"
+`
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestRunVersion(t *testing.T) {
@@ -58,17 +109,17 @@ func TestMCPNeedsAValidAgent(t *testing.T) {
 	}
 }
 
-func gateCommand(t *testing.T, dir, agent string) *exec.Cmd {
+func gateCommand(t *testing.T, dir, agent, configPath string) *exec.Cmd {
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "mcp", "--agent", agent,
-		"--db", filepath.Join(dir, "p.db"), "--config", filepath.Join(dir, "absent.toml"), "--project", dir)
+		"--db", filepath.Join(dir, "p.db"), "--config", configPath, "--project", dir)
 	cmd.Env = append(os.Environ(), "PORTCULLIS_TEST_MAIN=1")
 	return cmd
 }
 
-func connectProcess(t *testing.T, dir, agent string) *mcp.ClientSession {
+func connectProcess(t *testing.T, dir, agent, configPath string) *mcp.ClientSession {
 	t.Helper()
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "0"}, nil).
-		Connect(t.Context(), &mcp.CommandTransport{Command: gateCommand(t, dir, agent)}, nil)
+		Connect(t.Context(), &mcp.CommandTransport{Command: gateCommand(t, dir, agent, configPath)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +139,7 @@ func resultText(res *mcp.CallToolResult) string {
 func TestTwoAgentProcessesShareMemory(t *testing.T) {
 	dir := t.TempDir()
 
-	claude := connectProcess(t, dir, "claude")
+	claude := connectProcess(t, dir, "claude", filepath.Join(dir, "absent.toml"))
 	res, err := claude.CallTool(t.Context(), &mcp.CallToolParams{Name: "memory_write", Arguments: map[string]any{
 		"title": "Retry policy", "body": "Payment calls retry three times with jitter.",
 	}})
@@ -99,7 +150,7 @@ func TestTwoAgentProcessesShareMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	codex := connectProcess(t, dir, "codex")
+	codex := connectProcess(t, dir, "codex", filepath.Join(dir, "absent.toml"))
 	res, err = codex.CallTool(t.Context(), &mcp.CallToolParams{Name: "memory_search", Arguments: map[string]any{"query": "jitter"}})
 	if err != nil || res.IsError {
 		t.Fatalf("search: err %v, result %q", err, resultText(res))
@@ -178,5 +229,71 @@ func TestVerifyReportsABrokenChain(t *testing.T) {
 	err = run(t.Context(), []string{"verify", "--db", path}, strings.NewReader(""), &out, io.Discard)
 	if !errors.Is(err, errChainBroken) || !strings.Contains(err.Error(), "receipt 2") {
 		t.Fatalf("err = %v, want a broken chain at receipt 2", err)
+	}
+}
+
+func TestDownstreamServerThroughARealGate(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir)
+
+	codex := connectProcess(t, dir, "codex", cfg)
+	tools, err := codex.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
+	}
+	if !slices.Contains(names, "echo__echo") || slices.Contains(names, "echo__secret_tool") {
+		t.Fatalf("tools = %v, want echo__echo listed and echo__secret_tool hidden from codex", names)
+	}
+	token := "ghp_" + strings.Repeat("Q", 36)
+	res, err := codex.CallTool(t.Context(), &mcp.CallToolParams{Name: "echo__echo", Arguments: map[string]any{"text": token}})
+	if err != nil || res.IsError || resultText(res) != "echo:"+token {
+		t.Fatalf("echo: err %v, result %q", err, resultText(res))
+	}
+	if err = codex.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := store.OpenExisting(t.Context(), filepath.Join(dir, "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var args string
+	if err = db.QueryRowContext(t.Context(), `SELECT args FROM receipts WHERE tool = 'echo__echo'`).Scan(&args); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(args, token) || !strings.Contains(args, "[redacted]") {
+		t.Fatalf("stored args = %s, want the token masked", args)
+	}
+}
+
+func TestConfigCheckListsServerTools(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	if err := run(t.Context(), []string{"config", "check", "--config", writeConfig(t, dir)}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatalf("config check: %v\n%s", err, out.String())
+	}
+	for _, want := range []string{"rules: 2", "server echo: 2 tools", "echo__echo", "echo__secret_tool"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestConfigCheckFailsForAServerThatDoesNotStart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	cfg := "[servers.ghost]\ncommand = ['portcullis-test-no-such-command']\n\n[[rule]]\naction = \"allow\"\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := run(t.Context(), []string{"config", "check", "--config", path}, strings.NewReader(""), &out, io.Discard)
+	if !errors.Is(err, errCheckFailed) || !strings.Contains(out.String(), "server ghost: not running") {
+		t.Fatalf("err = %v, output:\n%s", err, out.String())
 	}
 }

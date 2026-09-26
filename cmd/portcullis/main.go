@@ -14,7 +14,7 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-var errUsage = errors.New("usage: portcullis mcp --agent <name> | portcullis verify | portcullis version")
+var errUsage = errors.New("usage: portcullis mcp --agent <name> | portcullis verify | portcullis config check | portcullis version")
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -35,6 +35,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runMCP(ctx, args[1:], stdin, stdout, stderr)
 	case "verify":
 		return runVerify(ctx, args[1:], stdout, stderr)
+	case "config":
+		if len(args) < 2 || args[1] != "check" {
+			return fmt.Errorf("unknown config command: %w", errUsage)
+		}
+		return runConfigCheck(ctx, args[2:], stdout, stderr)
 	case "version":
 		_, err := fmt.Fprintln(stdout, version)
 		return err
