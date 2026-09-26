@@ -6,8 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
@@ -47,6 +51,9 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("receipts: unexpected argument %q: filters are flags, such as --agent codex", flags.Arg(0))
+	}
 	var err error
 	if f.Since, err = parseSince(*since, time.Now()); err != nil {
 		return err
@@ -83,9 +90,22 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	fmt.Fprintln(w, "SEQ\tTIME\tAGENT\tTOOL\tDECISION\tBY\tOUTCOME\tMS")
 	for _, r := range list {
 		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", r.Seq, r.At.Local().Format("2006-01-02 15:04:05"),
-			r.Agent, r.Tool, r.Decision, r.DecidedBy, r.Outcome, r.Duration.Milliseconds())
+			printable(r.Agent), printable(r.Tool), printable(r.Decision), printable(r.DecidedBy), printable(r.Outcome),
+			r.Duration.Milliseconds())
 	}
 	return w.Flush()
+}
+
+// printable returns s as it is, or quoted with Go escapes when it holds a control character, a
+// bidirectional override or bytes that are not UTF-8. Stored text can come from an agent (a call to an
+// unknown tool is recorded under the name the agent sent), and it must not add rows, move the cursor
+// or send an escape sequence to the user's terminal.
+func printable(s string) string {
+	needsEscape := func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) }
+	if strings.ContainsFunc(s, needsEscape) || !utf8.ValidString(s) {
+		return strconv.Quote(s)
+	}
+	return s
 }
 
 // parseSince reads --since as a duration back from now or as an RFC 3339 time. Empty means no bound.

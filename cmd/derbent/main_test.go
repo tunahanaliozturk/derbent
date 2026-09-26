@@ -406,54 +406,108 @@ type called struct {
 	err error
 }
 
-// The design's evidence for approvals: a gate process waits on ask, a second process approves, and the
-// call goes through.
-func TestApprovalFromAnotherProcess(t *testing.T) {
+// askedEcho starts a gate whose rules ask before echo__echo, calls the tool in the background and waits
+// until the call is pending. It returns the database path, the pending approval and the call's result.
+func askedEcho(t *testing.T) (string, approval.Pending, <-chan called) {
+	t.Helper()
 	dir := t.TempDir()
 	codex := connectProcess(t, dir, "codex", writeAskConfig(t, dir, "30s"))
-	defer codex.Close()
+	t.Cleanup(func() { codex.Close() })
 	done := make(chan called, 1)
 	go func() {
 		res, err := codex.CallTool(t.Context(), &mcp.CallToolParams{Name: "echo__echo", Arguments: map[string]any{"text": "hi"}})
 		done <- called{res, err}
 	}()
 
-	db, err := store.Open(t.Context(), filepath.Join(dir, "p.db"))
+	path := filepath.Join(dir, "p.db")
+	db, err := store.Open(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 	q := approval.NewQueue(db)
-	var id int64
-	for deadline := time.Now().Add(10 * time.Second); id == 0; time.Sleep(20 * time.Millisecond) {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		var pending []approval.Pending
 		if pending, err = q.Pending(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		if len(pending) > 0 {
-			id = pending[0].ID
-		} else if time.Now().After(deadline) {
-			t.Fatal("the gate never asked")
+			return path, pending[0], done
 		}
 	}
-	var out bytes.Buffer
-	if err = run(t.Context(), []string{"approve", "--db", filepath.Join(dir, "p.db"), fmt.Sprint(id)}, strings.NewReader(""), &out, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), fmt.Sprintf("approved %d", id)) {
-		t.Fatalf("approve output: %q", out.String())
-	}
+	t.Fatal("the gate never asked")
+	return "", approval.Pending{}, nil
+}
+
+// callResult waits for the background call to come back and fails the test if it does not.
+func callResult(t *testing.T, done <-chan called) *mcp.CallToolResult {
+	t.Helper()
 	select {
 	case c := <-done:
-		if c.err != nil || c.res.IsError || resultText(c.res) != "echo:hi" {
-			t.Fatalf("call: err %v, result %q", c.err, resultText(c.res))
+		if c.err != nil {
+			t.Fatalf("call: %v", c.err)
 		}
+		return c.res
 	case <-time.After(15 * time.Second):
-		t.Fatal("the approved call did not return")
+		t.Fatal("the decided call did not return")
+		return nil
 	}
-	err = run(t.Context(), []string{"deny", "--db", filepath.Join(dir, "p.db"), fmt.Sprint(id)}, strings.NewReader(""), io.Discard, io.Discard)
+}
+
+// The design's evidence for approvals: a gate process waits on ask, a second process approves, and the
+// call goes through.
+func TestApprovalFromAnotherProcess(t *testing.T) {
+	path, p, done := askedEcho(t)
+	var out bytes.Buffer
+	if err := run(t.Context(), []string{"approve", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), fmt.Sprintf("approved %d", p.ID)) {
+		t.Fatalf("approve output: %q", out.String())
+	}
+	if res := callResult(t, done); res.IsError || resultText(res) != "echo:hi" {
+		t.Fatalf("call result %q", resultText(res))
+	}
+	err := run(t.Context(), []string{"deny", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "not pending") {
 		t.Fatalf("deciding twice: err = %v", err)
+	}
+}
+
+func TestApproveForTheSessionLeavesAGrant(t *testing.T) {
+	path, p, done := askedEcho(t)
+	var out bytes.Buffer
+	if err := run(t.Context(), []string{"approve", "--session", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("approved for the rest of the session: %d", p.ID); !strings.Contains(out.String(), want) {
+		t.Fatalf("approve output %q lacks %q", out.String(), want)
+	}
+	if res := callResult(t, done); res.IsError || resultText(res) != "echo:hi" {
+		t.Fatalf("call result %q", resultText(res))
+	}
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	id, granted, err := approval.NewQueue(db).Granted(t.Context(), "codex", p.Session, "echo__echo")
+	if err != nil || !granted || id != p.ID {
+		t.Fatalf("Granted = %d, %v, %v; want %d, true", id, granted, err, p.ID)
+	}
+}
+
+func TestDenyRefusesTheWaitingCall(t *testing.T) {
+	path, p, done := askedEcho(t)
+	var out bytes.Buffer
+	if err := run(t.Context(), []string{"deny", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), fmt.Sprintf("denied %d", p.ID)) {
+		t.Fatalf("deny output: %q", out.String())
+	}
+	if res := callResult(t, done); !res.IsError || !strings.Contains(resultText(res), "the user denied echo__echo") {
+		t.Fatalf("call result %q, IsError %v", resultText(res), res.IsError)
 	}
 }
 
@@ -472,6 +526,53 @@ func TestApproveNeedsANumber(t *testing.T) {
 		if err := run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err == nil {
 			t.Errorf("run %v succeeded", args)
 		}
+	}
+	err := run(t.Context(), []string{"approve", "5", "--session"}, strings.NewReader(""), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "before the id") {
+		t.Fatalf("a flag after the id: err = %v, want one saying flags go before the id", err)
+	}
+}
+
+func TestDecidingNeedsAnExistingDatabase(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "typo")
+	path := filepath.Join(dir, "p.db")
+	for _, command := range []string{"approve", "deny"} {
+		err := run(t.Context(), []string{command, "--db", path, "5"}, strings.NewReader(""), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), path) {
+			t.Errorf("%s: err = %v, want an error naming %s", command, err, path)
+		}
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deciding created %s", dir)
+	}
+}
+
+// Tool names are stored as the agent sent them, so the table must not hand an agent's control
+// characters to the user's terminal: no fake rows, no escape sequences, no reordered text.
+func TestReceiptsTableEscapesStoredText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = receipt.NewLog(db).Append(t.Context(), receipt.Receipt{
+		Project: "p", Agent: "codex", Session: "s", Tool: "evil\n\x1b]52;c;ZXZpbA==\x07\u202e",
+		Args: "{}", Decision: "deny", DecidedBy: "rule:2", Outcome: "refused",
+	})
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var table bytes.Buffer
+	if err = run(t.Context(), []string{"receipts", "--db", path}, strings.NewReader(""), &table, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	out := table.String()
+	if strings.ContainsAny(out, "\x1b\a\u202e") || strings.Count(out, "\n") != 2 {
+		t.Fatalf("raw control characters reached the table:\n%q", out)
+	}
+	if want := `"evil\n\x1b]52;c;ZXZpbA==\a\u202e"`; !strings.Contains(out, want) {
+		t.Fatalf("table lacks the quoted tool name %s:\n%q", want, out)
 	}
 }
 
@@ -513,5 +614,14 @@ func TestReceiptsCommand(t *testing.T) {
 
 	if err = run(t.Context(), []string{"receipts", "--db", path, "--since", "yesterday-ish"}, strings.NewReader(""), io.Discard, io.Discard); err == nil {
 		t.Fatal("a bad --since was accepted")
+	}
+
+	// The flag package stops at the first word that is not a flag, so a stray word would silently drop
+	// every flag after it.
+	for _, args := range [][]string{{"receipts", "--db", path, "codex", "--json"}, {"verify", "--db", path, "extra"}} {
+		err = run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), `"`+args[3]+`"`) {
+			t.Errorf("run %v: err = %v, want one naming %q", args, err, args[3])
+		}
 	}
 }

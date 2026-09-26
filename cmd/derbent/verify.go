@@ -24,6 +24,9 @@ func runVerify(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if err = flags.Parse(args); err != nil {
 		return err
 	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("verify: unexpected argument %q", flags.Arg(0))
+	}
 	path := *dbPath
 	if path == "" {
 		if path, err = config.DefaultDBPath(); err != nil {

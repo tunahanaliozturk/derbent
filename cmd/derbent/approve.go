@@ -6,9 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
+	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
 // runDecide approves or denies one pending approval, as the UI's a, A and d keys do.
@@ -22,6 +26,9 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	}
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if flags.NArg() > 1 && strings.HasPrefix(flags.Arg(1), "-") {
+		return fmt.Errorf("%s: flags go before the id: move %s in front of %s", command, flags.Arg(1), flags.Arg(0))
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%s: give one approval id, as the UI shows it", command)
@@ -37,7 +44,18 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	case command == "approve":
 		verdict, done = approval.ApproveOnce, "approved"
 	}
-	db, err := openDB(ctx, *dbPath)
+	path := *dbPath
+	if path == "" {
+		if path, err = config.DefaultDBPath(); err != nil {
+			return err
+		}
+	}
+	// Deciding writes, but it must never create a database: a mistyped path would only ever say "not
+	// pending".
+	if _, err = os.Stat(path); errors.Is(err, os.ErrNotExist) { //nolint:gosec // the path is the user's own --db or default database
+		return fmt.Errorf("%s: there is no database at %s", command, path)
+	}
+	db, err := store.Open(ctx, path)
 	if err != nil {
 		return err
 	}
