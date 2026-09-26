@@ -32,14 +32,15 @@ func TestDecide(t *testing.T) {
 		args        map[string]any
 		want        rule.Decision
 	}{
-		"memory tool for anyone":            {"claude", "memory_write", nil, decided(rule.Allow, 1)},
-		"copilot on github is denied":       {"copilot", "github__create_issue", nil, decided(rule.Deny, 2)},
-		"claude on github falls through":    {"claude", "github__create_issue", nil, decided(rule.Allow, 4)},
-		"push is denied":                    {"codex", "native__Bash", map[string]any{"command": "git push origin main"}, decided(rule.Deny, 3)},
-		"star spans newlines":               {"codex", "native__Bash", map[string]any{"command": "git push origin\nmain --force"}, decided(rule.Deny, 3)},
-		"other commands pass":               {"codex", "native__Bash", map[string]any{"command": "go test ./..."}, decided(rule.Allow, 4)},
-		"non-string argument never matches": {"codex", "native__Bash", map[string]any{"command": 42}, decided(rule.Allow, 4)},
-		"missing argument never matches":    {"codex", "native__Bash", nil, decided(rule.Allow, 4)},
+		"memory tool for anyone":             {"claude", "memory_write", nil, decided(rule.Allow, 1)},
+		"copilot on github is denied":        {"copilot", "github__create_issue", nil, decided(rule.Deny, 2)},
+		"claude on github falls through":     {"claude", "github__create_issue", nil, decided(rule.Allow, 4)},
+		"push is denied":                     {"codex", "native__Bash", map[string]any{"command": "git push origin main"}, decided(rule.Deny, 3)},
+		"star spans newlines":                {"codex", "native__Bash", map[string]any{"command": "git push origin\nmain --force"}, decided(rule.Deny, 3)},
+		"other commands pass":                {"codex", "native__Bash", map[string]any{"command": "go test ./..."}, decided(rule.Allow, 4)},
+		"non-string argument matches a deny": {"codex", "native__Bash", map[string]any{"command": []any{"git", "push"}}, decided(rule.Deny, 3)},
+		"null argument matches a deny":       {"codex", "native__Bash", map[string]any{"command": nil}, decided(rule.Deny, 3)},
+		"missing argument never matches":     {"codex", "native__Bash", nil, decided(rule.Allow, 4)},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -47,6 +48,23 @@ func TestDecide(t *testing.T) {
 				t.Fatalf("Decide = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNonStringArgumentNeverMatchesAnAllow(t *testing.T) {
+	set := mustCompile(t,
+		rule.Spec{Tool: "memory_search", Args: map[string]string{"query": "public*"}, Action: rule.Allow},
+		rule.Spec{Tool: "memory_search", Action: rule.Deny},
+		rule.Spec{Action: rule.Allow},
+	)
+	if got := set.Decide("claude", "memory_search", map[string]any{"query": 42}); got != decided(rule.Deny, 2) {
+		t.Fatalf("Decide = %+v, want the allow skipped and the deny to decide", got)
+	}
+}
+
+func TestLen(t *testing.T) {
+	if n := mustCompile(t, rule.Spec{Tool: "x", Action: rule.Deny}, rule.Spec{Action: rule.Allow}).Len(); n != 2 {
+		t.Fatalf("Len = %d, want 2", n)
 	}
 }
 

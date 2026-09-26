@@ -25,6 +25,11 @@ match the agent and the tool in order, a `deny` with an `args` condition only re
 passed over, the first `allow` (with or without `args`) keeps the tool listed, and a plain `deny`
 hides it.
 
+An `args` condition compares its pattern with a string argument. When the argument is present but not
+a string (a number, an array, an object or null), the pattern cannot read it: the condition then
+matches a `deny` and never an `allow`, so `{"command": ["git", "push"]}` is refused by a `git push*`
+deny and is not let through by an allow written for strings. A missing argument matches neither.
+
 Agent patterns may only hold the characters an agent name can have, plus the wildcards. A rule for
 `Copilot` is refused when the config loads, because agent names are lower-case and it would otherwise
 never match anything.

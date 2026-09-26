@@ -82,6 +82,11 @@ func Compile(specs []Spec) (Set, error) {
 	return set, nil
 }
 
+// Len is the number of rules in the set.
+func (s Set) Len() int {
+	return len(s.rules)
+}
+
 // Decide returns the decision of the first rule matching the call. args holds the call's arguments
 // decoded as a JSON object, or nil when there are none.
 func (s Set) Decide(agent, tool string, args map[string]any) Decision {
@@ -114,10 +119,24 @@ func (s Set) Hidden(agent, tool string) bool {
 	return true
 }
 
+// argsMatch checks every args condition of the rule against the call. A condition matches a string
+// value through its pattern. A value the pattern cannot read (a number, an array, an object, null)
+// matches a deny and never an allow, so an args condition never lets through what it cannot check. A
+// missing argument matches neither.
 func (c compiled) argsMatch(args map[string]any) bool {
 	for name, g := range c.args {
-		v, ok := args[name].(string)
-		if !ok || !g.match(v) {
+		v, present := args[name]
+		if !present {
+			return false
+		}
+		s, isString := v.(string)
+		if !isString {
+			if c.action == Deny {
+				continue
+			}
+			return false
+		}
+		if !g.match(s) {
 			return false
 		}
 	}
