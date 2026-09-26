@@ -13,3 +13,9 @@ func SwitchOffHiding(t testing.TB) {
 	knobs.skipHiding = true
 	t.Cleanup(func() { knobs.skipHiding = false })
 }
+
+// SwitchOffRedaction stores arguments unmasked for the rest of the test.
+func SwitchOffRedaction(t testing.TB) {
+	knobs.skipRedaction = true
+	t.Cleanup(func() { knobs.skipRedaction = false })
+}

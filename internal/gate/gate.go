@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,13 +30,22 @@ type Gate struct {
 	Rules    rule.Set
 	Memory   *memory.Store
 	Receipts *receipt.Log
+	// Forward sends a call to a downstream server. It may be nil when no servers are configured.
+	Forward func(ctx context.Context, server, tool string, args json.RawMessage) (*mcp.CallToolResult, error)
+	// Redact masks secrets in arguments before they are stored in a receipt. Nil stores them as they are.
+	Redact func(string) string
+
+	server *mcp.Server
+	mu     sync.Mutex
+	owners map[string]string // gate tool name to the downstream server it belongs to
 }
 
 // knobs switch safety checks off. Only tests set them, through export_test.go, to prove that the
 // tests of those checks can fail.
 var knobs struct {
-	skipRules  bool
-	skipHiding bool
+	skipRules     bool
+	skipHiding    bool
+	skipRedaction bool
 }
 
 const instructions = "Portcullis gates this session's tools. memory_write, memory_search and memory_read " +
@@ -45,6 +55,7 @@ const instructions = "Portcullis gates this session's tools. memory_write, memor
 func (g *Gate) Server() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "portcullis", Version: g.Version},
 		&mcp.ServerOptions{Instructions: instructions})
+	g.server = s
 	g.addMemoryTools(s)
 	s.AddReceivingMiddleware(g.gateCalls)
 	return s
@@ -72,7 +83,7 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 	}
 	rec := receipt.Receipt{
 		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name,
-		Args: argsJSON, ArgsSHA256: sha256Hex(req.Params.Arguments),
+		Args: g.redact(argsJSON), ArgsSHA256: sha256Hex(req.Params.Arguments),
 		Decision: string(decision.Action), DecidedBy: "rule:" + strconv.Itoa(decision.Rule),
 	}
 	var (
@@ -106,6 +117,13 @@ func unrecorded(tool, outcome string, err error) error {
 	}
 	return fmt.Errorf("portcullis: %s ran (outcome %s) but could not be recorded; do not repeat it without checking its effect: %w",
 		tool, outcome, err)
+}
+
+func (g *Gate) redact(args string) string {
+	if g.Redact == nil || knobs.skipRedaction {
+		return args
+	}
+	return g.Redact(args)
 }
 
 // decodeArgs returns the arguments as a map for the rules, or nil when they are not a JSON object, and
