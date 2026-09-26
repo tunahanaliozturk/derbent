@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/rule"
@@ -85,5 +86,29 @@ func TestDefaultDBPathFollowsEnvironment(t *testing.T) {
 	}
 	if want := filepath.Join(dir, "derbent", "derbent.db"); got != want {
 		t.Fatalf("DefaultDBPath = %q, want %q", got, want)
+	}
+}
+
+func TestApprovalTimeout(t *testing.T) {
+	const rules = "\n[[rule]]\naction = \"ask\"\n"
+	cfg, err := config.Parse("t.toml", rules)
+	if err != nil || cfg.ApprovalTimeout != config.DefaultApprovalTimeout {
+		t.Fatalf("default: %v, %v", cfg.ApprovalTimeout, err)
+	}
+	if config.DefaultApprovalTimeout != 50*time.Second {
+		t.Fatalf("DefaultApprovalTimeout = %v, the design says 50s", config.DefaultApprovalTimeout)
+	}
+	if got := config.Default().ApprovalTimeout; got != config.DefaultApprovalTimeout {
+		t.Fatalf("Default().ApprovalTimeout = %v", got)
+	}
+	cfg, err = config.Parse("t.toml", "[approvals]\ntimeout = \"90s\"\n"+rules)
+	if err != nil || cfg.ApprovalTimeout != 90*time.Second {
+		t.Fatalf("90s: %v, %v", cfg.ApprovalTimeout, err)
+	}
+	for _, bad := range []string{"soon", "500ms", "-5s", "0s"} {
+		_, err := config.Parse("t.toml", "[approvals]\ntimeout = \""+bad+"\"\n"+rules)
+		if err == nil || !strings.Contains(err.Error(), "approvals.timeout") {
+			t.Errorf("timeout %q: err = %v, want an approvals.timeout error", bad, err)
+		}
 	}
 }
