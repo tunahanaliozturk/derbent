@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -33,6 +35,20 @@ func TestOpenCreatesDirectoryAndSchema(t *testing.T) {
 	var mode string
 	if err := db.QueryRowContext(t.Context(), `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
 		t.Fatalf("journal_mode = %q, err %v", mode, err)
+	}
+}
+
+// A path is a path, not a URI: # and % must not cut it short or be decoded.
+func TestOpenKeepsPathCharactersThatURIsTreatSpecially(t *testing.T) {
+	for _, dir := range []string{"a#b", "c%41d", "e?f=g"} {
+		if runtime.GOOS == "windows" && strings.Contains(dir, "?") {
+			continue // not a legal file name character on Windows
+		}
+		path := filepath.Join(t.TempDir(), dir, "p.db")
+		open(t, path)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s: database not at %s: %v", dir, path, err)
+		}
 	}
 }
 

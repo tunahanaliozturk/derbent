@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
@@ -24,8 +25,8 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
-	dsn := "file:" + filepath.ToSlash(path) +
-		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
+	dsn := fileURI(path) +
+		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
@@ -35,6 +36,42 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
 	return db, nil
+}
+
+// OpenExisting opens the database at path for reading only. It never creates the file, never migrates
+// it, and refuses to run a statement that writes, so a copy kept as evidence stays byte for byte as it
+// was. A schema newer than this binary knows is refused.
+func OpenExisting(ctx context.Context, path string) (*sql.DB, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("open database %s: %w", path, err)
+	}
+	db, err := sql.Open("sqlite", fileURI(path)+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
+	if err != nil {
+		return nil, fmt.Errorf("open database %s: %w", path, err)
+	}
+	var version int
+	if err = db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open database %s: read schema version: %w", path, err)
+	}
+	names, err := fs.Glob(migrations, "migrations/*.sql")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("list migrations: %w", err)
+	}
+	if version > len(names) {
+		db.Close()
+		return nil, fmt.Errorf("open database %s: schema version %d is newer than this binary knows (%d): upgrade portcullis", path, version, len(names))
+	}
+	return db, nil
+}
+
+// uriEscaper escapes the characters that end or encode part of an SQLite file URI, so a directory
+// named "a#b" or "c%41d" is opened as written.
+var uriEscaper = strings.NewReplacer("%", "%25", "#", "%23", "?", "%3F")
+
+func fileURI(path string) string {
+	return "file:" + uriEscaper.Replace(filepath.ToSlash(path))
 }
 
 // Immediate runs fn inside BEGIN IMMEDIATE on a single connection. The write lock is taken before fn
@@ -74,6 +111,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		if current > len(names) {
 			return fmt.Errorf("schema version %d is newer than this binary knows (%d): upgrade portcullis", current, len(names))
+		}
+		if current == len(names) {
+			return nil
 		}
 		for _, name := range names[current:] {
 			script, err := migrations.ReadFile(name)

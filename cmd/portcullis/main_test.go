@@ -120,6 +120,44 @@ func TestTwoAgentProcessesShareMemory(t *testing.T) {
 	}
 }
 
+func TestVerifyDoesNotCreateADatabase(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "typo")
+	err := run(t.Context(), []string{"verify", "--db", filepath.Join(dir, "p.db")}, strings.NewReader(""), io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("verify of a missing database succeeded")
+	}
+	if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("verify created %s", dir)
+	}
+}
+
+// Verify is run on evidence, so it must read the database without writing a byte of it.
+func TestVerifyLeavesTheDatabaseUntouched(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = receipt.NewLog(db).Append(t.Context(), receipt.Receipt{Project: "p", Agent: "a", Session: "s", Tool: "t", Args: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = run(t.Context(), []string{"verify", "--db", path}, strings.NewReader(""), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("verify changed the database file")
+	}
+}
+
 func TestVerifyReportsABrokenChain(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
 	db, err := store.Open(t.Context(), path)

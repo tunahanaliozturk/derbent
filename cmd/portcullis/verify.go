@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/tunahanaliozturk/portcullis/internal/config"
 	"github.com/tunahanaliozturk/portcullis/internal/receipt"
+	"github.com/tunahanaliozturk/portcullis/internal/store"
 )
 
 var errChainBroken = errors.New("the receipt chain is broken")
@@ -18,10 +20,17 @@ func runVerify(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	flags := flag.NewFlagSet("verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	dbPath := flags.String("db", "", "database file (default: portcullis.db in the user state directory)")
-	if err := flags.Parse(args); err != nil {
+	var err error
+	if err = flags.Parse(args); err != nil {
 		return err
 	}
-	db, err := openDB(ctx, *dbPath)
+	path := *dbPath
+	if path == "" {
+		if path, err = config.DefaultDBPath(); err != nil {
+			return err
+		}
+	}
+	db, err := store.OpenExisting(ctx, path)
 	if err != nil {
 		return err
 	}
