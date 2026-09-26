@@ -22,7 +22,7 @@ jobs:
           go-version-file: go.mod
       - name: Module is tidy
         shell: bash
-        run: go mod tidy && git diff --exit-code go.mod go.sum
+        run: go mod tidy && test -z "$(git status --porcelain -- go.mod go.sum)"
       - name: Vet
         run: go vet ./...
       - name: Test
