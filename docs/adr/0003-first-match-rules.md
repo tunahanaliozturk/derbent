@@ -30,6 +30,10 @@ a string (a number, an array, an object or null), the pattern cannot read it: th
 matches a `deny` and never an `allow`, so `{"command": ["git", "push"]}` is refused by a `git push*`
 deny and is not let through by an allow written for strings. A missing argument matches neither.
 
+An `ask` rule keeps its tool listed, since a call to it can be approved. An `args` condition that meets a
+value it cannot read matches an `ask` as well as a `deny`: the call goes to a person instead of falling
+through to a rule written for readable values.
+
 Agent patterns may only hold the characters an agent name can have, plus the wildcards. A rule for
 `Copilot` is refused when the config loads, because agent names are lower-case and it would otherwise
 never match anything.

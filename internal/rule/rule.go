@@ -12,10 +12,12 @@ import (
 // Action is what a rule does with a call it matches.
 type Action string
 
-// Actions a rule can take. Milestone 3 adds ask.
+// Actions a rule can take.
 const (
 	Allow Action = "allow"
 	Deny  Action = "deny"
+	// Ask holds the call until the user approves or denies it.
+	Ask Action = "ask"
 )
 
 // Spec is a rule as written in the config file. An empty pattern matches anything.
@@ -63,9 +65,9 @@ func Compile(specs []Spec) (Set, error) {
 	set := Set{rules: make([]compiled, 0, len(specs))}
 	for i, sp := range specs {
 		switch sp.Action {
-		case Allow, Deny:
+		case Allow, Deny, Ask:
 		default:
-			return Set{}, fmt.Errorf("%w: rule %d: action %q is not allow or deny", ErrInvalid, i+1, sp.Action)
+			return Set{}, fmt.Errorf("%w: rule %d: action %q is not allow, deny or ask", ErrInvalid, i+1, sp.Action)
 		}
 		if !agentPattern.MatchString(sp.Agent) {
 			return Set{}, fmt.Errorf("%w: rule %d: agent %q can never match: agent names are lower-case letters, digits, dashes and underscores", ErrInvalid, i+1, sp.Agent)
@@ -100,15 +102,15 @@ func (s Set) Decide(agent, tool string, args map[string]any) Decision {
 
 // Hidden reports whether tool should be left out of agent's tool list, which is when no call to it
 // can be allowed. Rules matching agent and tool are read in order: a deny with an args condition can
-// only refuse some calls, so it is passed over; the first allow, with or without args, means some
-// calls get through and the tool is listed; a plain deny means none do.
+// only refuse some calls, so it is passed over; the first allow or ask, with or without args, means
+// some calls can get through and the tool is listed; a plain deny means none do.
 func (s Set) Hidden(agent, tool string) bool {
 	for _, r := range s.rules {
 		if !r.agent.match(agent) || !r.tool.match(tool) {
 			continue
 		}
 		switch r.action {
-		case Allow:
+		case Allow, Ask:
 			return false
 		case Deny:
 			if len(r.args) == 0 {
@@ -121,8 +123,8 @@ func (s Set) Hidden(agent, tool string) bool {
 
 // argsMatch checks every args condition of the rule against the call. A condition matches a string
 // value through its pattern. A value the pattern cannot read (a number, an array, an object, null)
-// matches a deny and never an allow, so an args condition never lets through what it cannot check. A
-// missing argument matches neither.
+// matches a deny or an ask and never an allow, so an args condition never lets through what it cannot
+// check: the call is refused or a person looks at it. A missing argument matches neither.
 func (c compiled) argsMatch(args map[string]any) bool {
 	for name, g := range c.args {
 		v, present := args[name]
@@ -131,7 +133,7 @@ func (c compiled) argsMatch(args map[string]any) bool {
 		}
 		s, isString := v.(string)
 		if !isString {
-			if c.action == Deny {
+			if c.action != Allow {
 				continue
 			}
 			return false

@@ -133,12 +133,11 @@ func TestZeroSetDeniesAndHides(t *testing.T) {
 
 func TestCompileRejects(t *testing.T) {
 	tests := map[string][]rule.Spec{
-		"no rules":               nil,
-		"conditional last rule":  {{Tool: "x", Action: rule.Allow}},
-		"unknown action":         {{Action: "maybe"}},
-		"ask before milestone 3": {{Action: "ask"}},
-		"agent with upper case":  {{Agent: "Copilot", Action: rule.Deny}, {Action: rule.Allow}},
-		"agent with a space":     {{Agent: "claude code", Action: rule.Deny}, {Action: rule.Allow}},
+		"no rules":              nil,
+		"conditional last rule": {{Tool: "x", Action: rule.Allow}},
+		"unknown action":        {{Action: "maybe"}},
+		"agent with upper case": {{Agent: "Copilot", Action: rule.Deny}, {Action: rule.Allow}},
+		"agent with a space":    {{Agent: "claude code", Action: rule.Deny}, {Action: rule.Allow}},
 	}
 	for name, specs := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -146,5 +145,38 @@ func TestCompileRejects(t *testing.T) {
 				t.Fatalf("err = %v, want ErrInvalid", err)
 			}
 		})
+	}
+}
+
+func TestAsk(t *testing.T) {
+	set := mustCompile(t,
+		rule.Spec{Tool: "github__create_*", Action: rule.Ask},
+		rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push*"}, Action: rule.Ask},
+		rule.Spec{Tool: "github__*", Action: rule.Deny},
+		rule.Spec{Action: rule.Allow},
+	)
+	tests := map[string]struct {
+		tool string
+		args map[string]any
+		want rule.Decision
+	}{
+		"asked tool":                        {"github__create_issue", nil, decided(rule.Ask, 1)},
+		"asked command":                     {"native__Bash", map[string]any{"command": "git push origin main"}, decided(rule.Ask, 2)},
+		"unreadable value goes to a person": {"native__Bash", map[string]any{"command": []any{"git", "push"}}, decided(rule.Ask, 2)},
+		"other command passes":              {"native__Bash", map[string]any{"command": "go test ./..."}, decided(rule.Allow, 4)},
+		"other github tool is denied":       {"github__delete_repo", nil, decided(rule.Deny, 3)},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := set.Decide("codex", tc.tool, tc.args); got != tc.want {
+				t.Fatalf("Decide = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	if set.Hidden("codex", "github__create_issue") {
+		t.Fatal("a tool behind ask is hidden; the user could never approve it")
+	}
+	if !set.Hidden("codex", "github__delete_repo") {
+		t.Fatal("a tool only a plain deny matches is listed")
 	}
 }
