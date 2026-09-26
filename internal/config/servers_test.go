@@ -52,17 +52,18 @@ func TestParseRedactPatterns(t *testing.T) {
 
 func TestParseRejectsBadServers(t *testing.T) {
 	tests := map[string]struct{ toml, wantInError string }{
-		"missing variable":        {"[servers.a]\ncommand = [\"x\"]\nenv = { T = \"${env:PORTCULLIS_TEST_UNSET}\" }\n", "PORTCULLIS_TEST_UNSET"},
-		"both command and url":    {"[servers.a]\ncommand = [\"x\"]\nurl = \"https://a.example\"\n", "exactly one"},
-		"neither command nor url": {"[servers.a]\nenv = { A = \"b\" }\n", "exactly one"},
-		"plain http to a remote":  {"[servers.a]\nurl = \"http://mcp.example.com\"\n", "https"},
-		"headers on a command":    {"[servers.a]\ncommand = [\"x\"]\nheaders = { A = \"b\" }\n", "headers"},
-		"env on a url":            {"[servers.a]\nurl = \"https://a.example\"\nenv = { A = \"b\" }\n", "env"},
-		"env reference in a url":  {"[servers.a]\nurl = \"https://a.example/mcp?key=${env:PORTCULLIS_TEST_TOKEN}\"\n", "headers"},
-		"underscore in name":      {"[servers.git_hub]\ncommand = [\"x\"]\n", "git_hub"},
-		"reserved name":           {"[servers.native]\ncommand = [\"x\"]\n", "reserved"},
-		"bad redact pattern":      {"[receipts]\nredact = ['(']\n", "redact"},
-		"unknown server key":      {"[servers.a]\ncommand = [\"x\"]\ncwd = \"/tmp\"\n", "cwd"},
+		"missing variable":           {"[servers.a]\ncommand = [\"x\"]\nenv = { T = \"${env:PORTCULLIS_TEST_UNSET}\" }\n", "PORTCULLIS_TEST_UNSET"},
+		"both command and url":       {"[servers.a]\ncommand = [\"x\"]\nurl = \"https://a.example\"\n", "exactly one"},
+		"neither command nor url":    {"[servers.a]\nenv = { A = \"b\" }\n", "exactly one"},
+		"plain http to a remote":     {"[servers.a]\nurl = \"http://mcp.example.com\"\n", "https"},
+		"headers on a command":       {"[servers.a]\ncommand = [\"x\"]\nheaders = { A = \"b\" }\n", "headers"},
+		"env on a url":               {"[servers.a]\nurl = \"https://a.example\"\nenv = { A = \"b\" }\n", "env"},
+		"env reference in a url":     {"[servers.a]\nurl = \"https://a.example/mcp?key=${env:PORTCULLIS_TEST_TOKEN}\"\n", "headers"},
+		"env reference in a command": {"[servers.a]\ncommand = [\"srv\", \"--token=${env:PORTCULLIS_TEST_TOKEN}\"]\n", "pass secrets to the server in env"},
+		"underscore in name":         {"[servers.git_hub]\ncommand = [\"x\"]\n", "git_hub"},
+		"reserved name":              {"[servers.native]\ncommand = [\"x\"]\n", "reserved"},
+		"bad redact pattern":         {"[receipts]\nredact = ['(']\n", "redact"},
+		"unknown server key":         {"[servers.a]\ncommand = [\"x\"]\ncwd = \"/tmp\"\n", "cwd"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {

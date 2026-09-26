@@ -62,11 +62,13 @@ func servers(files map[string]serverFile) ([]Server, []string, error) {
 		if envRef.MatchString(f.URL) {
 			return nil, nil, fmt.Errorf("server %s: url cannot use ${env:...}; send secrets in headers", name)
 		}
-		s := Server{Name: name, URL: f.URL}
-		var err error
-		if s.Command, err = expandAll(name, f.Command); err != nil {
-			return nil, nil, err
+		// A command line can end up in process listings and start errors, and a value resolved into it
+		// would not be masked in receipts either. The server's environment is the place for secrets.
+		if slices.ContainsFunc(f.Command, envRef.MatchString) {
+			return nil, nil, fmt.Errorf("server %s: command cannot use ${env:...}; pass secrets to the server in env", name)
 		}
+		s := Server{Name: name, Command: f.Command, URL: f.URL}
+		var err error
 		if s.URL != "" {
 			if err = checkURL(name, s.URL); err != nil {
 				return nil, nil, err
@@ -84,8 +86,8 @@ func servers(files map[string]serverFile) ([]Server, []string, error) {
 	return out, secrets, nil
 }
 
-// expand replaces every ${env:NAME} in value. A variable that is not set is an error naming the
-// variable, never showing any value. When secrets is not nil, each resolved value is added to it.
+// expand replaces every ${env:NAME} in value and adds each resolved value to secrets. A variable that
+// is not set is an error naming the variable, never showing any value.
 func expand(server, value string, secrets *[]string) (string, error) {
 	var missing string
 	out := envRef.ReplaceAllStringFunc(value, func(ref string) string {
@@ -97,27 +99,11 @@ func expand(server, value string, secrets *[]string) (string, error) {
 			}
 			return ""
 		}
-		if secrets != nil {
-			*secrets = append(*secrets, v)
-		}
+		*secrets = append(*secrets, v)
 		return v
 	})
 	if missing != "" {
 		return "", fmt.Errorf("server %s: environment variable %s is not set", server, missing)
-	}
-	return out, nil
-}
-
-func expandAll(server string, values []string) ([]string, error) {
-	if values == nil {
-		return nil, nil
-	}
-	out := make([]string, len(values))
-	for i, v := range values {
-		var err error
-		if out[i], err = expand(server, v, nil); err != nil {
-			return nil, err
-		}
 	}
 	return out, nil
 }
