@@ -16,6 +16,9 @@ linters:
     - staticcheck
     - unused
   settings:
+    gosec:
+      excludes:
+        - G104 # unhandled errors are errcheck's job, with its std-error-handling exclusions
     govet:
       enable-all: true
       disable:
