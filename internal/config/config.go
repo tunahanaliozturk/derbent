@@ -10,16 +10,24 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/tunahanaliozturk/portcullis/internal/redact"
 	"github.com/tunahanaliozturk/portcullis/internal/rule"
 )
 
 // Config is a loaded and validated configuration.
 type Config struct {
-	Rules rule.Set
+	Rules   rule.Set
+	Servers []Server
+	// Redact masks secrets in arguments before they are stored in a receipt. It is never nil.
+	Redact *redact.Redactor
 }
 
 type file struct {
-	Rules []rule.Spec `toml:"rule"`
+	Rules    []rule.Spec           `toml:"rule"`
+	Servers  map[string]serverFile `toml:"servers"`
+	Receipts struct {
+		Redact []string `toml:"redact"`
+	} `toml:"receipts"`
 }
 
 // Default is the configuration used when there is no config file. Milestone 1 serves only the memory
@@ -29,7 +37,15 @@ func Default() Config {
 	if err != nil {
 		panic(err) // a constant rule list that always compiles
 	}
-	return Config{Rules: set}
+	return Config{Rules: set, Redact: mustRedactor()}
+}
+
+func mustRedactor() *redact.Redactor {
+	r, err := redact.New(nil, nil)
+	if err != nil {
+		panic(err) // no patterns cannot fail
+	}
+	return r
 }
 
 // Load reads the config file at path. A file that does not exist gives Default.
@@ -62,5 +78,13 @@ func Parse(name, text string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", name, err)
 	}
-	return Config{Rules: rules}, nil
+	srvs, secrets, err := servers(f.Servers)
+	if err != nil {
+		return Config{}, fmt.Errorf("config %s: %w", name, err)
+	}
+	red, err := redact.New(f.Receipts.Redact, secrets)
+	if err != nil {
+		return Config{}, fmt.Errorf("config %s: %w", name, err)
+	}
+	return Config{Rules: rules, Servers: srvs, Redact: red}, nil
 }
