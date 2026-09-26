@@ -12,10 +12,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/goleak"
 
+	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/gate"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
@@ -28,9 +30,10 @@ func TestMain(m *testing.M) {
 }
 
 type env struct {
-	db       *sql.DB
-	receipts *receipt.Log
-	memory   *memory.Store
+	db        *sql.DB
+	receipts  *receipt.Log
+	memory    *memory.Store
+	approvals *approval.Queue
 }
 
 func newEnv(t *testing.T) *env {
@@ -40,7 +43,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return &env{db: db, receipts: receipt.NewLog(db), memory: memory.NewStore(db)}
+	return &env{db: db, receipts: receipt.NewLog(db), memory: memory.NewStore(db), approvals: approval.NewQueue(db)}
 }
 
 func (e *env) gate(t *testing.T, agent string, specs ...rule.Spec) *gate.Gate {
@@ -55,6 +58,7 @@ func (e *env) gate(t *testing.T, agent string, specs ...rule.Spec) *gate.Gate {
 	return &gate.Gate{
 		Agent: agent, Project: "/work/shop", Session: agent + "-session", Version: "test",
 		Rules: set, Memory: e.memory, Receipts: e.receipts,
+		Approvals: e.approvals, ApprovalTimeout: 10 * time.Second,
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/rule"
@@ -34,6 +35,10 @@ type Gate struct {
 	Forward func(ctx context.Context, server, tool string, args json.RawMessage) (*mcp.CallToolResult, error)
 	// Redact masks secrets in arguments before they are stored in a receipt. Nil stores them as they are.
 	Redact func(string) string
+	// Approvals holds the calls a rule sends to the user. Nil refuses them.
+	Approvals *approval.Queue
+	// ApprovalTimeout is how long a call waits for the user before it is denied.
+	ApprovalTimeout time.Duration
 	// ToolsReady, when set, holds the agent's tool listings and calls until it is closed or ToolsWait
 	// has passed since Server was called: a downstream server that comes up quickly is in the agent's
 	// first list, and one that is slow holds nothing for long. The agent's initialize is never held.
@@ -124,6 +129,8 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 	case decision.Action == rule.Allow:
 		res, err = next(ctx, method, req)
 		rec.Outcome = outcome(res, err)
+	case decision.Action == rule.Ask:
+		res, err = g.ask(ctx, method, req, next, &rec, decision.Rule)
 	default:
 		res = refusal(name, decision.Rule)
 		rec.Outcome = "refused"
@@ -135,6 +142,53 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 		return nil, unrecorded(name, rec.Outcome, appendErr)
 	}
 	return res, err
+}
+
+// ask settles a call a rule sends to the user, and fills in rec's decision and outcome. A grant from an
+// earlier "approve for this session" lets the call through at once. Otherwise the call waits in the
+// approval queue until the user decides, the timeout passes, or the agent gives up.
+func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest, next mcp.MethodHandler,
+	rec *receipt.Receipt, ruleIndex int,
+) (mcp.Result, error) {
+	name := req.Params.Name
+	refuse := func(by, text string) (mcp.Result, error) {
+		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), by, "refused"
+		return toolError("derbent: " + text), nil
+	}
+	run := func(by string) (mcp.Result, error) {
+		rec.Decision, rec.DecidedBy = string(rule.Allow), by
+		res, err := next(ctx, method, req)
+		rec.Outcome = outcome(res, err)
+		return res, err
+	}
+	if g.Approvals == nil {
+		return refuse(rec.DecidedBy, name+" needs the user's approval, and this gate cannot ask for it")
+	}
+	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name)
+	if err != nil {
+		return refuse(rec.DecidedBy, name+" needs the user's approval, which could not be checked: "+err.Error())
+	}
+	if granted {
+		return run("grant:" + strconv.FormatInt(id, 10))
+	}
+	out, err := g.Approvals.Ask(ctx, approval.Request{
+		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: rec.Args, Rule: ruleIndex,
+	}, g.ApprovalTimeout)
+	ref := strconv.FormatInt(out.ID, 10)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), "withdrawn:"+ref, "refused"
+		return nil, err
+	case err != nil:
+		return refuse(rec.DecidedBy, name+" needs the user's approval, which could not be asked for: "+err.Error())
+	case out.Approved:
+		return run("user:" + ref)
+	case out.By == approval.ByTimeout:
+		return refuse("timeout:"+ref, fmt.Sprintf("%s needs the user's approval and none came within %s, so it was denied. "+
+			"Ask the user to approve it in the derbent UI, then try again.", name, g.ApprovalTimeout))
+	default:
+		return refuse("user:"+ref, "the user denied "+name)
+	}
 }
 
 // unrecorded is the error for a call whose receipt could not be written. It tells the agent whether
