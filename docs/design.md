@@ -114,7 +114,9 @@ redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
 - A tool is hidden from an agent's tool list when no call to it can be allowed: among the rules matching
   that agent and tool, a `deny` with no `args` condition comes before any `allow` (ADR 0003). A `deny`
   with an `args` condition refuses the matching calls and leaves the rest to later rules.
-- `${env:NAME}` is resolved when the gate starts. Resolved values never reach receipts or logs.
+- `${env:NAME}` is resolved when the gate starts. Resolved values never reach receipts or logs. A `url`
+  cannot hold one, because HTTP errors quote the url to stderr and to the agent; a secret for a url
+  server goes in `headers`.
 - A `url` server must use `https`, except on `localhost`, `127.0.0.1` or `::1`. `env` belongs to command
   servers and `headers` to url servers.
 - Every value that came from `${env:...}` in `env` or `headers` and is at least eight characters long is
