@@ -39,6 +39,9 @@ anyone who can open a pull request, or any agent that can write a file, turn off
   reading the project file when the gate starts and whenever it changes, for no gain in safety.
 - An agent that can edit the repository can edit or delete the file. That takes the project back to the
   user's rules, never below them.
+- The file sits at the project root, which is the git root, and for a linked worktree the main
+  checkout's root. A worktree therefore follows the main checkout's file, as it shares its project key
+  and memory, and a `.derbent.toml` at the worktree's own root is not read.
 - Failing closed on an invalid file means a typo in a repository stops every agent working in it until it
   is fixed. A file that half applied would be worse: the user could not tell which rules held.
 - The cache keyed on size and modification time misses an edit that keeps both, which only a file system
