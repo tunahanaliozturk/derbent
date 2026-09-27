@@ -125,8 +125,7 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 // for a server in cfg. The hook starts no servers, so it cannot know their exact tools.
 func servedBy(cfg config.Config) func(tool string) bool {
 	return func(tool string) bool {
-		switch tool {
-		case "memory_write", "memory_search", "memory_read":
+		if slices.Contains(gate.MemoryTools[:], tool) {
 			return true
 		}
 		name, rest, ok := strings.Cut(tool, "__")

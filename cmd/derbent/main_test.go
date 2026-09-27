@@ -21,6 +21,7 @@ import (
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/gate"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 )
@@ -941,12 +942,31 @@ func TestHookAllowedByARuleSaysNothing(t *testing.T) {
 	}
 }
 
+// Claude Code reads the hook's stdout as one JSON object, so a deny must be exactly that: anything
+// else there, even a log line, spoils the answer.
 func TestHookDeniedByARule(t *testing.T) {
 	dir := t.TempDir()
 	writeHookConfig(t, dir)
 	out, errOut, code := runHook(t, dir, claudeHookInput(dir, "rm -rf /"), "--agent", "claude")
-	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "native__Bash is not allowed") {
+	if code != 0 {
 		t.Fatalf("code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	dec := json.NewDecoder(strings.NewReader(out))
+	dec.DisallowUnknownFields()
+	var got struct {
+		HookSpecificOutput struct {
+			HookEventName, PermissionDecision, PermissionDecisionReason string
+		} `json:"hookSpecificOutput"`
+	}
+	if err := dec.Decode(&got); err != nil {
+		t.Fatalf("stdout %q is not the answer object: %v", out, err)
+	}
+	if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+		t.Fatalf("stdout %q holds more than one JSON object (err %v)", out, err)
+	}
+	if o := got.HookSpecificOutput; o.HookEventName != "PreToolUse" || o.PermissionDecision != "deny" ||
+		!strings.Contains(o.PermissionDecisionReason, "native__Bash is not allowed") {
+		t.Fatalf("answer = %+v", o)
 	}
 }
 
@@ -958,7 +978,11 @@ func TestHookSkipsDerbentsOwnTools(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range []string{"mcp__derbent__memory_write", "mcp__derbent__echo__echo"} {
+	var own []string
+	for _, tool := range gate.MemoryTools {
+		own = append(own, "mcp__derbent__"+tool)
+	}
+	for _, tool := range append(own, "mcp__derbent__echo__echo") {
 		out, errOut, code := runHook(t, dir, claudeToolInput(dir, tool), "--agent", "claude")
 		if code != 0 || out != "" {
 			t.Fatalf("%s: code %d, stdout %q, stderr %q", tool, code, out, errOut)

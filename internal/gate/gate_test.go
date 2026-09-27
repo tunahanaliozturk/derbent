@@ -143,8 +143,9 @@ func TestListsMemoryTools(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"memory_read", "memory_search", "memory_write"}; !slices.Equal(names, want) {
-		t.Fatalf("tools = %v, want %v", names, want)
+	want := slices.Sorted(slices.Values(gate.MemoryTools[:]))
+	if len(want) != 3 || !slices.Equal(names, want) {
+		t.Fatalf("tools = %v, want gate.MemoryTools %v", names, want)
 	}
 }
 

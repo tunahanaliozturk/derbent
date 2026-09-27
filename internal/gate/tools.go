@@ -60,19 +60,24 @@ type readOutput struct {
 	SupersededBy int64    `json:"superseded_by,omitempty"`
 }
 
+// MemoryTools are the tools every gate serves itself: write, search and read. The pre-tool hook leaves
+// calls to them to the MCP gate, which decides and records them.
+var MemoryTools = [...]string{"memory_write", "memory_search", "memory_read"}
+
 func (g *Gate) addMemoryTools(s *mcp.Server) {
+	write, search, read := MemoryTools[0], MemoryTools[1], MemoryTools[2]
 	addTool(g, s, &mcp.Tool{
-		Name: "memory_write",
+		Name: write,
 		Description: "Save a note for the other agents working on this project: a decision, a finding, " +
 			"a convention. Returns the note's id. Pass supersedes to replace an older note.",
 	}, g.memoryWrite)
 	addTool(g, s, &mcp.Tool{
-		Name:        "memory_search",
+		Name:        search,
 		Description: "Search the notes agents have saved for this project. Returns ids, titles and snippets, best matches first.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, g.memorySearch)
 	addTool(g, s, &mcp.Tool{
-		Name:        "memory_read",
+		Name:        read,
 		Description: "Read one saved note in full by its id.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, g.memoryRead)
