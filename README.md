@@ -47,8 +47,9 @@ go install github.com/tunahanaliozturk/derbent/cmd/derbent@latest
 
 ### Check a release
 
-A release can be rebuilt byte for byte. The release workflow builds every binary twice, the second time
-with an empty build cache, and publishes only when both builds match. To check a published release,
+A release can be rebuilt byte for byte. The release workflow runs vet, the tests and the linter on the
+tag, then builds every binary twice, the second time with an empty build cache, and publishes only when
+both builds match. To check a published release,
 rebuild it from a clean checkout of its tag with Go 1.27.1 and no `GOFLAGS`, `GOAMD64` or `GOARM64`
 overrides, in the environment or set with `go env -w`:
 

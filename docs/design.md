@@ -475,7 +475,8 @@ derbent/
   off and no build id, each twice, the second time from an empty build cache, and fails unless every pair
   is byte-identical; it then writes `SHA256SUMS`. CI's `reproducible` job runs it on every push to main
   and every pull request, and the release workflow runs it on the tag, without a restored cache, before
-  it publishes. A clean checkout of a tag, built with go1.27.1 and no `GOFLAGS`, `GOAMD64` or `GOARM64`
+  it publishes. The release job needs a job that first runs vet, the tests with `-race` and the linter
+  on the tag, with read-only access to the repository; only the release job can write. A clean checkout of a tag, built with go1.27.1 and no `GOFLAGS`, `GOAMD64` or `GOARM64`
   overrides, gives the published checksums.
 
 ## Decisions

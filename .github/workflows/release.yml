@@ -4,12 +4,34 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  release:
+  # The tag's code passes the same checks as main before anything is published.
+  test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -race -count=1
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
