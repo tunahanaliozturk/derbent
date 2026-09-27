@@ -274,17 +274,39 @@ func TestApprovalLeftBehindByAStoppedGateIsNotOffered(t *testing.T) {
 	}
 }
 
+// waitRow waits for the first approval written after the one with id after, and returns its id and
+// deadline. It reads the table rather than Pending, which hides a row as soon as its deadline passes.
+func waitRow(t *testing.T, db *sql.DB, after int64) (int64, time.Time) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		var id, ms int64
+		err := db.QueryRowContext(t.Context(), `SELECT id, deadline_ms FROM approvals WHERE id > ? ORDER BY id LIMIT 1`,
+			after).Scan(&id, &ms)
+		if err == nil {
+			return id, time.UnixMilli(ms)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal(err)
+		}
+	}
+	t.Fatal("no approval was written")
+	return 0, time.Time{}
+}
+
 // Whichever of the user and the deadline gets there first, the waiting call and the user must be told
 // the same thing: a decision the user was told succeeded is the one the call gets.
 func TestDecisionRacingTheDeadlineHasOneWinner(t *testing.T) {
-	q, _ := open(t)
+	q, db := open(t)
 	var decided, timedOut int
+	var id int64
 	for i := range 20 {
-		timeout := 60 * time.Millisecond
-		done := ask(t.Context(), q, req, timeout)
-		p := waitPending(t, q)
-		time.Sleep(time.Until(p.Deadline) - time.Duration(i%5)*time.Millisecond)
-		decideErr := q.Decide(t.Context(), p.ID, approval.ApproveOnce)
+		// Long enough that a slow runner still reads the row well before its deadline, so the decision
+		// below lands in the last few milliseconds, where it races Ask's own expiry.
+		done := ask(t.Context(), q, req, 250*time.Millisecond)
+		var deadline time.Time
+		id, deadline = waitRow(t, db, id)
+		time.Sleep(time.Until(deadline) - time.Duration(i%5)*time.Millisecond)
+		decideErr := q.Decide(t.Context(), id, approval.ApproveOnce)
 		a := result(t, done)
 		switch {
 		case decideErr == nil && (!a.out.Approved || a.out.By != approval.ByUser):
