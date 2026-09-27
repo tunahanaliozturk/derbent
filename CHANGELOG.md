@@ -40,6 +40,20 @@ The first release.
   ([ADR 0011](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0011-grants-follow-the-rule.md)):
   an `A` on a `git push` does not let through a `terraform apply` that another rule asks about, and
   editing or reordering the rules never widens a grant.
+- `derbent grants` lists the session grants, and `derbent revoke <id>` or `derbent revoke --all` takes them
+  back; the next call a revoked grant covered asks again. In the UI, `g` lists them and `r` pressed twice
+  revokes one.
+- Budgets: `[[budget]]` limits how many calls an agent may have let through to some tools within a sliding
+  window, and a call over it is refused without asking you
+  ([ADR 0012](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0012-budgets.md)).
+- Tool pins: each downstream tool's definition is pinned the first time a gate sees it, and a tool whose
+  definition changed is withheld until `derbent pins accept <server>__<tool> <sha256>` accepts it by the
+  whole hash of the new definition; another hash or a shortened one is refused. `derbent pins` and
+  `derbent pins show` list and explain the changes, `pins show` ends with the accept command to copy,
+  `pin = false` opts a server out, and `derbent config check` shows each tool's pin state
+  ([ADR 0013](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0013-tool-pins.md)).
+- Project rules: a `.derbent.toml` at a repository's root can make calls ask or deny, never allow what
+  your rules refuse ([ADR 0014](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0014-project-rules.md)).
 - `derbent gate`: a pre-tool hook for Claude Code, Codex, Copilot CLI and Antigravity CLI, so built-in
   tools such as the shell and file edits pass the same rules, approvals and receipts as MCP tools, named
   `native__<tool>`.
@@ -73,5 +87,8 @@ The first release.
   `derbent config check` escape control characters, bidirectional overrides and invisible characters in
   text from agents and tools before it reaches your terminal.
 - The MCP gate refuses a `tools/call` request it cannot read instead of passing it on unchecked.
+- A downstream tool whose definition changed after a gate first saw it is left out of the agents' tool
+  lists, so they never read the changed description, and calls to it are refused.
+- A `.derbent.toml` that cannot be read or holds anything but rules denies every call in its project.
 
 [1.0.0]: https://github.com/tunahanaliozturk/derbent/releases/tag/v1.0.0
