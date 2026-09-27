@@ -294,6 +294,13 @@ agent reads and follows. The gate pins each downstream tool (ADR 0013).
   every tool the gate could serve, including tools the rules hide from one agent, since another agent may
   see them. A tool the rules hide from this agent is refused by the rule that hides it whether or not it
   changed, as before pins, so a refusal never tells the agent that the tool exists.
+- A tool that an update adds to a server already pinned is new too, so it is pinned and served at once,
+  and mid-session through `list_changed`. Its description can tell the agent what to do as well as a
+  changed one can. Pins catch a change to a tool already seen; the rules are the guard against a new
+  one. For a server whose updates are not reviewed, name the tools to allow or ask about, such as
+  `github__create_issue`, and deny `github__*` after them: a tool that no call can get through is left
+  out of the list, so its description never reaches the agent. An `allow` or `ask` on `github__*` lists
+  every new tool as soon as it appears.
 - When a tool's definition differs from its pin, the gate leaves the tool out of the agent's tool list, so
   the agent never reads the changed text, keeps the new definition next to the pin, and writes one warning
   line to stderr. A call to it from an agent holding an older list is refused before any rule is read:
@@ -758,7 +765,10 @@ Not in v1, in rough order of value:
 - A budget is approximate under concurrency: calls in flight at the same moment can pass it by at most
   their number.
 - Pins trust the first definition a gate sees. A tool that is hostile from its first listing is pinned as
-  it is; `derbent config check` shows a new server's tools before an agent uses them.
+  it is; `derbent config check` shows a new server's tools before an agent uses them. That includes a
+  tool that an update adds to a server already pinned: it is pinned and served at once, mid-session too,
+  with no check before an agent reads it. Allowing a server's tools by name, such as
+  `github__create_issue`, and denying `github__*` after them keeps a new tool out of the agents' lists.
 - The project rules file is kept by size and modification time. An edit that keeps both, which only a
   file system with a coarse clock allows within one tick, is not seen until the file changes again.
 - Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call

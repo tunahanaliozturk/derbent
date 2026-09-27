@@ -32,6 +32,12 @@ new text under the same name and the same rules.
 - Trust on first use cannot tell whether the first definition was honest. A server that is hostile from
   its first listing is pinned as it is. `derbent config check` shows the tools and their pin states before
   an agent uses them.
+- The same holds for a tool that an update adds to a server already pinned: it is new, so it is pinned
+  and served at once, mid-session too through `list_changed`, and its description can carry the kind of
+  instruction the Context describes. Pins only catch a change to a tool already seen. For a server whose
+  updates are not reviewed, the rules are the guard: allowing its tools by name, such as
+  `github__create_issue`, and denying `github__*` after them leaves a new tool out of every list, where an
+  `allow` or `ask` on `github__*` serves it.
 - Global pins mean one review covers every agent and project, and a tool the rules hide from one agent is
   still pinned for the next agent that can see it. The agent it is hidden from gets the refusal of the
   rule that hides it, changed or not, so a pin never tells an agent that a hidden tool exists.
