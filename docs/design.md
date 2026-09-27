@@ -1146,6 +1146,8 @@ Not in v1, in rough order of value:
 6. **More of MCP.** Resources and prompts from downstream servers, and approvals shown inside the
    agent's own UI through elicitation.
 
+Ideas found after this list, with the measurements behind them, are in [backlog.md](backlog.md).
+
 ## Known limits and risks
 
 - Only calls that pass through the gate are seen: tools a CLI never shows its hook (Codex's hosted web
