@@ -15,10 +15,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// acceptLine is the line of derbent pins show that says how to accept the change, hash included, and
-// pinnedLine the one with the pinned definition's hash.
+// acceptLine is the line of derbent pins show that says how to accept the change, with the --db it
+// names and the hash, and pinnedLine the one with the pinned definition's hash.
 var (
-	acceptLine = regexp.MustCompile(`derbent pins accept echo__echo ([0-9a-f]{64})`)
+	acceptLine = regexp.MustCompile(`(?m)^to accept this change: derbent pins accept (.*)echo__echo ([0-9a-f]{64})$`)
 	pinnedLine = regexp.MustCompile(`pinned [^,]+, sha256 ([0-9a-f]{64})`)
 )
 
@@ -52,9 +52,13 @@ func listedTools(t *testing.T, cs *mcp.ClientSession) []string {
 
 // The milestone's evidence for pins: a gate pins the echo tool, the next gate on the same database sees
 // its description changed and withholds it, the change is reviewed and accepted from a shell, and the
-// running gate serves the tool again.
+// running gate serves the tool again. The database's directory has a space in its name, as a user's often
+// does, so the accept line pins show prints has to quote it.
 func TestAChangedToolIsWithheldUntilAccepted(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "my pins")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	db := filepath.Join(dir, "p.db")
 	cfg := writePinConfig(t, dir, "Echo the text back.", "")
 	first := connectProcess(t, dir, "claude", cfg)
@@ -102,12 +106,24 @@ func TestAChangedToolIsWithheldUntilAccepted(t *testing.T) {
 	if m == nil || pinned == nil {
 		t.Fatalf("pins show does not show both hashes, or how to accept the change:\n%s", show)
 	}
-	// A hash that is not the recorded change's, here the pinned one, accepts nothing.
-	err = run(t.Context(), []string{"pins", "accept", "--db", db, "echo__echo", pinned[1]}, strings.NewReader(""), io.Discard, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "echo__echo: the change on record is not the one given; run derbent pins show again") {
-		t.Fatalf("accept with the pinned hash: err = %v", err)
+	// Pasted as printed, the line accepts the change in the database pins show read.
+	if want := `--db "` + db + `" `; m[1] != want {
+		t.Fatalf("the accept line names %q before the tool, want %q:\n%s", m[1], want, show)
 	}
-	if out := runOK(t, "pins", "accept", "--db", db, "echo__echo", m[1][:12]); !strings.Contains(out, "accepted echo__echo") {
+	newHash := m[2]
+	for _, tc := range []struct{ given, want string }{
+		// A hash that is not the recorded change's, here the pinned one, accepts nothing.
+		{pinned[1], "echo__echo: the change on record is not the one given; run derbent pins show again"},
+		// Nor does a prefix of the recorded change's own hash: a hostile server can find two definitions
+		// whose hashes share one, and switch to the other after the review.
+		{newHash[:8], `"` + newHash[:8] + `" is not the sha256 of the new definition`},
+	} {
+		err = run(t.Context(), []string{"pins", "accept", "--db", db, "echo__echo", tc.given}, strings.NewReader(""), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("accept with %s: err = %v, want %q", tc.given, err, tc.want)
+		}
+	}
+	if out := runOK(t, "pins", "accept", "--db", db, "echo__echo", strings.ToUpper(newHash)); !strings.Contains(out, "accepted echo__echo") {
 		t.Fatalf("pins accept output %q", out)
 	}
 	for deadline := time.Now().Add(10 * time.Second); !slices.Contains(listedTools(t, second), "echo__echo"); time.Sleep(100 * time.Millisecond) {
@@ -177,15 +193,18 @@ func TestPinsCommandsNameWhatIsWrong(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := filepath.Join(dir, "p.db")
+	hash := strings.Repeat("0123456789abcdef", 4)
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"pins", "accept", "--db", db, "echo__echo", "0123456789abcdef"}, "echo__echo has no change to accept"},
-		{[]string{"pins", "accept", "--db", db, "echo__nope", "01234567"}, "echo__nope has no pin"},
+		{[]string{"pins", "accept", "--db", db, "echo__echo", hash}, "echo__echo has no change to accept"},
+		{[]string{"pins", "accept", "--db", db, "echo__nope", hash}, "echo__nope has no pin"},
 		{[]string{"pins", "accept", "--db", db, "echo__echo"}, "give the tool and the sha256 of its new definition"},
-		{[]string{"pins", "accept", "--db", db, "echo__echo", "0123456"}, `"0123456" is not the sha256 of the new definition`},
-		{[]string{"pins", "accept", "--db", db, "echo__echo", "0123456z"}, `"0123456z" is not the sha256 of the new definition`},
+		{[]string{"pins", "accept", "--db", db, "echo__echo", hash[:8]}, `"01234567" is not the sha256 of the new definition`},
+		{[]string{"pins", "accept", "--db", db, "echo__echo", hash[:63]}, `is not the sha256 of the new definition`},
+		{[]string{"pins", "accept", "--db", db, "echo__echo", hash + "0"}, `is not the sha256 of the new definition`},
+		{[]string{"pins", "accept", "--db", db, "echo__echo", hash[:63] + "z"}, `is not the sha256 of the new definition`},
 		{[]string{"pins", "show", "--db", db, "echo"}, `"echo" is not <server>__<tool>`},
 		{[]string{"pins", "show", "--db", db}, "give one tool"},
 		{[]string{"pins", "--db", db, "extra"}, "unexpected argument"},

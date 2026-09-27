@@ -304,16 +304,19 @@ agent reads and follows. The gate pins each downstream tool (ADR 0013).
 - `derbent pins` lists the pins with their state, `pinned` or `changed`, when each was pinned and when the
   change was seen, as rows or JSON lines. `derbent pins show <server>__<tool>` prints the pinned and the
   new definition as indented JSON with their hashes, the lines that differ and the command that accepts
-  that change, all escaped. `derbent pins accept <server>__<tool> <sha256>` takes the new definition's
-  hash as `pins show` prints it, or its first 8 hex digits or more, makes that definition the pin and
-  prints its hash. When the change on record has another hash, because the server changed the tool again
-  after the review, it refuses and says to run `derbent pins show` again, so no change is accepted
-  unseen.
+  that change, with the `--db` it was given, all escaped. `derbent pins accept <server>__<tool>
+  <sha256>` takes the new definition's whole hash, all 64 hex digits as `pins show` prints them, makes
+  that definition the pin and prints its hash. A prefix is refused, since a hostile server can find two
+  definitions whose hashes share a short one. When the change on record has another hash, because the
+  server changed the tool again after the review, it refuses and says to run `derbent pins show` again,
+  so what is accepted is always what was read.
 - A running gate looks at its withheld tools every two seconds and serves one again once its definition
-  is the pin, which the agent learns through `list_changed`. For a changed tool it only reads the pin,
-  and writes its own definition as the change only when none is recorded, after the user accepted
-  another: gates that hold different definitions of a tool never replace the change the user is
-  reviewing, and a waiting gate takes no write lock.
+  is the pin, which the agent learns through `list_changed`. For a changed tool the watcher only reads
+  the pin, and writes its own definition as the change only when none is recorded, after the user
+  accepted another, so it never replaces the recorded change and takes no write lock. A gate that lists
+  the server's tools again, at its start, on a reconnect or after `list_changed`, does record its
+  definition, and can replace a change the user is reviewing; the accept of the reviewed hash is then
+  refused.
 - `pin = false` in a server's table turns pinning off for a server whose descriptions change on every
   start: its tools are served as they come and never pinned.
 - A tool that disappears keeps its pin, so it cannot come back changed without notice.
@@ -515,14 +518,15 @@ migrates it inside `BEGIN IMMEDIATE`.
   asked call without writing an approval, and leaving a deny to its rule.
 - **Pins.** A golden test fixes the canonical form of a definition, and another shows it does not depend
   on key order or spacing. Store tests pin on first use, record a change, drop it when the server goes
-  back, accept it only with the recorded change's hash, leave a recorded change alone on a recheck, and
-  pin each tool once when checks race. Gate tests withhold a changed tool and refuse its calls with `pin`,
-  serve it again after an accept while the gate runs, keep two gates that hold different changes from
-  replacing the recorded one, serve a server with `pin = false` unpinned, keep the pin of a tool that
-  disappears, pin a tool the rules hide and refuse it by its rule when it changed. End-to-end tests start
-  two gates on one database with the echo test server's description changed between them, and check
-  `derbent pins`, `pins show`, `pins accept`, which refuses a hash that is not the change's, and
-  `derbent config check`, also on a database from before the pins table.
+  back, accept it only with the recorded change's whole hash and never a prefix of it, leave a recorded
+  change alone on a recheck, and pin each tool once when checks race. Gate tests withhold a changed tool
+  and refuse its calls with `pin`, serve it again after an accept while the gate runs, keep the watchers
+  of two gates that hold different changes from replacing the recorded one, serve a server with
+  `pin = false` unpinned, keep the pin of a tool that disappears, pin a tool the rules hide and refuse it
+  by its rule when it changed. End-to-end tests start two gates on one database with the echo test
+  server's description changed between them, and check `derbent pins`, `pins show`, whose accept line
+  carries the quoted `--db`, `pins accept`, which refuses another change's hash and a prefix of the
+  change's own, and `derbent config check`, also on a database from before the pins table.
 - **Project rules.** Rule and config tests compile project rules without a catch-all, refuse any other
   key, parse a file with a byte order mark and CRLF line endings, and read the file again only when its
   size or modification time changes. Gate tests show a project rule making a call ask or deny, never

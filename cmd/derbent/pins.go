@@ -27,9 +27,13 @@ type pinLine struct {
 	SHA256  string `json:"sha256"`
 }
 
-// sha256Prefix is a hash as derbent pins accept takes it: the whole sha256, or its first pin.MinPrefix
-// hex digits or more.
-var sha256Prefix = regexp.MustCompile(fmt.Sprintf(`^[0-9a-f]{%d,64}$`, pin.MinPrefix))
+var (
+	// wholeSHA256 is a hash as derbent pins accept takes it: all 64 hex digits, never a prefix (see
+	// pin.Store.Accept).
+	wholeSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// plainArg is a command-line argument that bash, PowerShell and cmd all take as it is.
+	plainArg = regexp.MustCompile(`^[A-Za-z0-9_./\\:-]+$`)
+)
 
 // runPins lists the tool pins, shows one tool's change, or accepts it: derbent pins [--json],
 // derbent pins show <server>__<tool>, derbent pins accept <server>__<tool> <sha256>.
@@ -70,14 +74,25 @@ func runPins(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return fmt.Errorf("pins %s: %q is not <server>__<tool>", sub, visible.Escape(flags.Arg(0)))
 	}
 	if sub == "show" {
-		return showPin(ctx, path, server, tool, stdout)
+		return showPin(ctx, path, *dbFlag, server, tool, stdout)
 	}
 	given := strings.ToLower(flags.Arg(1))
-	if !sha256Prefix.MatchString(given) {
-		return fmt.Errorf("pins accept: %q is not the sha256 of the new definition, or its first %d hex digits or more; copy it from derbent pins show",
-			visible.Escape(flags.Arg(1)), pin.MinPrefix)
+	if !wholeSHA256.MatchString(given) {
+		return fmt.Errorf("pins accept: %q is not the sha256 of the new definition, which is 64 hex digits; copy it whole from derbent pins show",
+			visible.Escape(flags.Arg(1)))
 	}
 	return acceptPin(ctx, path, server, tool, given, stdout)
+}
+
+// shellArg is s as it can be pasted into bash, PowerShell or cmd: as it is when it holds only letters,
+// digits and _ . / \ : -, and in double quotes otherwise, which covers spaces.
+// ponytail: a path holding a double quote, $ or a backtick still needs quoting by hand after pasting;
+// per-shell quoting if one ever does.
+func shellArg(s string) string {
+	if plainArg.MatchString(s) {
+		return s
+	}
+	return `"` + s + `"`
 }
 
 // listPins prints every pin with its state, as rows or JSON lines. It opens the database read-only.
@@ -125,9 +140,9 @@ func listPins(ctx context.Context, path string, asJSON bool, stdout io.Writer) e
 }
 
 // showPin prints a tool's pinned definition and, when its server has since sent another, that one, the
-// lines that differ and the command that accepts exactly that one. Definitions come from a server, so
-// every line is escaped.
-func showPin(ctx context.Context, path, server, tool string, stdout io.Writer) error {
+// lines that differ and the command that accepts exactly that one, with dbFlag, the --db pins show was
+// given, so the command works as pasted. Definitions come from a server, so every line is escaped.
+func showPin(ctx context.Context, path, dbFlag, server, tool string, stdout io.Writer) error {
 	db, err := store.OpenExisting(ctx, path)
 	if err != nil {
 		return err
@@ -153,7 +168,11 @@ func showPin(ctx context.Context, path, server, tool string, stdout io.Writer) e
 		removed, added := differ(pinned, changed)
 		writeLines(&b, "- ", removed)
 		writeLines(&b, "+ ", added)
-		fmt.Fprintf(&b, "to accept this change: derbent pins accept %s %s\n", name, visible.Escape(p.NewSHA256))
+		db := ""
+		if dbFlag != "" {
+			db = "--db " + shellArg(visible.Escape(dbFlag)) + " "
+		}
+		fmt.Fprintf(&b, "to accept this change: derbent pins accept %s%s %s\n", db, name, visible.Escape(p.NewSHA256))
 	}
 	_, err = io.WriteString(stdout, b.String())
 	return err
