@@ -317,9 +317,12 @@ agent reads and follows. The gate pins each downstream tool (ADR 0013).
 - `derbent pins` lists the pins with their state, `pinned` or `changed`, when each was pinned and when the
   change was seen, as rows or JSON lines. `derbent pins show <server>__<tool>` prints the pinned and the
   new definition as indented JSON with their hashes, the lines that differ and the command that accepts
-  that change, with the `--db` it was given, all escaped. `derbent pins accept <server>__<tool>
-  <sha256>` takes the new definition's whole hash, all 64 hex digits as `pins show` prints them, makes
-  that definition the pin and prints its hash. A prefix is refused, since a hostile server can find two
+  that change, with the `--db` it was given, all escaped. The lines that differ are lined up on a longest
+  common subsequence, so a line that only moved, such as a description swapped from one property to
+  another, shows where it left and where it arrived; definitions too long to line up within 16 MiB are to
+  be compared in full. `derbent pins accept <server>__<tool> <sha256>` takes the new definition's whole
+  hash, all 64 hex digits as `pins show` prints them, makes that definition the pin and prints its hash.
+  A prefix is refused, since a hostile server can find two
   definitions whose hashes share a short one. When the change on record has another hash, because the
   server changed the tool again after the review, it refuses and says to run `derbent pins show` again,
   so what is accepted is always what was read.
