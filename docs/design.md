@@ -203,7 +203,8 @@ arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's
   takes a second press within five seconds, so one press can never grant the session, and the question
   and the status after it name the tool, the rule's number and the agent. An `a` typed with Caps Lock on
   arrives as `a` with Caps Lock from a terminal that reports modifiers, and the UI takes it as `a`; a
-  terminal that reports none sends `A`, which still needs the second press. Nothing the UI does changes the config file.
+  terminal that reports none sends `A`, which still needs the second press. Nothing the UI does
+  changes the config file.
 - `derbent approve [--session] <id>` and `derbent deny <id>` do the same from any shell, by the id the
   UI shows, written `12` or `#12`. An approval written by a gate from before grants followed the rule,
   still running after the upgrade, names no rule and grants nothing: `A` in the UI says it approves the
@@ -394,8 +395,13 @@ migrates it inside `BEGIN IMMEDIATE`.
   exiting. Both report p50, p99 and calls per second, compared with `benchstat` over ten runs, on GitHub's
   Windows and Linux runners. The results, from one workflow run, live under `docs/benchmark-results/`
   with the runners named, and the README states only numbers in those files.
-- **Demo.** A recorded session: Claude Code writes a decision to memory, Codex finds it, then asks for
-  `github__create_issue` and the user approves it from the UI; `derbent verify` ends clean.
+- **Demo.** [demo.md](demo.md) is the transcript of a recorded run with two Claude Code sessions under
+  the agent names `claude` and `reviewer`: `claude` writes a decision to memory, `reviewer` finds it and
+  asks to write a follow-up note with `memory_write`, an `ask` rule holds the call until `derbent approve`
+  approves it from another shell, and `derbent verify` ends clean. The cross-vendor version, in which
+  Codex finds the note, asks for `github__create_issue` and the user approves it from the UI, is
+  described there as a scenario and was not recorded: Codex was left out by the owner's choice, and no
+  GitHub repository or issue was approved.
 
 ## Repository layout
 
@@ -416,7 +422,7 @@ derbent/
 ├── internal/visible/             escaping text before it reaches a terminal
 ├── scripts/release.sh            reproducible release builds
 ├── .github/workflows/            ci, bench and release
-├── docs/adr/  docs/benchmark-results/  docs/design.md
+├── docs/adr/  docs/benchmark-results/  docs/design.md  docs/demo.md
 ├── .golangci.yml  go.mod  go.sum
 └── README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md  LICENSE
 ```
@@ -439,9 +445,8 @@ derbent/
   off and no build id, each twice, the second time from an empty build cache, and fails unless every pair
   is byte-identical; it then writes `SHA256SUMS`. CI's `reproducible` job runs it on every push to main
   and every pull request, and the release workflow runs it on the tag, without a restored cache, before
-  it publishes. A clean checkout of
-  a tag, built with go1.27.1 and no `GOFLAGS`, `GOAMD64` or `GOARM64` overrides, gives the published
-  checksums.
+  it publishes. A clean checkout of a tag, built with go1.27.1 and no `GOFLAGS`, `GOAMD64` or `GOARM64`
+  overrides, gives the published checksums.
 
 ## Decisions
 

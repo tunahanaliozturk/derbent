@@ -155,6 +155,13 @@ derbent verify
 
 prints the number of receipts, the hash of the last one, and whether the chain is intact.
 
+## Demo
+
+[docs/demo.md](docs/demo.md) is a transcript of two real Claude Code sessions sharing one gate. One writes
+a decision to memory; the other finds it and asks to add a note, which waits until `derbent approve`
+approves it from another shell; `derbent verify` then finds the chain intact. The version with Codex and
+a GitHub issue is described there too, and was not recorded.
+
 ## Rules
 
 Rules live in `config.toml` in your user config directory: `%AppData%\derbent\` on Windows,
@@ -240,9 +247,9 @@ derbent deny '#12'             # quote the # in a shell that reads it as a comme
 
 Editing or reordering the rules never widens a grant ([ADR 0011](docs/adr/0011-grants-follow-the-rule.md)).
 The hook reads the config on every call, so there, while the granted rule or a rule above it differs
-from when you approved, its calls ask again, and undoing the edit makes the grant apply again; a change
-below the granted rule keeps the grant. A `derbent mcp` gate reads the config only when it starts, so an
-edit does not affect its grants.
+from when you approved, the calls that rule asks about ask again, and undoing the edit makes the grant
+apply again; a change below the granted rule keeps the grant. A `derbent mcp` gate reads the config only
+when it starts, so an edit does not affect its grants.
 
 Approvals guard against mistakes and against prompt injection that stays inside MCP. They are not a
 boundary against an agent that can already run shell commands as you: it can run `derbent approve` itself

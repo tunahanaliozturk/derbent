@@ -48,9 +48,8 @@ Migration 0003 adds `rule_key` to `approvals` and rebuilds `grants` on
   above it is narrowed, and when the two push rules described under Context swap places.
 - The cost is extra questions on the hook path: any edit above a granted rule asks again while it
   stands, even one that cannot change what the rule catches, and a rule added at the top asks again for
-  every grant. Telling a harmless edit
-  from a widening one would mean comparing glob patterns, which is not worth saving one question per
-  grant.
+  every grant. Telling a harmless edit from a widening one would mean comparing glob patterns, which is
+  not worth saving one question per grant.
 - The grants written before the upgrade are dropped by migration 0003, since they do not say which rule
   asked. A grant lasts one agent session, so the cost is one more question per rule in the sessions
   running during the upgrade.
