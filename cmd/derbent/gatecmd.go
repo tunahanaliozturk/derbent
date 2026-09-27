@@ -1,0 +1,123 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"slices"
+	"strings"
+
+	"github.com/tunahanaliozturk/derbent/internal/approval"
+	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/hook"
+	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/receipt"
+)
+
+// maxHookInput bounds what a hook call reads from standard input. A tool call larger than this is
+// refused rather than read without limit.
+const maxHookInput = 16 << 20
+
+// errBlock makes main exit with status 2, which Claude Code and Codex treat as "block this call"
+// even when nothing could be written in their answer format.
+type errBlock struct{ err error }
+
+func (e errBlock) Error() string { return e.err.Error() }
+func (e errBlock) Unwrap() error { return e.err }
+
+// runGate answers one call from an agent CLI's pre-tool hook. Once the CLI's protocol is known, every
+// failure answers deny with the reason: the gate fails closed.
+func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("gate", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	agent := flags.String("agent", "", "name of the agent this hook serves, as in its rules")
+	cli := flags.String("cli", "", "hook protocol: "+strings.Join(hook.Names(), ", ")+" (default: the agent name)")
+	server := flags.String("server", "derbent", "the name of Derbent's MCP server entry in the CLI, whose tools the hook skips")
+	configPath := flags.String("config", "", "config file (default: config.toml in the user config directory)")
+	dbPath := flags.String("db", "", "database file (default: derbent.db in the user state directory)")
+	projectDir := flags.String("project", "", "project directory (default: the git root of the directory the CLI reports)")
+	if err := flags.Parse(args); err != nil {
+		return errBlock{err}
+	}
+	if *cli == "" {
+		*cli = *agent
+	}
+	p, ok := hook.Lookup(*cli)
+	if !ok || !agentName.MatchString(*agent) {
+		return errBlock{fmt.Errorf("gate: --agent must be a valid agent name and --cli one of %s (got agent %q, cli %q)",
+			strings.Join(hook.Names(), ", "), *agent, *cli)}
+	}
+	deny := func(err error) error {
+		_, werr := stdout.Write(p.Answer(gate.HookAnswer{Verdict: gate.Denied, Reason: "derbent: " + err.Error()}))
+		return werr
+	}
+	in, err := io.ReadAll(io.LimitReader(stdin, maxHookInput+1))
+	if err != nil {
+		return deny(fmt.Errorf("read the hook input: %w", err))
+	}
+	if len(in) > maxHookInput {
+		return deny(fmt.Errorf("the hook input is larger than %d bytes", maxHookInput))
+	}
+	call, err := p.Parse(in)
+	if err != nil {
+		return deny(err)
+	}
+	// The config says which tools are Derbent's, so it loads first: under a config that does not load,
+	// Derbent's own tools are denied with the rest rather than skipped.
+	cfg, err := loadConfig(*configPath)
+	if err != nil {
+		return deny(err)
+	}
+	if p.Own(*server, call, servedBy(cfg)) {
+		return nil // the MCP gate decides and records its own tools
+	}
+	dir := *projectDir
+	if dir == "" {
+		dir = call.Dir
+	}
+	if dir == "" { // Antigravity can report no workspace
+		if dir, err = os.Getwd(); err != nil {
+			return deny(fmt.Errorf("find working directory: %w", err))
+		}
+	}
+	project, err := config.ProjectKey(dir)
+	if err != nil {
+		return deny(err)
+	}
+	db, err := openDB(ctx, *dbPath)
+	if err != nil {
+		return deny(err)
+	}
+	defer db.Close()
+	g := &gate.Gate{
+		Agent: *agent, Project: project, Session: call.Session, Version: version,
+		Rules: cfg.Rules, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
+		Redact: cfg.Redact.JSON, Approvals: approval.NewQueue(db), ApprovalTimeout: cfg.ApprovalTimeout,
+		Stop: ctx, // SIGINT or SIGTERM withdraws the call if it waits for the user
+	}
+	ans, err := g.Hook(ctx, "native__"+call.Tool, call.Args)
+	if _, werr := stdout.Write(p.Answer(ans)); werr != nil {
+		return errors.Join(err, werr)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "derbent:", err)
+	}
+	return nil
+}
+
+// servedBy reports whether the MCP gate under cfg may serve a tool: a memory tool, or <server>__<tool>
+// for a server in cfg. The hook starts no servers, so it cannot know their exact tools.
+func servedBy(cfg config.Config) func(tool string) bool {
+	return func(tool string) bool {
+		switch tool {
+		case "memory_write", "memory_search", "memory_read":
+			return true
+		}
+		name, rest, ok := strings.Cut(tool, "__")
+		return ok && rest != "" && slices.ContainsFunc(cfg.Servers, func(s config.Server) bool { return s.Name == name })
+	}
+}

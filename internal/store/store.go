@@ -114,6 +114,13 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("list migrations: %w", err)
 	}
+	var current int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&current); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if current == len(names) {
+		return nil // current already: no write lock needed, which matters for a hook call per tool call
+	}
 	return Immediate(ctx, db, func(ctx context.Context, conn *sql.Conn) error {
 		var current int
 		if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&current); err != nil {

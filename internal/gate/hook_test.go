@@ -92,9 +92,9 @@ func TestHookDeniedByARuleSaysWhy(t *testing.T) {
 	}
 }
 
-func TestHookAskWaitsForTheUserAndAGrantCoversBothPaths(t *testing.T) {
+func TestHookAskWaitsForTheUserAndASessionGrantCoversLaterHookCalls(t *testing.T) {
 	e := newEnv(t)
-	g := e.gate(t, "claude", append([]rule.Spec{{Tool: "memory_write", Action: rule.Ask}}, shellRules...)...)
+	g := e.gate(t, "claude", shellRules...)
 	done := hookAsync(t, g, `{"command":"git push origin main"}`)
 	p := waitPending(t, e.approvals)
 	if p.Tool != "native__Bash" || p.Session != "claude-session" {
@@ -114,6 +114,38 @@ func TestHookAskWaitsForTheUserAndAGrantCoversBothPaths(t *testing.T) {
 	got := hookReceipts(t, e)
 	if len(got) != 2 || got[0].decidedBy != want[0] || got[1].decidedBy != want[1] || got[1].outcome != "gated" {
 		t.Fatalf("receipts = %+v, want decided_by %v", got, want)
+	}
+}
+
+// A grant is for one tool, and a hook call's tool is always a native__ name, which no MCP tool can have
+// ("native" is a reserved server name). So a grant from the hook path never covers an MCP call, even
+// in the same gate, agent and session: the MCP call asks the user again.
+func TestASessionGrantForAHookToolDoesNotCoverAnMCPTool(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "claude", append([]rule.Spec{askWrites}, shellRules...)...)
+	cs := connect(t, g)
+	done := hookAsync(t, g, `{"command":"git push"}`)
+	hookAsk := waitPending(t, e.approvals)
+	if err := e.approvals.Decide(t.Context(), hookAsk.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if ans := awaitHook(t, done); ans != (gate.HookAnswer{Verdict: gate.Allowed}) {
+		t.Fatalf("hook answer = %+v", ans)
+	}
+	mcpDone := callAsync(t.Context(), cs, "memory_write", map[string]any{"title": "t", "body": "b"})
+	mcpAsk := waitPending(t, e.approvals)
+	if mcpAsk.ID == hookAsk.ID || mcpAsk.Tool != "memory_write" || mcpAsk.Session != hookAsk.Session {
+		t.Fatalf("pending = %+v, want a new approval for memory_write in session %s", mcpAsk, hookAsk.Session)
+	}
+	if err := e.approvals.Decide(t.Context(), mcpAsk.ID, approval.ApproveOnce); err != nil {
+		t.Fatal(err)
+	}
+	if c := awaitCall(t, mcpDone); c.err != nil || c.res.IsError {
+		t.Fatalf("MCP call: %+v, %v", c.res, c.err)
+	}
+	want := []string{fmt.Sprintf("user:%d", hookAsk.ID), fmt.Sprintf("user:%d", mcpAsk.ID)}
+	if by := decidedBy(t, e.db); !slices.Equal(by, want) {
+		t.Fatalf("decided_by = %v, want %v", by, want)
 	}
 }
 

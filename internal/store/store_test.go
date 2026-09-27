@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tunahanaliozturk/derbent/internal/store"
 )
@@ -129,5 +130,30 @@ func TestImmediateRollsBackOnError(t *testing.T) {
 	var n int
 	if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM memories`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("rows = %d, err %v, want the insert rolled back", n, err)
+	}
+}
+
+// Every hook call opens the database in a new process. Opening a current database must not wait for
+// the write lock another gate holds, or a hook call could stall past its CLI's timeout.
+func TestOpenACurrentDatabaseDoesNotWaitForTheWriteLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	holder := open(t, path)
+	conn, err := holder.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(t.Context(), "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.ExecContext(context.WithoutCancel(t.Context()), "ROLLBACK") //nolint:errcheck // cleanup
+	began := time.Now()
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if took := time.Since(began); took > 2*time.Second {
+		t.Fatalf("Open waited %s for a lock it did not need", took)
 	}
 }

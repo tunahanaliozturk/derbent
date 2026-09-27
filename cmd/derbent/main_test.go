@@ -20,6 +20,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
+	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 )
@@ -810,5 +811,290 @@ func TestUIOpensAndQuits(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "RECEIPTS") {
 		t.Fatalf("the UI drew nothing recognisable: %q", out.String())
+	}
+}
+
+// runHook starts this test binary as `derbent gate` with stdin and returns its stdout, stderr and exit
+// code, as a CLI's hook runner would see them. It may run on a goroutine of its own, so a process that
+// cannot start is reported with Errorf, and its code is -1.
+func runHook(t *testing.T, dir, stdin string, args ...string) (string, string, int) {
+	t.Helper()
+	base := []string{"gate", "--db", filepath.Join(dir, "p.db"), "--config", filepath.Join(dir, "config.toml")}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], append(base, args...)...)
+	cmd.Env = append(os.Environ(), "DERBENT_TEST_MAIN=1")
+	cmd.Stdin = strings.NewReader(stdin)
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	err := cmd.Run()
+	code := 0
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		code = exit.ExitCode()
+	} else if err != nil {
+		t.Errorf("start the hook: %v", err)
+		code = -1
+	}
+	return out.String(), errOut.String(), code
+}
+
+const hookConfig = `
+[approvals]
+timeout = "20s"
+
+[[rule]]
+tool   = "native__Bash"
+args   = { command = "git push*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__Bash"
+args   = { command = "rm -rf*" }
+action = "deny"
+
+[[rule]]
+action = "allow"
+`
+
+func writeHookConfig(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(hookConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func claudeHookInput(dir, command string) string {
+	in, _ := json.Marshal(map[string]any{
+		"session_id": "sess-1", "cwd": dir, "hook_event_name": "PreToolUse",
+		"tool_name": "Bash", "tool_input": map[string]any{"command": command},
+	})
+	return string(in)
+}
+
+func claudeToolInput(dir, tool string) string {
+	in, _ := json.Marshal(map[string]any{"session_id": "sess-1", "cwd": dir, "tool_name": tool, "tool_input": map[string]any{}})
+	return string(in)
+}
+
+type hookReceipt struct{ tool, project, decidedBy string }
+
+// hookReceiptRows reads the receipts in dir's database, or none when no call ever created it.
+func hookReceiptRows(t *testing.T, dir string) []hookReceipt {
+	t.Helper()
+	db, err := store.OpenExisting(t.Context(), filepath.Join(dir, "p.db"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(t.Context(), `SELECT tool, project, decided_by FROM receipts ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []hookReceipt
+	for rows.Next() {
+		var r hookReceipt
+		if err = rows.Scan(&r.tool, &r.project, &r.decidedBy); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// awaitHookApproval waits until a hook call is pending in dir's database and returns its id.
+func awaitHookApproval(t *testing.T, dir string) int64 {
+	t.Helper()
+	db, err := store.Open(t.Context(), filepath.Join(dir, "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	q := approval.NewQueue(db)
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		p, err := q.Pending(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p) > 0 {
+			return p[0].ID
+		}
+	}
+	t.Fatal("the hook never asked")
+	return 0
+}
+
+func TestHookAllowedByARuleSaysNothing(t *testing.T) {
+	dir := t.TempDir()
+	writeHookConfig(t, dir)
+	out, errOut, code := runHook(t, dir, claudeHookInput(dir, "go test ./..."), "--agent", "claude")
+	if code != 0 || out != "" {
+		t.Fatalf("code %d, stdout %q, stderr %q; want exit 0 and no output", code, out, errOut)
+	}
+	if got := hookReceiptRows(t, dir); len(got) != 1 || got[0].tool != "native__Bash" || got[0].decidedBy != "rule:3" {
+		t.Fatalf("receipts = %+v; the first hook call creates the database and records the call", got)
+	}
+}
+
+func TestHookDeniedByARule(t *testing.T) {
+	dir := t.TempDir()
+	writeHookConfig(t, dir)
+	out, errOut, code := runHook(t, dir, claudeHookInput(dir, "rm -rf /"), "--agent", "claude")
+	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "native__Bash is not allowed") {
+		t.Fatalf("code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}
+
+// The hook leaves Derbent's own tools, the memory tools and those of the servers in its config, to the
+// MCP gate, which decides and records them. A name Derbent does not serve is decided as a native tool.
+func TestHookSkipsDerbentsOwnTools(t *testing.T) {
+	dir := t.TempDir()
+	cfg := hookConfig + "\n[servers.echo]\ncommand = ['echo-server']\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"mcp__derbent__memory_write", "mcp__derbent__echo__echo"} {
+		out, errOut, code := runHook(t, dir, claudeToolInput(dir, tool), "--agent", "claude")
+		if code != 0 || out != "" {
+			t.Fatalf("%s: code %d, stdout %q, stderr %q", tool, code, out, errOut)
+		}
+	}
+	if got := hookReceiptRows(t, dir); len(got) != 0 {
+		t.Fatalf("receipts = %+v; the gate's own tools get none from the hook", got)
+	}
+	out, errOut, code := runHook(t, dir, claudeToolInput(dir, "mcp__derbent__other__tool"), "--agent", "claude")
+	if code != 0 || out != "" {
+		t.Fatalf("code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if got := hookReceiptRows(t, dir); len(got) != 1 || got[0].tool != "native__mcp__derbent__other__tool" {
+		t.Fatalf("receipts = %+v; a server not in the config is not Derbent's", got)
+	}
+}
+
+func TestHookAskIsApprovedFromAnotherProcess(t *testing.T) {
+	dir := t.TempDir()
+	writeHookConfig(t, dir)
+	type result struct {
+		out, errOut string
+		code        int
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, errOut, code := runHook(t, dir, claudeHookInput(dir, "git push origin main"), "--agent", "claude")
+		done <- result{out, errOut, code}
+	}()
+	id := awaitHookApproval(t, dir)
+	if err := run(t.Context(), []string{"approve", "--db", filepath.Join(dir, "p.db"), fmt.Sprint(id)}, strings.NewReader(""), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-done:
+		if r.code != 0 || !strings.Contains(r.out, `"permissionDecision":"allow"`) {
+			t.Fatalf("code %d, stdout %q, stderr %q", r.code, r.out, r.errOut)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("the hook did not return")
+	}
+}
+
+// A hook stopped while its call waits for the user, as a CLI stops a hook that runs past its timeout,
+// withdraws the approval and answers deny.
+func TestHookStoppedWhileWaitingWithdrawsItsApproval(t *testing.T) {
+	dir := t.TempDir()
+	writeHookConfig(t, dir)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, []string{"gate", "--agent", "claude", "--db", filepath.Join(dir, "p.db"), "--config", filepath.Join(dir, "config.toml")},
+			strings.NewReader(claudeHookInput(dir, "git push")), &out, io.Discard)
+	}()
+	id := awaitHookApproval(t, dir)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil || !strings.Contains(out.String(), `"permissionDecision":"deny"`) || !strings.Contains(out.String(), "withdrawn") {
+			t.Fatalf("err %v, stdout %q", err, out.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the stopped hook did not return")
+	}
+	if got := hookReceiptRows(t, dir); len(got) != 1 || got[0].decidedBy != fmt.Sprintf("withdrawn:%d", id) {
+		t.Fatalf("receipts = %+v", got)
+	}
+}
+
+func TestHookFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeHookConfig(t, dir)
+	out, errOut, code := runHook(t, dir, `{"tool_name":"Bash"}`, "--agent", "claude")
+	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "session") {
+		t.Fatalf("missing session id: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[[rule]]\naction = \"maybe\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Under a config that does not load, the hook cannot tell which tools are Derbent's, so it denies
+	// those too rather than skip them.
+	for _, in := range []string{claudeHookInput(dir, "ls"), claudeToolInput(dir, "mcp__derbent__memory_write")} {
+		out, errOut, code = runHook(t, dir, in, "--agent", "claude")
+		if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "config") {
+			t.Fatalf("broken config: code %d, stdout %q, stderr %q", code, out, errOut)
+		}
+	}
+	_, errOut, code = runHook(t, dir, claudeHookInput(dir, "ls"), "--agent", "someone")
+	if code != 2 || !strings.Contains(errOut, "--cli") {
+		t.Fatalf("unknown cli: code %d, stderr %q", code, errOut)
+	}
+}
+
+func TestHookInputIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	writeHookConfig(t, dir)
+	huge := `{"session_id":"s","cwd":"x","tool_name":"Bash","tool_input":{"command":"` + strings.Repeat("a", 17<<20) + `"}}`
+	out, errOut, code := runHook(t, dir, huge, "--agent", "claude")
+	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) {
+		t.Fatalf("code %d, stdout %.200q, stderr %q", code, out, errOut)
+	}
+}
+
+// The project is --project when given, else the directory the CLI reports, else the working directory,
+// since Antigravity can report no workspace at all.
+func TestHookProjectComesFromTheFlagThenTheCLIThenTheWorkingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeHookConfig(t, dir)
+	other := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	antigravity := `{"toolCall":{"name":"run_command","args":{}},"conversationId":"c1","workspacePaths":[]}`
+	for _, c := range []struct {
+		in   string
+		args []string
+	}{
+		{claudeHookInput(dir, "ls"), []string{"--agent", "claude", "--project", other}},
+		{claudeHookInput(dir, "ls"), []string{"--agent", "claude"}},
+		{antigravity, []string{"--agent", "antigravity"}},
+	} {
+		if out, errOut, code := runHook(t, dir, c.in, c.args...); code != 0 || out != "" {
+			t.Fatalf("%v: code %d, stdout %q, stderr %q", c.args, code, out, errOut)
+		}
+	}
+	got := hookReceiptRows(t, dir)
+	for i, d := range []string{other, dir, wd} {
+		want, err := config.ProjectKey(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 3 || got[i].project != want {
+			t.Fatalf("receipts = %+v; call %d should be in project %s", got, i, want)
+		}
 	}
 }
