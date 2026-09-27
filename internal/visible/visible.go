@@ -23,7 +23,7 @@ func Unsafe(r rune) bool {
 
 // blanks are runes outside the categories above that a terminal draws as nothing or as a space: the
 // four Hangul fillers, the combining grapheme joiner and the braille blank.
-const blanks = "ᅟᅠㅤﾠ͏⠀"
+const blanks = "\u115f\u1160\u3164\uffa0\u034f\u2800"
 
 // Escape returns s with every unsafe rune written as an escape: \n and \t for a newline and a tab, so
 // one value stays one line, \uXXXX, or \UXXXXXXXX above U+FFFF, for the others, and \xNN for a byte

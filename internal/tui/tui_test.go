@@ -19,6 +19,7 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
 func TestMain(m *testing.M) {
@@ -524,6 +525,20 @@ func TestThePreviewReadsNoFurtherIntoSpacesThanItsLimit(t *testing.T) {
 	s := screen(m)
 	if !regexp.MustCompile(`␠×\d+\+`).MatchString(s) || !strings.Contains(s, "more lines, enter to read all") {
 		t.Fatalf("the preview does not say the spaces go on:\n%s", s)
+	}
+}
+
+// Only spaces that draw as a blank are shortened to ␠×N. A run of carriage returns or other control
+// or line-breaking spaces keeps its escaped form, so the user sees what the agent actually sent.
+func TestARunOfControlSpacesShowsEscaped(t *testing.T) {
+	for _, r := range "\r\v\f\u0085\u2028\u2029" {
+		args := strings.Repeat(string(r), 9)
+		if text, _ := argText(args, 4096); strings.Contains(text, "␠") || text != visible.Escape(args) {
+			t.Errorf("argText(nine %U) = %q, want %q", r, text, visible.Escape(args))
+		}
+	}
+	if text, _ := argText(strings.Repeat("\r", 9), 4096); text != strings.Repeat(`\u000d`, 9) {
+		t.Errorf("argText(nine \\r) = %q", text)
 	}
 }
 

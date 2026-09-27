@@ -139,8 +139,9 @@ func argText(s string, limit int) (string, int) {
 	return b.String(), i
 }
 
-// padding reports whether r is a space of any kind but a newline or a tab, which Escape writes as \n
-// and \t. unicode.IsSpace covers every space separator (category Zs).
+// padding reports whether r is a space that draws as a blank: the ASCII space or another space
+// separator (category Zs). Control and line-breaking spaces (\r, \v, \f, U+0085, U+2028, U+2029) are
+// not padding, so a run of them keeps the escaped form that shows what they are.
 func padding(r rune) bool {
-	return r != '\n' && r != '\t' && unicode.IsSpace(r)
+	return r == ' ' || unicode.Is(unicode.Zs, r)
 }

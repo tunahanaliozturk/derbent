@@ -109,7 +109,7 @@ func (g *Gate) waitForTools(ctx context.Context) {
 }
 
 // call decides one tools/call request and records its receipt. The gate itself refuses, before any rule
-// is read, a name it does not serve and arguments that are not an object; the rules decide the rest.
+// is read, a name it does not serve; settle decides the rest.
 func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest, next mcp.MethodHandler) (mcp.Result, error) {
 	start := time.Now()
 	name := req.Params.Name
@@ -117,35 +117,29 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 	rec := receipt.Receipt{
 		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name,
 		Args: g.redact(argsJSON), ArgsSHA256: sha256Hex(req.Params.Arguments),
-		Decision: string(rule.Deny), DecidedBy: "gate", Outcome: "refused",
+		Decision: string(rule.Deny), Outcome: "refused",
 	}
+	// Asking the user about a name the gate does not serve would only fill their queue with a call that
+	// fails anyway. Hook calls name the CLI's own tools, which the gate never serves, so this check is
+	// here and not in settle.
+	s := settled{by: "gate", text: name + " is not a tool this gate serves"}
+	if g.serves(name) {
+		s = g.settle(ctx, name, args, isObject, rec.Args)
+	}
+	rec.DecidedBy = s.by
 	var (
 		res mcp.Result
 		err error
 	)
 	switch {
-	case !g.serves(name):
-		// Asking the user about it would only fill their queue with a call that fails anyway.
-		res = toolError("derbent: " + name + " is not a tool this gate serves")
-	case !isObject:
-		// MCP arguments are an object. Rules read named string arguments, so anything else would slip
-		// past an args condition that a deny depends on.
-		res = toolError("derbent: " + name + " was refused: its arguments are not a JSON object")
+	case s.allow:
+		rec.Decision = string(rule.Allow)
+		res, err = next(ctx, method, req)
+		rec.Outcome = outcome(res, err)
+	case s.err != nil: // the agent gave up while the call waited
+		err = s.err
 	default:
-		decision := g.Rules.Decide(g.Agent, name, args)
-		if knobs.skipRules {
-			decision = rule.Decision{Action: rule.Allow}
-		}
-		rec.Decision, rec.DecidedBy = string(decision.Action), "rule:"+strconv.Itoa(decision.Rule)
-		switch decision.Action { // rule.Compile admits these three and no other
-		case rule.Allow:
-			res, err = next(ctx, method, req)
-			rec.Outcome = outcome(res, err)
-		case rule.Ask:
-			res, err = g.ask(ctx, method, req, next, &rec, decision.Rule)
-		case rule.Deny:
-			res = refusal(name, decision.Rule)
-		}
+		res = toolError("derbent: " + s.text)
 	}
 	rec.ResultSize, rec.ResultSHA256 = resultDigest(res, err)
 	rec.Duration = time.Since(start)
@@ -156,36 +150,58 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 	return res, err
 }
 
-// ask settles a call a rule sends to the user, and fills in rec's decision and outcome. A grant from an
-// earlier "approve for this session" lets the call through at once. Otherwise the call waits in the
-// approval queue until the user decides, the timeout passes, or the agent gives up.
-func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest, next mcp.MethodHandler,
-	rec *receipt.Receipt, ruleIndex int,
-) (mcp.Result, error) {
-	name := req.Params.Name
-	refuse := func(by, text string) (mcp.Result, error) {
-		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), by, "refused"
-		return toolError("derbent: " + text), nil
+// settled is how the gate answered a call before it runs.
+type settled struct {
+	allow bool
+	user  bool   // the call is allowed because the user approved it, now or earlier in the session
+	by    string // what decided: rule:<n>, gate, user:<id>, grant:<id>, timeout:<id> or withdrawn:<id>
+	text  string // what the agent is told when the call is refused
+	err   error  // set when the agent gave up while the call waited
+}
+
+// settle decides a call before it runs: the rules first, and for a rule that says ask, a grant from an
+// earlier "approve for this session" or the user's answer. MCP calls and pre-tool hook calls both come
+// through here, so the two paths cannot decide differently. redacted is the arguments as the approval
+// queue may show them.
+func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isObject bool, redacted string) settled {
+	if !isObject {
+		// Arguments are an object. Rules read named string arguments, so anything else would slip past
+		// an args condition that a deny depends on.
+		return settled{by: "gate", text: name + " was refused: its arguments are not a JSON object"}
 	}
-	run := func(by string) (mcp.Result, error) {
-		rec.Decision, rec.DecidedBy = string(rule.Allow), by
-		res, err := next(ctx, method, req)
-		rec.Outcome = outcome(res, err)
-		return res, err
+	d := g.Rules.Decide(g.Agent, name, args)
+	if knobs.skipRules {
+		d = rule.Decision{Action: rule.Allow}
 	}
+	byRule := "rule:" + strconv.Itoa(d.Rule)
+	switch d.Action { // rule.Compile admits these three and no other
+	case rule.Allow:
+		return settled{allow: true, by: byRule}
+	case rule.Ask:
+		return g.ask(ctx, name, redacted, d.Rule, byRule)
+	case rule.Deny:
+	}
+	return settled{by: byRule, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, d.Rule)}
+}
+
+// ask settles a call a rule sends to the user. A grant from an earlier "approve for this session" lets
+// it through at once. Otherwise the call waits in the approval queue until the user decides, the
+// timeout passes, the agent gives up, or the gate is told to stop.
+func (g *Gate) ask(ctx context.Context, name, redacted string, ruleIndex int, byRule string) settled {
 	if g.Approvals == nil {
-		return refuse(rec.DecidedBy, name+" needs the user's approval, and this gate cannot ask for it")
+		return settled{by: byRule, text: name + " needs the user's approval, and this gate cannot ask for it"}
 	}
 	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name)
 	if err != nil {
-		return refuse(rec.DecidedBy, name+" needs the user's approval, which could not be checked: "+err.Error())
+		return settled{by: byRule, text: name + " needs the user's approval, which could not be checked: " + err.Error()}
 	}
 	if granted {
-		return run("grant:" + strconv.FormatInt(id, 10))
+		return settled{allow: true, user: true, by: "grant:" + strconv.FormatInt(id, 10)}
 	}
 	// A gate told to stop asks nothing more: the call never waits, so the gate itself refuses it.
+	stopping := settled{by: "gate", text: name + " was refused because the gate is stopping; it did not run"}
 	if g.Stop != nil && g.Stop.Err() != nil {
-		return refuse("gate", name+" was refused because the gate is stopping; it did not run")
+		return stopping
 	}
 	// The call waits until the agent gives up or the gate is told to stop, whichever comes first.
 	wait, cancel := context.WithCancel(ctx)
@@ -195,7 +211,7 @@ func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest,
 		defer stop()
 	}
 	out, err := g.Approvals.Ask(wait, approval.Request{
-		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: rec.Args, Rule: ruleIndex,
+		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: redacted, Rule: ruleIndex,
 	}, g.ApprovalTimeout)
 	ref := strconv.FormatInt(out.ID, 10)
 	withdrawn := "withdrawn:" + ref
@@ -204,19 +220,20 @@ func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest,
 	}
 	switch {
 	case err != nil && ctx.Err() != nil:
-		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), withdrawn, "refused"
-		return nil, err
+		return settled{by: withdrawn, text: name + " was withdrawn before the user decided", err: err}
+	case err != nil && wait.Err() != nil && out.ID == 0:
+		return stopping // the gate stopped before the call could wait, as if it had been stopping already
 	case err != nil && wait.Err() != nil:
-		return refuse(withdrawn, name+" was withdrawn before the user decided, because the gate is stopping; it did not run")
+		return settled{by: withdrawn, text: name + " was withdrawn before the user decided, because the gate is stopping; it did not run"}
 	case err != nil:
-		return refuse(rec.DecidedBy, name+" needs the user's approval, which could not be asked for: "+err.Error())
+		return settled{by: byRule, text: name + " needs the user's approval, which could not be asked for: " + err.Error()}
 	case out.Approved:
-		return run("user:" + ref)
+		return settled{allow: true, user: true, by: "user:" + ref}
 	case out.By == approval.ByTimeout:
-		return refuse("timeout:"+ref, fmt.Sprintf("%s needs the user's approval and none came within %s, so it was denied. "+
-			"Try again and ask the user to approve it in the derbent UI while it waits.", name, g.ApprovalTimeout))
+		return settled{by: "timeout:" + ref, text: fmt.Sprintf("%s needs the user's approval and none came within %s, so it was denied. "+
+			"Try again and ask the user to approve it in the derbent UI while it waits.", name, g.ApprovalTimeout)}
 	default:
-		return refuse("user:"+ref, "the user denied "+name)
+		return settled{by: "user:" + ref, text: "the user denied " + name}
 	}
 }
 
@@ -307,15 +324,6 @@ func resultBytes(res mcp.Result) []byte {
 		return raw
 	}
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
-}
-
-func refusal(tool string, ruleIndex int) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
-		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{
-			Text: fmt.Sprintf("derbent: %s is not allowed for this agent (rule %d)", tool, ruleIndex),
-		}},
-	}
 }
 
 func sha256Hex(b []byte) string {
