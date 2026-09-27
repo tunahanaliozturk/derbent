@@ -40,29 +40,41 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 
 // OpenExistingWritable opens the database at path as Open does, migrating it if needed, but never
 // creates it: a path that does not exist is an error naming it, so a mistyped path fails instead of
-// showing an empty database where nothing ever waits.
+// showing an empty database where nothing ever waits. It first opens the file as OpenExisting does, so
+// another program's SQLite file is refused before anything is written to it.
 func OpenExistingWritable(ctx context.Context, path string) (*sql.DB, error) {
-	if _, err := os.Stat(path); err != nil {
+	db, err := OpenExisting(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if err = db.Close(); err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
 	return Open(ctx, path)
 }
 
-// OpenExisting opens the database at path for reading only. It never creates the file, never migrates
-// it, and refuses to run a statement that writes, so a copy kept as evidence stays byte for byte as it
-// was. A schema newer than this binary knows is refused.
+// OpenExisting opens the database at path read-only. It never creates the file and never migrates it.
+// SQLite opens the file itself read-only, so no statement can write it and closing never folds the
+// write-ahead log into it: a copy kept as evidence stays byte for byte as it was, and so does its -wal
+// file. SQLite may add its -shm index file beside them. A schema newer than this binary knows is
+// refused, and so is a file with tables but no Derbent schema version, which is another program's.
 func OpenExisting(ctx context.Context, path string) (*sql.DB, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
-	db, err := sql.Open("sqlite", fileURI(path)+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
+	db, err := sql.Open("sqlite", fileURI(path)+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
-	var version int
-	if err = db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+	var version, objects int
+	if err = db.QueryRowContext(ctx, "SELECT (SELECT user_version FROM pragma_user_version), (SELECT count(*) FROM sqlite_master)").
+		Scan(&version, &objects); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("open database %s: read schema version: %w", path, err)
+	}
+	if version == 0 && objects > 0 {
+		db.Close()
+		return nil, fmt.Errorf("open database %s: it is not a Derbent database: it has tables but no Derbent schema version", path)
 	}
 	names, err := fs.Glob(migrations, "migrations/*.sql")
 	if err != nil {

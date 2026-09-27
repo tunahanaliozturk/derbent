@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -252,6 +253,86 @@ func TestVerifyLeavesTheDatabaseUntouched(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Fatal("verify changed the database file")
+	}
+}
+
+// A copy taken while a gate was writing holds receipts that are only in the write-ahead log. Reading
+// it must not fold the log into the database file, which SQLite does when the last connection that may
+// write closes: verify, receipts and pending leave both files byte for byte as they were, and still
+// see the receipts in the log.
+func TestReadingCommandsLeaveADatabaseAndItsLogUntouched(t *testing.T) {
+	live := filepath.Join(t.TempDir(), "p.db")
+	writer, err := store.Open(t.Context(), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	for range 3 {
+		if _, err = receipt.NewLog(writer).Append(t.Context(), receipt.Receipt{Project: "p", Agent: "a", Session: "s", Tool: "t", Args: "{}"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The writer stays open, so the log still holds the receipts while the files are copied.
+	path := filepath.Join(t.TempDir(), "p.db")
+	files := map[string][]byte{}
+	for _, suffix := range []string{"", "-wal"} {
+		b, readErr := os.ReadFile(live + suffix)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if err = os.WriteFile(path+suffix, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files[suffix] = b
+	}
+	if len(files["-wal"]) == 0 {
+		t.Fatal("the write-ahead log is empty, so this test proves nothing")
+	}
+	var out bytes.Buffer
+	if err = run(t.Context(), []string{"verify", "--db", path}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if !strings.Contains(out.String(), "receipts: 3") {
+		t.Fatalf("verify output %q, want the three receipts that are only in the log", out.String())
+	}
+	for _, args := range [][]string{{"receipts", "--db", path}, {"pending", "--db", path}} {
+		if err = run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != nil {
+			t.Fatalf("%s: %v", args[0], err)
+		}
+	}
+	for suffix, want := range files {
+		got, readErr := os.ReadFile(path + suffix)
+		if readErr != nil || !bytes.Equal(got, want) {
+			t.Fatalf("p.db%s changed: %d bytes before, %d after, err %v", suffix, len(want), len(got), readErr)
+		}
+	}
+}
+
+// A --db that names some other program's SQLite file is a mistake: approve, deny and the UI refuse it
+// instead of adding Derbent's tables to it, and leave it as it was.
+func TestCommandsRefuseADatabaseThatIsNotDerbents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "other.db")
+	other, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = other.ExecContext(t.Context(), `CREATE TABLE notes (body TEXT)`)
+	other.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"approve", "--db", path, "1"}, {"deny", "--db", path, "1"}, {"--db", path}} {
+		err := run(t.Context(), args, strings.NewReader("q"), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "not a Derbent database") {
+			t.Errorf("%v: err = %v, want it to say the file is not a Derbent database", args, err)
+		}
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the other program's database changed: err %v", err)
 	}
 }
 

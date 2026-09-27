@@ -183,6 +183,11 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
 - Results are stored as size and hash only. What a tool returned can be large or private, and the hash
   is enough to show later that a given result was the one returned. It is taken over a form of the
   result that can be rebuilt from what the agent received (ADR 0004).
+- `derbent verify`, `derbent receipts` and `derbent pending` open the database file read-only, so the
+  file and its `-wal` stay byte for byte as they were, even when the `-wal` still holds receipts that
+  are not in the file yet; SQLite may add its `-shm` index beside them. A file with tables but no
+  Derbent schema version is another program's: these commands, `derbent approve`, `derbent deny` and
+  the UI given `--db` refuse it and leave it as it was.
 - `derbent verify` opens the database read-only, never creates or migrates it, walks the chain and
   names the first sequence number whose hash, predecessor or position is wrong. It prints the head
   hash. Someone able to write the database could rewrite the whole chain consistently, or delete the
