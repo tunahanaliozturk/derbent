@@ -55,6 +55,8 @@ The first release.
 
 - The hook fails closed: when it cannot read the call, load the config, open the database or write the
   receipt, it denies the call and says why.
+- A session grant never covers a call that its rule matched on an argument it could not read, such as a
+  `command` sent as an array: each such call asks.
 - A `url` server must use HTTPS, except on localhost, and redirects are refused, so its headers never
   reach another host.
 - Secrets come from `${env:...}` only through a server's `env` or `headers`, never in `command` or `url`,

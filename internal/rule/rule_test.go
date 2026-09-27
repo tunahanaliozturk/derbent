@@ -20,6 +20,11 @@ func decided(action rule.Action, n int) rule.Decision {
 	return rule.Decision{Action: action, Rule: n}
 }
 
+// unread is a decision whose rule matched because an args condition could not read the value.
+func unread(action rule.Action, n int) rule.Decision {
+	return rule.Decision{Action: action, Rule: n, Unread: true}
+}
+
 func TestDecide(t *testing.T) {
 	set := mustCompile(t,
 		rule.Spec{Tool: "memory_*", Action: rule.Allow},
@@ -38,8 +43,8 @@ func TestDecide(t *testing.T) {
 		"push is denied":                     {"codex", "native__Bash", map[string]any{"command": "git push origin main"}, decided(rule.Deny, 3)},
 		"star spans newlines":                {"codex", "native__Bash", map[string]any{"command": "git push origin\nmain --force"}, decided(rule.Deny, 3)},
 		"other commands pass":                {"codex", "native__Bash", map[string]any{"command": "go test ./..."}, decided(rule.Allow, 4)},
-		"non-string argument matches a deny": {"codex", "native__Bash", map[string]any{"command": []any{"git", "push"}}, decided(rule.Deny, 3)},
-		"null argument matches a deny":       {"codex", "native__Bash", map[string]any{"command": nil}, decided(rule.Deny, 3)},
+		"non-string argument matches a deny": {"codex", "native__Bash", map[string]any{"command": []any{"git", "push"}}, unread(rule.Deny, 3)},
+		"null argument matches a deny":       {"codex", "native__Bash", map[string]any{"command": nil}, unread(rule.Deny, 3)},
 		"missing argument never matches":     {"codex", "native__Bash", nil, decided(rule.Allow, 4)},
 	}
 	for name, tc := range tests {
@@ -162,7 +167,7 @@ func TestAsk(t *testing.T) {
 	}{
 		"asked tool":                        {"github__create_issue", nil, decided(rule.Ask, 1)},
 		"asked command":                     {"native__Bash", map[string]any{"command": "git push origin main"}, decided(rule.Ask, 2)},
-		"unreadable value goes to a person": {"native__Bash", map[string]any{"command": []any{"git", "push"}}, decided(rule.Ask, 2)},
+		"unreadable value goes to a person": {"native__Bash", map[string]any{"command": []any{"git", "push"}}, unread(rule.Ask, 2)},
 		"other command passes":              {"native__Bash", map[string]any{"command": "go test ./..."}, decided(rule.Allow, 4)},
 		"other github tool is denied":       {"github__delete_repo", nil, decided(rule.Deny, 3)},
 	}

@@ -27,7 +27,9 @@ then its `args` conditions sorted by name, each string written as its length, a 
 Each form goes into the hash the same way, as its length, a colon and its bytes, so two different rule
 lists never give the same bytes. Each approval stores the fingerprint of the rule that asked, and `A`
 writes the grant with it. A later call is let through by a grant only when a rule with the same
-fingerprint asks about it. An approval with no fingerprint grants nothing.
+fingerprint asks about it. An approval with no fingerprint grants nothing. A call that its rule matched
+on an argument the rule could not read (ADR 0003) gets no fingerprint, so no grant covers it and
+approving it writes none: nobody has seen what such a call does, so each one asks.
 
 Migration 0003 adds `rule_key` to `approvals` and rebuilds `grants` on
 `(agent, session, tool, rule_key)`.
@@ -53,8 +55,10 @@ Migration 0003 adds `rule_key` to `approvals` and rebuilds `grants` on
 - The grants written before the upgrade are dropped by migration 0003, since they do not say which rule
   asked. A grant lasts one agent session, so the cost is one more question per rule in the sessions
   running during the upgrade.
-- A gate from before the upgrade that is still running writes approvals with no fingerprint. The UI's
-  `A` question says it approves such a call once, and does. `derbent approve --session` has no question
-  to confirm, so it refuses such an approval and says to approve it once.
+- A gate from before the upgrade that is still running writes approvals with no fingerprint, as does a
+  call matched on an argument its rule could not read. The UI's `A` question says it approves such a
+  call once, and does. `derbent approve --session` has no question to confirm, so it refuses such an
+  approval and says to approve it once. `internal/gate` tests on both paths that after `A` on a string
+  `git push`, a `command` sent as an array still asks, and `A` on it writes no grant.
 - The UI's `A` question, the UI's status after the approval and `derbent approve --session` name the
   scope: the tool, the rule's number and the agent.

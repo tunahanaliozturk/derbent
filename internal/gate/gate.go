@@ -178,7 +178,7 @@ func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isO
 	case rule.Allow:
 		return settled{allow: true, by: byRule}
 	case rule.Ask:
-		return g.ask(ctx, name, redacted, d.Rule, byRule)
+		return g.ask(ctx, name, redacted, d, byRule)
 	case rule.Deny:
 	}
 	return settled{by: byRule, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, d.Rule)}
@@ -189,12 +189,16 @@ func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isO
 // are keyed on a fingerprint of the rule and every rule above it, so one rule's grant never covers a
 // call that another rule holds, nor one the same rule catches after a rule above it changed (ADR 0011).
 // Otherwise the call waits in the approval queue until the user decides, the timeout passes, the agent
-// gives up, or the gate is told to stop.
-func (g *Gate) ask(ctx context.Context, name, redacted string, ruleIndex int, byRule string) settled {
+// gives up, or the gate is told to stop. A call the rule matched on a value it could not read gets no
+// rule key, so no grant covers it and approving it writes none: every such call is shown to the user.
+func (g *Gate) ask(ctx context.Context, name, redacted string, d rule.Decision, byRule string) settled {
 	if g.Approvals == nil {
 		return settled{by: byRule, text: name + " needs the user's approval, and this gate cannot ask for it"}
 	}
-	ruleKey := g.Rules.Key(ruleIndex)
+	ruleKey := g.Rules.Key(d.Rule)
+	if d.Unread {
+		ruleKey = "" // an empty key never matches a grant, and an approval with none grants nothing
+	}
 	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name, ruleKey)
 	if err != nil {
 		return settled{by: byRule, text: name + " needs the user's approval, which could not be checked: " + err.Error()}
@@ -215,7 +219,7 @@ func (g *Gate) ask(ctx context.Context, name, redacted string, ruleIndex int, by
 		defer stop()
 	}
 	out, err := g.Approvals.Ask(wait, approval.Request{
-		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: redacted, Rule: ruleIndex, RuleKey: ruleKey,
+		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: redacted, Rule: d.Rule, RuleKey: ruleKey,
 	}, g.ApprovalTimeout)
 	ref := strconv.FormatInt(out.ID, 10)
 	withdrawn := "withdrawn:" + ref

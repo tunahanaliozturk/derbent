@@ -240,6 +240,44 @@ func TestApprovalForTheSessionCoversOnlyTheRuleThatAsked(t *testing.T) {
 	}
 }
 
+// An args condition that cannot read a value sends the call to a person (ADR 0003), and a session grant
+// must never cover such a call: after A on a readable deploy note, a note whose title is not a string
+// still asks, and A on it approves that call once and writes no grant.
+func TestASessionGrantNeverCoversACallWhoseArgumentCouldNotBeRead(t *testing.T) {
+	e := newEnv(t)
+	deploys := rule.Spec{Tool: "memory_write", Args: map[string]string{"title": "deploy*"}, Action: rule.Ask}
+	cs := connect(t, e.gate(t, "codex", deploys, allowRest))
+	done := callAsync(t.Context(), cs, "memory_write", map[string]any{"title": "deploy one", "body": "b"})
+	first := waitPending(t, e.approvals)
+	if err := e.approvals.Decide(t.Context(), first.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if c := awaitCall(t, done); c.err != nil || c.res.IsError {
+		t.Fatalf("first call: %+v, %v", c.res, c.err)
+	}
+	want := []string{fmt.Sprintf("user:%d", first.ID)}
+	for range 2 {
+		// memory_write itself refuses a title that is not a string; what matters here is that it asks.
+		done = callAsync(t.Context(), cs, "memory_write", map[string]any{"title": []any{"deploy"}, "body": "b"})
+		p := waitPending(t, e.approvals)
+		if p.RuleKey != "" {
+			t.Fatalf("pending rule key = %q, want none, so that approving it can grant nothing", p.RuleKey)
+		}
+		if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+			t.Fatal(err)
+		}
+		awaitCall(t, done)
+		want = append(want, fmt.Sprintf("user:%d", p.ID))
+	}
+	var grants int
+	if err := e.db.QueryRowContext(t.Context(), `SELECT count(*) FROM grants`).Scan(&grants); err != nil || grants != 1 {
+		t.Fatalf("grants = %d, err %v; want only the one for the readable call", grants, err)
+	}
+	if by := decidedBy(t, e.db); !slices.Equal(by, want) {
+		t.Fatalf("decided_by = %v, want %v: every unreadable call should have asked", by, want)
+	}
+}
+
 func TestAgentGivingUpLeavesAReceiptThatTheCallDidNotRun(t *testing.T) {
 	e := newEnv(t)
 	cs := connect(t, e.gate(t, "codex", askWrites, allowRest))

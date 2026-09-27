@@ -37,6 +37,10 @@ type Decision struct {
 	Action Action
 	// Rule is the 1-based position of the matching rule in the config, or 0 when no rule matched.
 	Rule int
+	// Unread reports that the rule matched because an args condition could not read the value it names
+	// (a number, an array, an object, null). Nobody has seen what such a call does, so a session grant
+	// must never cover it (ADR 0011).
+	Unread bool
 }
 
 // ErrInvalid marks a rule list that cannot be compiled.
@@ -128,8 +132,11 @@ func form(sp Spec) string {
 // decoded as a JSON object, or nil when there are none.
 func (s Set) Decide(agent, tool string, args map[string]any) Decision {
 	for i, r := range s.rules {
-		if r.agent.match(agent) && r.tool.match(tool) && r.argsMatch(args) {
-			return Decision{Action: r.action, Rule: i + 1}
+		if !r.agent.match(agent) || !r.tool.match(tool) {
+			continue
+		}
+		if match, unread := r.argsMatch(args); match {
+			return Decision{Action: r.action, Rule: i + 1, Unread: unread}
 		}
 	}
 	return Decision{Action: Deny}
@@ -159,25 +166,27 @@ func (s Set) Hidden(agent, tool string) bool {
 // argsMatch checks every args condition of the rule against the call. A condition matches a string
 // value through its pattern. A value the pattern cannot read (a number, an array, an object, null)
 // matches a deny or an ask and never an allow, so an args condition never lets through what it cannot
-// check: the call is refused or a person looks at it. A missing argument matches neither.
-func (c compiled) argsMatch(args map[string]any) bool {
+// check: the call is refused or a person looks at it. A missing argument matches neither. unread
+// reports that the rule matched through such a value.
+func (c compiled) argsMatch(args map[string]any) (match, unread bool) {
 	for name, g := range c.args {
 		v, present := args[name]
 		if !present {
-			return false
+			return false, false
 		}
 		s, isString := v.(string)
 		if !isString {
-			if c.action != Allow {
-				continue
+			if c.action == Allow {
+				return false, false
 			}
-			return false
+			unread = true
+			continue
 		}
 		if !g.match(s) {
-			return false
+			return false, false
 		}
 	}
-	return true
+	return true, unread
 }
 
 // glob matches * against any run of characters, newlines included, and ? against exactly one.

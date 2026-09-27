@@ -229,7 +229,8 @@ agent, the tool, the time left and the start of its arguments, masked as they ar
 terminal bell rings when a new one arrives. `enter` shows the highlighted call's whole arguments, and up,
 down, page up, page down, home and end scroll them. The keys act on the highlighted call: `a` approves it
 once, `d` denies it, and `A` pressed twice within five seconds approves the tool's calls that the same
-rule asks about under the same rules above it, for the rest of that agent's session. Up and down pick
+rule asks about under the same rules above it, for the rest of that agent's session; a call whose rule
+could not read one of its arguments, such as a `command` sent as an array, asks every time. Up and down pick
 another call. A newly highlighted call takes none of these keys for its first 750 ms on the main screen,
 so a key meant for the call before it cannot land on it.
 

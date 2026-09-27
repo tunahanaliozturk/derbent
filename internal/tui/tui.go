@@ -320,12 +320,12 @@ func (m Model) decide(v approval.Verdict, asked int64) (tea.Model, tea.Cmd) {
 }
 
 // sessionScope is what A approves for p: the tool's calls that the rule which asked holds, under the
-// same rules above it, for the rest of the agent's session. An approval with no rule key was written by
-// a gate from before grants followed the rule, still running after the upgrade, and it grants nothing
-// (ADR 0011), so A approves it once.
+// same rules above it, for the rest of the agent's session. An approval with no rule key grants nothing
+// (ADR 0011), so A approves it once. It has none when its rule matched on an argument it could not read,
+// or when a gate from before grants followed the rule, still running after the upgrade, asked.
 func sessionScope(p approval.Pending) string {
 	if p.RuleKey == "" {
-		return fmt.Sprintf("%s's %s call once, since the gate that asked predates rule-scoped grants", p.Agent, p.Tool)
+		return fmt.Sprintf("%s's %s call once; this call cannot be approved for the session", p.Agent, p.Tool)
 	}
 	return fmt.Sprintf("%s calls that rule %d asks about, for the rest of %s's session", p.Tool, p.Rule, p.Agent)
 }

@@ -600,8 +600,9 @@ func TestSessionApprovalNeedsASecondA(t *testing.T) {
 	}
 }
 
-// A gate from before grants followed the rule, still running after the upgrade, writes approvals with no
-// rule key, and such an approval grants nothing. So A on one says it approves the call once, and does.
+// An approval has no rule key when its rule matched on an argument it could not read, or when a gate
+// from before grants followed the rule, still running after the upgrade, asked. Such an approval grants
+// nothing, so A on one says it approves the call once, and does.
 func TestSessionApprovalWithNoRuleKeySaysItApprovesOnce(t *testing.T) {
 	m, d := newModel(t)
 	keyless := askReq
@@ -610,7 +611,7 @@ func TestSessionApprovalWithNoRuleKeySaysItApprovesOnce(t *testing.T) {
 	waitPending(t, d.q, 1)
 	m, _ = refresh(m)
 	m, _ = press(later(m, armAfter), "A")
-	scope := "codex's github__create_issue call once, since the gate that asked predates rule-scoped grants"
+	scope := "codex's github__create_issue call once; this call cannot be approved for the session"
 	if want := "press A again to approve " + scope; !strings.Contains(screen(m), want) {
 		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
 	}

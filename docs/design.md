@@ -203,16 +203,19 @@ arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's
   Editing or reordering the config never widens a grant. The hook reads the config on every call, so
   there a change to the granted rule or to any rule above it asks again while the change stands, and
   the grant applies again if the change is undone; a change below it keeps the grant. A `derbent mcp`
-  gate reads the config only when it starts, so an edit does not affect its grants (ADR 0011). `A`
+  gate reads the config only when it starts, so an edit does not affect its grants (ADR 0011). No
+  grant covers a call that its rule matched on an argument the rule could not read, such as a `command`
+  sent as an array, so each such call asks. `A`
   takes a second press within five seconds, so one press can never grant the session, and the question
   and the status after it name the tool, the rule's number and the agent. An `a` typed with Caps Lock on
   arrives as `a` with Caps Lock from a terminal that reports modifiers, and the UI takes it as `a`; a
   terminal that reports none sends `A`, which still needs the second press. Nothing the UI does
   changes the config file.
 - `derbent approve [--session] <id>` and `derbent deny <id>` do the same from any shell, by the id the
-  UI shows, written `12` or `#12`. An approval written by a gate from before grants followed the rule,
-  still running after the upgrade, names no rule and grants nothing: `A` in the UI says it approves the
-  call once, and `derbent approve --session` refuses it and says to approve it once. `derbent pending`
+  UI shows, written `12` or `#12`. An approval for a call matched on an argument its rule could not
+  read, or one written by a gate from before grants followed the rule, still running after the upgrade,
+  names no rule and grants nothing: `A` in the UI says it approves the call once, and
+  `derbent approve --session` refuses it and says to approve it once. `derbent pending`
   lists the waiting calls with their whole arguments, read-only, as rows or JSON lines, so they can be
   read before deciding. The deciding commands, and the UI given `--db`, refuse a database path that does
   not exist instead of creating one.

@@ -521,9 +521,10 @@ func TestApproveForTheSessionLeavesAGrant(t *testing.T) {
 	}
 }
 
-// A gate from before grants followed the rule, still running after the upgrade, writes approvals with no
-// rule key, and such an approval grants nothing. approve --session refuses it and says how to approve it
-// once, and the call keeps waiting until it is.
+// An approval has no rule key when its rule matched on an argument it could not read, or when a gate
+// from before grants followed the rule, still running after the upgrade, asked. Such an approval grants
+// nothing. approve --session refuses it, says why and how to approve it once, and the call keeps waiting
+// until it is.
 func TestApproveForTheSessionRefusesAnApprovalWithNoRuleKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
 	db, err := store.Open(t.Context(), path)
@@ -542,7 +543,8 @@ func TestApproveForTheSessionRefusesAnApprovalWithNoRuleKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = run(t.Context(), []string{"approve", "--session", "--db", path, fmt.Sprint(id)}, strings.NewReader(""), io.Discard, io.Discard)
-	if want := fmt.Sprintf("approve it once with derbent approve %d", id); err == nil || !strings.Contains(err.Error(), want) {
+	if want := fmt.Sprintf("its rule could not read one of its arguments, or the gate that asked predates rule-scoped grants; "+
+		"approve it once with derbent approve %d", id); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("err = %v, want one saying %q", err, want)
 	}
 	var out bytes.Buffer
