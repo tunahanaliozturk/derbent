@@ -71,6 +71,18 @@ func Compile(specs []Spec) (Set, error) {
 	if last := specs[len(specs)-1]; last.Agent != "" || last.Tool != "" || len(last.Args) > 0 {
 		return Set{}, fmt.Errorf("%w: the last rule must have no agent, tool or args condition", ErrInvalid)
 	}
+	return compile(specs)
+}
+
+// CompileProject compiles a project's rules (ADR 0014). Each rule is checked as Compile checks it, but
+// the list needs no final rule without conditions and may be empty: a call no project rule matches gets
+// a Decision with Rule 0, and the project adds nothing to it.
+func CompileProject(specs []Spec) (Set, error) {
+	return compile(specs)
+}
+
+// compile checks each rule and compiles its patterns and fingerprint.
+func compile(specs []Spec) (Set, error) {
 	set := Set{rules: make([]compiled, 0, len(specs))}
 	prefix := sha256.New() // the forms of the rules so far, each written as its length, a colon and its bytes
 	for i, sp := range specs {

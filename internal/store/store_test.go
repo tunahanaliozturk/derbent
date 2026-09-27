@@ -63,7 +63,7 @@ func TestOpenTwiceKeepsVersion(t *testing.T) {
 	first.Close()
 	db := open(t, path)
 	var v int
-	if err := db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&v); err != nil || v != 5 {
+	if err := db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&v); err != nil || v != 6 {
 		t.Fatalf("user_version = %d, err %v", v, err)
 	}
 }

@@ -19,12 +19,13 @@ import (
 
 // grantLine is one session grant as `derbent grants --json` prints it.
 type grantLine struct {
-	ID      int64  `json:"id"`
-	Agent   string `json:"agent"`
-	Session string `json:"session"`
-	Tool    string `json:"tool"`
-	Rule    int    `json:"rule"`
-	Granted string `json:"granted"`
+	ID          int64  `json:"id"`
+	Agent       string `json:"agent"`
+	Session     string `json:"session"`
+	Tool        string `json:"tool"`
+	Rule        int    `json:"rule"`
+	ProjectRule bool   `json:"project_rule"`
+	Granted     string `json:"granted"`
 }
 
 // runGrants lists the session grants, oldest first, as rows or JSON lines. It opens the database
@@ -57,7 +58,7 @@ func runGrants(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		for _, g := range list {
 			var line []byte
 			if line, err = json.Marshal(grantLine{
-				ID: g.ID, Agent: g.Agent, Session: g.Session, Tool: g.Tool, Rule: g.Rule,
+				ID: g.ID, Agent: g.Agent, Session: g.Session, Tool: g.Tool, Rule: g.Rule, ProjectRule: g.ProjectRule,
 				Granted: g.Granted.Format(time.RFC3339Nano),
 			}); err != nil {
 				return err
@@ -75,8 +76,8 @@ func runGrants(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tAGENT\tSESSION\tTOOL\tASKED BY\tGRANTED")
 	for _, g := range list {
-		fmt.Fprintf(w, "#%d\t%s\t%s\t%s\trule %d\t%s\n", g.ID, visible.Escape(g.Agent), visible.Escape(g.Session),
-			visible.Escape(g.Tool), g.Rule, g.Granted.Local().Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(w, "#%d\t%s\t%s\t%s\t%s\t%s\n", g.ID, visible.Escape(g.Agent), visible.Escape(g.Session),
+			visible.Escape(g.Tool), approval.RuleName(g.Rule, g.ProjectRule), g.Granted.Local().Format("2006-01-02 15:04:05"))
 	}
 	return w.Flush()
 }

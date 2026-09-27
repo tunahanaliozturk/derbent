@@ -7,8 +7,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/rule"
 )
 
 func mustKey(t *testing.T, dir string) string {
@@ -111,5 +113,119 @@ func TestProjectKeyIgnoresCaseOnWindows(t *testing.T) {
 	dir := t.TempDir()
 	if got, want := mustKey(t, strings.ToUpper(dir)), mustKey(t, dir); got != want {
 		t.Fatalf("key %q, want %q", got, want)
+	}
+}
+
+func TestParseProjectRulesTakesRulesAndNothingElse(t *testing.T) {
+	set, err := config.ParseProjectRules("p.toml", "[[rule]]\ntool = \"native__Bash\"\nargs = { command = \"git push*\" }\naction = \"ask\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := set.Decide("claude", "native__Bash", map[string]any{"command": "git push"}); d.Rule != 1 || d.Action != rule.Ask {
+		t.Fatalf("git push = %+v", d)
+	}
+	if d := set.Decide("claude", "native__Bash", map[string]any{"command": "ls"}); d.Rule != 0 {
+		t.Fatalf("ls = %+v, want no match: project rules need no catch-all", d)
+	}
+	if _, err = config.ParseProjectRules("p.toml", ""); err != nil {
+		t.Fatalf("an empty file: %v", err)
+	}
+	for name, text := range map[string]string{
+		"a server":       "[servers.x]\ncommand = [\"x\"]\n",
+		"approvals":      "[approvals]\ntimeout = \"1s\"\n",
+		"a budget":       "[[budget]]\ncalls = 1\nper = \"1h\"\n",
+		"a misspelt key": "[[rule]]\nacton = \"deny\"\n",
+		"a bad action":   "[[rule]]\naction = \"maybe\"\n",
+		"a bad agent":    "[[rule]]\nagent = \"Claude\"\naction = \"deny\"\n",
+		"bad syntax":     "[[rule]\n",
+	} {
+		if _, perr := config.ParseProjectRules("p.toml", text); perr == nil || !strings.Contains(perr.Error(), "p.toml") {
+			t.Errorf("%s: err = %v, want an error naming the file", name, perr)
+		}
+	}
+}
+
+// Notepad and other Windows editors can save UTF-8 with a byte order mark and CRLF line endings.
+func TestProjectRulesFromAWindowsEditorParse(t *testing.T) {
+	set, err := config.ParseProjectRules("p.toml", "\ufeff[[rule]]\r\ntool = \"native__Bash\"\r\naction = \"deny\"\r\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := set.Decide("claude", "native__Bash", nil); d.Rule != 1 || d.Action != rule.Deny {
+		t.Fatalf("decision = %+v", d)
+	}
+}
+
+// The file is read again when its size or modification time changes, and not otherwise.
+func TestProjectRulesReadTheFileAgainOnlyWhenItChanges(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, config.ProjectRulesFile)
+	write := func(tool string, mod time.Time) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte("[[rule]]\ntool = \""+tool+"\"\naction = \"deny\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	matches := func(p *config.ProjectRules, tool string) bool {
+		t.Helper()
+		set, err := p.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return set.Decide("claude", tool, nil).Rule == 1
+	}
+	p := config.NewProjectRules(dir)
+	if matches(p, "aaaa") {
+		t.Fatal("a missing file matched")
+	}
+	then := time.Now().Add(-time.Hour).Truncate(time.Second)
+	write("aaaa", then)
+	if !matches(p, "aaaa") {
+		t.Fatal("the new file was not read")
+	}
+	write("bbbb", then) // same size, same modification time
+	if !matches(p, "aaaa") {
+		t.Fatal("an unchanged size and time read the file again")
+	}
+	write("bbbb", then.Add(time.Second))
+	if !matches(p, "bbbb") || matches(p, "aaaa") {
+		t.Fatal("a new modification time did not read the file again")
+	}
+	if err := os.WriteFile(path, []byte("[servers.x]\ncommand = [\"x\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Load(); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "every call in this project is refused") {
+		t.Fatalf("an invalid file: err = %v", err)
+	}
+}
+
+// On Windows the key is lower-cased, but a directory can be case-sensitive there, so the rules file is
+// looked up under the root in the path's own case.
+func TestProjectRootKeepsTheCaseOfThePath(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "MyRepo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(repo, "Sub")
+	if err := os.MkdirAll(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root, err := config.ProjectRoot(sub)
+	if err != nil || filepath.Base(root) != "MyRepo" {
+		t.Fatalf("ProjectRoot = %q, %v; want the repository root in its own case", root, err)
+	}
+	key, err := config.ProjectKey(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.ToSlash(root)
+	if runtime.GOOS == "windows" {
+		want = strings.ToLower(want)
+	}
+	if key != want {
+		t.Fatalf("ProjectKey = %q, want %q", key, want)
 	}
 }

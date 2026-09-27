@@ -83,7 +83,7 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 			return fmt.Errorf("%s: approval %d cannot be approved for the session: its rule could not read one of its arguments, "+
 				"or the gate that asked predates rule-scoped grants; approve it once with derbent approve %d", command, id, id)
 		}
-		done = fmt.Sprintf("approved %s calls that rule %d asks about, for the rest of %s's session: %d", tool, p.Rule, agent, id)
+		done = fmt.Sprintf("approved %s calls that %s asks about, for the rest of %s's session: %d", tool, approval.RuleName(p.Rule, p.ProjectRule), agent, id)
 	case approval.Deny:
 	}
 	if err = q.Decide(ctx, id, verdict); err != nil {

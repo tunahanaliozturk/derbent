@@ -452,3 +452,27 @@ func TestRevokeAllDeletesEveryGrant(t *testing.T) {
 		t.Fatalf("grants after RevokeAll = %+v, %v", list, err)
 	}
 }
+
+func TestAnApprovalRecordsWhichRuleListAsked(t *testing.T) {
+	q, _ := open(t)
+	r := req
+	r.ProjectRule = true
+	done := ask(t.Context(), q, r, 10*time.Second)
+	p := waitPending(t, q)
+	if !p.ProjectRule || p.Rule != 3 {
+		t.Fatalf("pending = %+v, want project rule 3", p)
+	}
+	if err := q.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	result(t, done)
+	if list, err := q.Grants(t.Context()); err != nil || len(list) != 1 || !list[0].ProjectRule {
+		t.Fatalf("grants = %+v, %v", list, err)
+	}
+	if got := approval.RuleName(2, true); got != "project rule 2" {
+		t.Fatalf("RuleName(2, true) = %q", got)
+	}
+	if got := approval.RuleName(3, false); got != "rule 3" {
+		t.Fatalf("RuleName(3, false) = %q", got)
+	}
+}

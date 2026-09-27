@@ -269,3 +269,33 @@ func TestKeyCoversTheRuleAndTheRulesAboveIt(t *testing.T) {
 		t.Fatal("two different rule lists share a key")
 	}
 }
+
+func TestCompileProject(t *testing.T) {
+	set, err := rule.CompileProject([]rule.Spec{
+		{Tool: "native__Bash", Args: map[string]string{"command": "terraform *"}, Action: rule.Ask},
+		{Tool: "github__*", Action: rule.Deny},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := set.Decide("claude", "native__Bash", map[string]any{"command": "terraform apply"}); got != decided(rule.Ask, 1) {
+		t.Fatalf("terraform = %+v", got)
+	}
+	if got := set.Decide("claude", "native__Bash", map[string]any{"command": "ls"}); got.Rule != 0 {
+		t.Fatalf("a call no project rule matches = %+v, want Rule 0", got)
+	}
+	if set.Key(2) == "" || set.Key(2) == set.Key(1) {
+		t.Fatal("project rules need fingerprints of their own")
+	}
+	if empty, err := rule.CompileProject(nil); err != nil || empty.Decide("claude", "x", nil).Rule != 0 {
+		t.Fatalf("an empty project list: %v", err)
+	}
+	for name, specs := range map[string][]rule.Spec{
+		"unknown action":        {{Action: "maybe"}},
+		"agent with upper case": {{Agent: "Claude", Action: rule.Deny}},
+	} {
+		if _, err := rule.CompileProject(specs); !errors.Is(err, rule.ErrInvalid) {
+			t.Errorf("%s: err = %v, want ErrInvalid", name, err)
+		}
+	}
+}

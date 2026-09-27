@@ -1108,3 +1108,20 @@ func TestChangedToolsShowALineUnderTheHeader(t *testing.T) {
 		t.Fatalf("screen:\n%s", screen(m))
 	}
 }
+
+func TestAProjectRuleIsNamedOnTheRowAndInTheSessionQuestion(t *testing.T) {
+	m, d := newModel(t)
+	r := askReq
+	r.ProjectRule = true
+	waiting(t, d.q, r)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	if !strings.Contains(screen(m), "left  project rule 2") {
+		t.Fatalf("the waiting row does not name the project rule:\n%s", screen(m))
+	}
+	m, _ = press(later(m, armAfter), "A")
+	want := "press A again to approve github__create_issue calls that project rule 2 asks about, for the rest of codex's session"
+	if !strings.Contains(screen(m), want) {
+		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
+	}
+}

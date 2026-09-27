@@ -37,16 +37,19 @@ var ErrNotPending = errors.New("approval is not pending")
 const pollEvery = 200 * time.Millisecond
 
 // Request is a call waiting for the user. Args are the call's arguments after redaction, as the UI
-// shows them. Rule is the position of the rule that asked, and RuleKey its fingerprint (rule.Set.Key),
-// which scopes a session grant to that rule.
+// shows them. Rule is the position of the rule that asked, in the user's config or, when ProjectRule is
+// set, in the project's .derbent.toml (ADR 0014). RuleKey is what a session grant for the call is keyed
+// on (rule.Set.Key, joined with the project rule's for a call the project asked about), which scopes
+// the grant to that rule.
 type Request struct {
-	Project string
-	Agent   string
-	Session string
-	Tool    string
-	Args    string
-	Rule    int
-	RuleKey string
+	Project     string
+	Agent       string
+	Session     string
+	Tool        string
+	Args        string
+	Rule        int
+	ProjectRule bool // Rule is a position in the project's rules file, not in the user's config
+	RuleKey     string
 }
 
 // Pending is an approval the user has not decided yet.
@@ -82,8 +85,8 @@ func (q *Queue) Ask(ctx context.Context, r Request, timeout time.Duration) (Outc
 	created := q.now()
 	deadline := created.Add(timeout)
 	res, err := q.db.ExecContext(ctx, `INSERT INTO approvals
-		(created_ms, deadline_ms, project, agent, session, tool, args, rule, rule_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		created.UnixMilli(), deadline.UnixMilli(), r.Project, r.Agent, r.Session, r.Tool, r.Args, r.Rule, r.RuleKey)
+		(created_ms, deadline_ms, project, agent, session, tool, args, rule, project_rule, rule_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		created.UnixMilli(), deadline.UnixMilli(), r.Project, r.Agent, r.Session, r.Tool, r.Args, r.Rule, r.ProjectRule, r.RuleKey)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("write approval: %w", err)
 	}
@@ -210,7 +213,7 @@ func (q *Queue) Decide(ctx context.Context, id int64, v Verdict) error {
 // Pending lists the approvals waiting for the user, oldest first. One past its deadline is left out
 // even while it is still marked pending, which is what a gate that stopped while waiting leaves.
 func (q *Queue) Pending(ctx context.Context) ([]Pending, error) {
-	rows, err := q.db.QueryContext(ctx, `SELECT id, created_ms, deadline_ms, project, agent, session, tool, args, rule, rule_key
+	rows, err := q.db.QueryContext(ctx, `SELECT id, created_ms, deadline_ms, project, agent, session, tool, args, rule, project_rule, rule_key
 		FROM approvals WHERE state = 'pending' AND deadline_ms > ? ORDER BY id`, q.now().UnixMilli())
 	if err != nil {
 		return nil, fmt.Errorf("read approvals: %w", err)
@@ -220,7 +223,7 @@ func (q *Queue) Pending(ctx context.Context) ([]Pending, error) {
 	for rows.Next() {
 		var p Pending
 		var created, deadline int64
-		if err = rows.Scan(&p.ID, &created, &deadline, &p.Project, &p.Agent, &p.Session, &p.Tool, &p.Args, &p.Rule, &p.RuleKey); err != nil {
+		if err = rows.Scan(&p.ID, &created, &deadline, &p.Project, &p.Agent, &p.Session, &p.Tool, &p.Args, &p.Rule, &p.ProjectRule, &p.RuleKey); err != nil {
 			return nil, fmt.Errorf("read approval: %w", err)
 		}
 		p.Created, p.Deadline = time.UnixMilli(created), time.UnixMilli(deadline)
@@ -256,22 +259,31 @@ var ErrNoGrant = errors.New("no session grant")
 
 // Grant is a session grant: the approval that made it, whose id names it, and what it covers.
 type Grant struct {
-	ID      int64 // the approval the user approved for the session
-	Agent   string
-	Session string
-	Tool    string
-	Rule    int       // the rule that asked, from the approval
-	Granted time.Time // when the user approved it
+	ID          int64 // the approval the user approved for the session
+	Agent       string
+	Session     string
+	Tool        string
+	Rule        int       // the rule that asked, from the approval
+	ProjectRule bool      // Rule is a position in the project's rules file
+	Granted     time.Time // when the user approved it
 }
 
 // grantColumns reads a grant together with the approval behind it, in the order scanGrant takes them.
-const grantColumns = `SELECT g.approval_id, g.agent, g.session, g.tool, a.rule, coalesce(a.decided_ms, 0)
+const grantColumns = `SELECT g.approval_id, g.agent, g.session, g.tool, a.rule, a.project_rule, coalesce(a.decided_ms, 0)
 	FROM grants g JOIN approvals a ON a.id = g.approval_id`
+
+// RuleName names the rule that asked: "rule 3" for the user's rules, "project rule 2" for the project's.
+func RuleName(n int, project bool) string {
+	if project {
+		return fmt.Sprintf("project rule %d", n)
+	}
+	return fmt.Sprintf("rule %d", n)
+}
 
 func scanGrant(row interface{ Scan(dest ...any) error }) (Grant, error) {
 	var g Grant
 	var decided int64
-	if err := row.Scan(&g.ID, &g.Agent, &g.Session, &g.Tool, &g.Rule, &decided); err != nil {
+	if err := row.Scan(&g.ID, &g.Agent, &g.Session, &g.Tool, &g.Rule, &g.ProjectRule, &decided); err != nil {
 		return Grant{}, err
 	}
 	g.Granted = time.UnixMilli(decided)

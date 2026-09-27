@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
+	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
@@ -32,9 +33,12 @@ type Gate struct {
 	Rules   rule.Set
 	// Budgets limit how many calls the agent may have let through to some tools within a window
 	// (ADR 0012). The zero value has none.
-	Budgets  rule.Budgets
-	Memory   *memory.Store
-	Receipts *receipt.Log
+	Budgets rule.Budgets
+	// ProjectRules, when set, reads the project's .derbent.toml, whose rules can only make a call
+	// stricter (ADR 0014). Nil means the user's rules alone.
+	ProjectRules *config.ProjectRules
+	Memory       *memory.Store
+	Receipts     *receipt.Log
 	// Forward sends a call to a downstream server. It may be nil when no servers are configured.
 	Forward func(ctx context.Context, server, tool string, args json.RawMessage) (*mcp.CallToolResult, error)
 	// Pins, when set, pins each downstream tool on first sight and withholds one whose definition has
@@ -182,38 +186,86 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 type settled struct {
 	allow bool
 	user  bool   // the call is allowed because the user approved it, now or earlier in the session
-	by    string // what decided: rule:<n>, budget:<n>, pin, gate, user:<id>, grant:<id>, timeout:<id> or withdrawn:<id>
+	by    string // what decided: rule:<n>, project:<n>, budget:<n>, pin, gate, user:<id>, grant:<id>, timeout:<id> or withdrawn:<id>
 	text  string // what the agent is told when the call is refused
 	err   error  // set when the agent gave up while the call waited
 }
 
-// settle decides a call before it runs: the rules first, and for a rule that says ask, a grant from an
-// earlier "approve for this session" or the user's answer. MCP calls and pre-tool hook calls both come
-// through here, so the two paths cannot decide differently. A budget that is used up refuses a call no
-// rule denied. redacted is the arguments as the approval queue may show them.
+// strictness orders the actions, so project rules can only make a call stricter (ADR 0014).
+var strictness = map[rule.Action]int{rule.Allow: 0, rule.Ask: 1, rule.Deny: 2}
+
+// verdict is what the rules decided for a call: the user's rules, made stricter by the project's.
+type verdict struct {
+	action  rule.Action
+	by      string // rule:<n> or project:<n>
+	rule    int
+	project bool   // the project's rules set the action
+	key     string // what a session grant for the call is keyed on; "" when no grant may cover it
+}
+
+// judge decides a call with the user's rules and then the project's (ADR 0014). The stricter action
+// wins, deny over ask over allow, and on a tie the user's rule is named. A call the project's rules ask
+// about is keyed on both lists, the user's rules up to the one that decided and the project's up to the
+// one that asked, so an edit at or above either stops a grant from covering it (ADR 0011). A call a rule
+// matched on an argument it could not read gets no key, so no grant covers it. A project with no rules
+// file, or no rule matching, adds nothing: Decide on its rules gives Rule 0 then.
+func (g *Gate) judge(name string, args map[string]any) (verdict, error) {
+	if knobs.skipRules {
+		return verdict{action: rule.Allow, by: "rule:0"}, nil
+	}
+	d := g.Rules.Decide(g.Agent, name, args)
+	v := verdict{action: d.Action, by: "rule:" + strconv.Itoa(d.Rule), rule: d.Rule, key: g.Rules.Key(d.Rule)}
+	unread := d.Unread
+	if g.ProjectRules != nil {
+		set, err := g.ProjectRules.Load()
+		if err != nil {
+			return verdict{}, err
+		}
+		if p := set.Decide(g.Agent, name, args); p.Rule > 0 {
+			if strictness[p.Action] > strictness[v.action] {
+				v.action, v.by, v.rule, v.project = p.Action, "project:"+strconv.Itoa(p.Rule), p.Rule, true
+			}
+			if p.Action == rule.Ask {
+				v.key += "+" + set.Key(p.Rule)
+				unread = unread || p.Unread
+			}
+		}
+	}
+	if unread {
+		v.key = ""
+	}
+	return v, nil
+}
+
+// settle decides a call before it runs: the user's rules, made stricter by the project's, then a budget
+// that is used up, and for a call that must ask, a grant from an earlier "approve for this session" or
+// the user's answer. MCP calls and pre-tool hook calls both come through here, so the two paths cannot
+// decide differently. redacted is the arguments as the approval queue may show them.
 func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isObject bool, redacted string) settled {
 	if !isObject {
 		// Arguments are an object. Rules read named string arguments, so anything else would slip past
 		// an args condition that a deny depends on.
 		return settled{by: "gate", text: name + " was refused: its arguments are not a JSON object"}
 	}
-	d := g.Rules.Decide(g.Agent, name, args)
-	if knobs.skipRules {
-		d = rule.Decision{Action: rule.Allow}
+	v, err := g.judge(name, args)
+	if err != nil {
+		return settled{by: "gate", text: name + " was refused: " + err.Error()}
 	}
-	byRule := "rule:" + strconv.Itoa(d.Rule)
-	if d.Action == rule.Deny {
-		return settled{by: byRule, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, d.Rule)}
+	if v.action == rule.Deny {
+		if v.project {
+			return settled{by: v.by, text: fmt.Sprintf("%s is not allowed in this project (rule %d of %s)", name, v.rule, config.ProjectRulesFile)}
+		}
+		return settled{by: v.by, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, v.rule)}
 	}
 	// A deny stays a deny. Otherwise a used-up budget refuses the call without asking the user, so an
 	// agent stuck in a loop never floods the approval queue (ADR 0012).
 	if s, over := g.overBudget(ctx, name); over {
 		return s
 	}
-	if d.Action == rule.Ask {
-		return g.ask(ctx, name, redacted, d, byRule)
+	if v.action == rule.Ask {
+		return g.ask(ctx, name, redacted, v)
 	}
-	return settled{allow: true, by: byRule}
+	return settled{allow: true, by: v.by}
 }
 
 // overBudget refuses a call when a budget that applies to it is used up. The count reads the receipts,
@@ -241,24 +293,19 @@ func (g *Gate) overBudget(ctx context.Context, name string) (settled, bool) {
 	return settled{by: "budget:" + strconv.Itoa(r.N), text: r.Message(g.Agent)}, true
 }
 
-// ask settles a call a rule sends to the user. A grant from an earlier "approve for this session" lets
-// it through at once, when the same rule, under the same rules above it, asked for that grant: grants
-// are keyed on a fingerprint of the rule and every rule above it, so one rule's grant never covers a
-// call that another rule holds, nor one the same rule catches after a rule above it changed (ADR 0011).
-// Otherwise the call waits in the approval queue until the user decides, the timeout passes, the agent
-// gives up, or the gate is told to stop. A call the rule matched on a value it could not read gets no
-// rule key, so no grant covers it and approving it writes none: every such call is shown to the user.
-func (g *Gate) ask(ctx context.Context, name, redacted string, d rule.Decision, byRule string) settled {
+// ask settles a call the rules send to the user. A grant from an earlier "approve for this session" lets
+// it through at once when it was keyed the same way (see judge): grants are keyed on a fingerprint of the
+// rule and every rule above it, so one rule's grant never covers a call that another rule holds, nor one
+// the same rule catches after a rule above it changed (ADR 0011). Otherwise the call waits in the
+// approval queue until the user decides, the timeout passes, the agent gives up, or the gate is told to
+// stop. A call with no key is shown to the user every time, and approving it writes no grant.
+func (g *Gate) ask(ctx context.Context, name, redacted string, v verdict) settled {
 	if g.Approvals == nil {
-		return settled{by: byRule, text: name + " needs the user's approval, and this gate cannot ask for it"}
+		return settled{by: v.by, text: name + " needs the user's approval, and this gate cannot ask for it"}
 	}
-	ruleKey := g.Rules.Key(d.Rule)
-	if d.Unread {
-		ruleKey = "" // an empty key never matches a grant, and an approval with none grants nothing
-	}
-	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name, ruleKey)
+	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name, v.key)
 	if err != nil {
-		return settled{by: byRule, text: name + " needs the user's approval, which could not be checked: " + err.Error()}
+		return settled{by: v.by, text: name + " needs the user's approval, which could not be checked: " + err.Error()}
 	}
 	if granted {
 		return settled{allow: true, user: true, by: "grant:" + strconv.FormatInt(id, 10)}
@@ -276,7 +323,8 @@ func (g *Gate) ask(ctx context.Context, name, redacted string, d rule.Decision, 
 		defer stop()
 	}
 	out, err := g.Approvals.Ask(wait, approval.Request{
-		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: redacted, Rule: d.Rule, RuleKey: ruleKey,
+		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: redacted,
+		Rule: v.rule, ProjectRule: v.project, RuleKey: v.key,
 	}, g.ApprovalTimeout)
 	ref := strconv.FormatInt(out.ID, 10)
 	withdrawn := "withdrawn:" + ref
@@ -291,7 +339,7 @@ func (g *Gate) ask(ctx context.Context, name, redacted string, d rule.Decision, 
 	case err != nil && wait.Err() != nil:
 		return settled{by: withdrawn, text: name + " was withdrawn before the user decided, because the gate is stopping; it did not run"}
 	case err != nil:
-		return settled{by: byRule, text: name + " needs the user's approval, which could not be asked for: " + err.Error()}
+		return settled{by: v.by, text: name + " needs the user's approval, which could not be asked for: " + err.Error()}
 	case out.Approved:
 		return settled{allow: true, user: true, by: "user:" + ref}
 	case out.By == approval.ByTimeout:

@@ -65,6 +65,10 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if err != nil {
 		return err
 	}
+	root, err := config.ProjectRoot(*projectDir)
+	if err != nil {
+		return err
+	}
 	db, err := openDB(ctx, *dbPath)
 	if err != nil {
 		return err
@@ -78,7 +82,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		Agent: *agent, Project: project, Session: session, Version: version,
 		Rules: cfg.Rules, Budgets: cfg.Budgets, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
 		Redact: cfg.Redact.JSON, Approvals: approval.NewQueue(db), ApprovalTimeout: cfg.ApprovalTimeout,
-		Pins: pin.NewStore(db), Unpinned: unpinned(cfg.Servers),
+		Pins: pin.NewStore(db), Unpinned: unpinned(cfg.Servers), ProjectRules: config.NewProjectRules(root),
 		Stop: ctx, // SIGINT or SIGTERM withdraws the calls still waiting for the user
 	}
 	srv := g.Server()

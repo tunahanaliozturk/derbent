@@ -350,7 +350,7 @@ func sessionScope(p approval.Pending) string {
 	if p.RuleKey == "" {
 		return fmt.Sprintf("%s's %s call once; this call cannot be approved for the session", p.Agent, p.Tool)
 	}
-	return fmt.Sprintf("%s calls that rule %d asks about, for the rest of %s's session", p.Tool, p.Rule, p.Agent)
+	return fmt.Sprintf("%s calls that %s asks about, for the rest of %s's session", p.Tool, approval.RuleName(p.Rule, p.ProjectRule), p.Agent)
 }
 
 // decideKeys is the key legend for p. A call with no rule key cannot be approved for the session, and A
@@ -557,8 +557,8 @@ func (m Model) drawWaiting(l *lines) {
 // callLine is a waiting call's row: its id, agent, tool, time left, the rule that asked and its project.
 func (m Model) callLine(p approval.Pending) string {
 	left := max(p.Deadline.Sub(m.now()), 0).Round(time.Second)
-	return fmt.Sprintf("#%d  %s  %s  %s left  rule %d  %s", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left, p.Rule,
-		visible.Escape(p.Project))
+	return fmt.Sprintf("#%d  %s  %s  %s left  %s  %s", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left,
+		approval.RuleName(p.Rule, p.ProjectRule), visible.Escape(p.Project))
 }
 
 // argLines wraps the highlighted call's arguments, which the agent controls, over about a third of the

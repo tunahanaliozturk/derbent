@@ -100,8 +100,8 @@ func grantText(gr approval.Grant) string {
 // grantRow is a grant's row on the grants screen. Agent, session and tool are stored text from agents,
 // so each is escaped.
 func grantRow(gr approval.Grant) string {
-	return fmt.Sprintf("#%d  %s  %s  %s  rule %d  granted %s", gr.ID, visible.Escape(gr.Agent), visible.Escape(gr.Session),
-		visible.Escape(gr.Tool), gr.Rule, gr.Granted.Local().Format("2006-01-02 15:04:05"))
+	return fmt.Sprintf("#%d  %s  %s  %s  %s  granted %s", gr.ID, visible.Escape(gr.Agent), visible.Escape(gr.Session),
+		visible.Escape(gr.Tool), approval.RuleName(gr.Rule, gr.ProjectRule), gr.Granted.Local().Format("2006-01-02 15:04:05"))
 }
 
 // grantsView draws the grants screen. Calls waiting for the user and a failing poll head it, as they

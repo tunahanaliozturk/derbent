@@ -101,6 +101,10 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if err != nil {
 		return deny(err)
 	}
+	root, err := config.ProjectRoot(dir)
+	if err != nil {
+		return deny(err)
+	}
 	db, err := openDB(ctx, *dbPath)
 	if err != nil {
 		return deny(err)
@@ -110,7 +114,8 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		Agent: *agent, Project: project, Session: call.Session, Version: version,
 		Rules: cfg.Rules, Budgets: cfg.Budgets, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
 		Redact: cfg.Redact.JSON, Approvals: approval.NewQueue(db), ApprovalTimeout: cfg.ApprovalTimeout,
-		Stop: ctx, // SIGINT or SIGTERM withdraws the call if it waits for the user
+		ProjectRules: config.NewProjectRules(root),
+		Stop:         ctx, // SIGINT or SIGTERM withdraws the call if it waits for the user
 	}
 	ans, err := g.Hook(ctx, "native__"+call.Tool, call.Args)
 	if werr := answer(ans); werr != nil {
