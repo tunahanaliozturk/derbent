@@ -1,0 +1,1 @@
+{"hook_event_name":"PreToolUse","session_id":"cp-1","timestamp":"2026-09-27T10:00:00Z","cwd":"/work/shop","tool_name":"bash","tool_input":{"command":"git push"}}

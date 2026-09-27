@@ -104,7 +104,7 @@ func (m Model) detailRoom() int {
 }
 
 // argText escapes arguments for the preview and the detail view, and writes a run of more than eight
-// spaces of any kind as ␠×N, so that padding cannot push what follows out of sight. It stops once it
+// blank spaces (see padding) as ␠×N, so that padding cannot push what follows out of sight. It stops once it
 // has read or written limit bytes and returns how many bytes of s it used, so the preview pays for a
 // screenful of megabytes of arguments and no more, spaces or not. A run of spaces that goes on past
 // what it read is written ␠×N+.

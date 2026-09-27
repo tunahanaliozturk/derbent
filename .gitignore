@@ -3,6 +3,7 @@
 *.exe
 *.test
 *.out
+!/internal/hook/testdata/**/*.out
 coverage.*
 .idea/
 .vscode/

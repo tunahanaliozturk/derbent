@@ -1,0 +1,1 @@
+{"session_id":"s-9","transcript_path":null,"cwd":"/work/shop","hook_event_name":"PreToolUse","model":"gpt-5-codex","permission_mode":"default","turn_id":"t-1","tool_name":"apply_patch","tool_use_id":"call_1","tool_input":{"command":"*** Begin Patch\n*** Update File: a.go\n*** End Patch"}}
