@@ -298,7 +298,8 @@ func (m Model) decide(v approval.Verdict, asked int64) (tea.Model, tea.Cmd) {
 	p := m.pending[i]
 	if v == approval.ApproveSession && (asked != p.ID || m.now().Sub(m.confirmAt) > confirmFor) {
 		m.confirm, m.confirmAt = p.ID, m.now()
-		m.status = fmt.Sprintf("press A again to approve %s for the rest of %s's session", p.Tool, p.Agent)
+		m.status = fmt.Sprintf("press A again to approve %s calls that rule %d asks about, for the rest of %s's session",
+			p.Tool, p.Rule, p.Agent)
 		return m, nil
 	}
 	// The call is about to leave the list; that is no news to report.
@@ -363,7 +364,8 @@ func (m Model) View() tea.View {
 const helpText = `derbent keys
 
   a          approve the selected call once
-  A, A       approve this tool for the rest of that agent's session
+  A, A       approve this tool's calls that the same rule asks about, for the
+             rest of that agent's session
   d          deny the selected call
   enter      read the selected call's whole arguments; esc goes back
   up, down   select a waiting call

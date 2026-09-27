@@ -37,7 +37,8 @@ var ErrNotPending = errors.New("approval is not pending")
 const pollEvery = 200 * time.Millisecond
 
 // Request is a call waiting for the user. Args are the call's arguments after redaction, as the UI
-// shows them.
+// shows them. Rule is the position of the rule that asked, and RuleKey its fingerprint (rule.Set.Key),
+// which scopes a session grant to that rule.
 type Request struct {
 	Project string
 	Agent   string
@@ -45,6 +46,7 @@ type Request struct {
 	Tool    string
 	Args    string
 	Rule    int
+	RuleKey string
 }
 
 // Pending is an approval the user has not decided yet.
@@ -80,8 +82,8 @@ func (q *Queue) Ask(ctx context.Context, r Request, timeout time.Duration) (Outc
 	created := q.now()
 	deadline := created.Add(timeout)
 	res, err := q.db.ExecContext(ctx, `INSERT INTO approvals
-		(created_ms, deadline_ms, project, agent, session, tool, args, rule) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		created.UnixMilli(), deadline.UnixMilli(), r.Project, r.Agent, r.Session, r.Tool, r.Args, r.Rule)
+		(created_ms, deadline_ms, project, agent, session, tool, args, rule, rule_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		created.UnixMilli(), deadline.UnixMilli(), r.Project, r.Agent, r.Session, r.Tool, r.Args, r.Rule, r.RuleKey)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("write approval: %w", err)
 	}
@@ -166,9 +168,10 @@ func (q *Queue) closeForCtx(ctx context.Context, id int64) (Outcome, error) {
 	return out, ctx.Err()
 }
 
-// Decide records the user's verdict on a pending approval. ApproveSession also lets every later call
-// to the same tool from the same agent session through without asking. An approval that is not
-// waiting, including one past its deadline that its gate has not closed yet, gives ErrNotPending.
+// Decide records the user's verdict on a pending approval. ApproveSession also lets through, without
+// asking, every later call to the same tool from the same agent session that the same rule asks about;
+// an approval with no rule key is approved once and grants nothing. An approval that is not waiting,
+// including one past its deadline that its gate has not closed yet, gives ErrNotPending.
 func (q *Queue) Decide(ctx context.Context, id int64, v Verdict) error {
 	state := "approved"
 	switch v {
@@ -195,8 +198,8 @@ func (q *Queue) Decide(ctx context.Context, id int64, v Verdict) error {
 		if v != ApproveSession {
 			return nil
 		}
-		if _, err = conn.ExecContext(ctx, `INSERT OR REPLACE INTO grants (agent, session, tool, approval_id)
-			SELECT agent, session, tool, id FROM approvals WHERE id = ?`, id); err != nil {
+		if _, err = conn.ExecContext(ctx, `INSERT OR REPLACE INTO grants (agent, session, tool, rule_key, approval_id)
+			SELECT agent, session, tool, rule_key, id FROM approvals WHERE id = ? AND rule_key <> ''`, id); err != nil {
 			return fmt.Errorf("grant approval %d: %w", id, err)
 		}
 		return nil
@@ -206,7 +209,7 @@ func (q *Queue) Decide(ctx context.Context, id int64, v Verdict) error {
 // Pending lists the approvals waiting for the user, oldest first. One past its deadline is left out
 // even while it is still marked pending, which is what a gate that stopped while waiting leaves.
 func (q *Queue) Pending(ctx context.Context) ([]Pending, error) {
-	rows, err := q.db.QueryContext(ctx, `SELECT id, created_ms, deadline_ms, project, agent, session, tool, args, rule
+	rows, err := q.db.QueryContext(ctx, `SELECT id, created_ms, deadline_ms, project, agent, session, tool, args, rule, rule_key
 		FROM approvals WHERE state = 'pending' AND deadline_ms > ? ORDER BY id`, q.now().UnixMilli())
 	if err != nil {
 		return nil, fmt.Errorf("read approvals: %w", err)
@@ -216,7 +219,7 @@ func (q *Queue) Pending(ctx context.Context) ([]Pending, error) {
 	for rows.Next() {
 		var p Pending
 		var created, deadline int64
-		if err = rows.Scan(&p.ID, &created, &deadline, &p.Project, &p.Agent, &p.Session, &p.Tool, &p.Args, &p.Rule); err != nil {
+		if err = rows.Scan(&p.ID, &created, &deadline, &p.Project, &p.Agent, &p.Session, &p.Tool, &p.Args, &p.Rule, &p.RuleKey); err != nil {
 			return nil, fmt.Errorf("read approval: %w", err)
 		}
 		p.Created, p.Deadline = time.UnixMilli(created), time.UnixMilli(deadline)
@@ -228,12 +231,16 @@ func (q *Queue) Pending(ctx context.Context) ([]Pending, error) {
 	return out, nil
 }
 
-// Granted reports whether the user approved tool for the rest of this agent's session, and the
-// approval that did.
-func (q *Queue) Granted(ctx context.Context, agent, session, tool string) (int64, bool, error) {
+// Granted reports whether the user approved, for the rest of this agent's session, the calls to tool
+// that the rule with fingerprint ruleKey asks about, and the approval that did. An empty ruleKey never
+// matches a grant.
+func (q *Queue) Granted(ctx context.Context, agent, session, tool, ruleKey string) (int64, bool, error) {
+	if ruleKey == "" {
+		return 0, false, nil
+	}
 	var id int64
-	err := q.db.QueryRowContext(ctx, `SELECT approval_id FROM grants WHERE agent = ? AND session = ? AND tool = ?`,
-		agent, session, tool).Scan(&id)
+	err := q.db.QueryRowContext(ctx, `SELECT approval_id FROM grants WHERE agent = ? AND session = ? AND tool = ? AND rule_key = ?`,
+		agent, session, tool, ruleKey).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}

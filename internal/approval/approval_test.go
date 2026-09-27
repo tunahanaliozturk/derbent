@@ -31,6 +31,7 @@ func open(t *testing.T) (*approval.Queue, *sql.DB) {
 
 var req = approval.Request{
 	Project: "/work/shop", Agent: "codex", Session: "s1", Tool: "github__create_issue", Args: `{"title":"x"}`, Rule: 3,
+	RuleKey: "key-of-rule-3",
 }
 
 type asked struct {
@@ -99,7 +100,7 @@ func TestApproveOnce(t *testing.T) {
 	if a.err != nil || a.out != (approval.Outcome{ID: p.ID, Approved: true, By: approval.ByUser}) {
 		t.Fatalf("Ask = %+v, %v", a.out, a.err)
 	}
-	if _, ok, err := q.Granted(t.Context(), req.Agent, req.Session, req.Tool); err != nil || ok {
+	if _, ok, err := q.Granted(t.Context(), req.Agent, req.Session, req.Tool, req.RuleKey); err != nil || ok {
 		t.Fatalf("a one-off approval left a grant (ok %v, err %v)", ok, err)
 	}
 	noneLeft(t, q)
@@ -115,13 +116,13 @@ func TestDeny(t *testing.T) {
 	if a := result(t, done); a.err != nil || a.out != (approval.Outcome{ID: p.ID, By: approval.ByUser}) {
 		t.Fatalf("Ask = %+v, %v", a.out, a.err)
 	}
-	if _, ok, err := q.Granted(t.Context(), req.Agent, req.Session, req.Tool); err != nil || ok {
+	if _, ok, err := q.Granted(t.Context(), req.Agent, req.Session, req.Tool, req.RuleKey); err != nil || ok {
 		t.Fatalf("a denial left a grant (ok %v, err %v)", ok, err)
 	}
 	noneLeft(t, q)
 }
 
-func TestApproveForTheSessionGrantsOnlyThatAgentSessionAndTool(t *testing.T) {
+func TestApproveForTheSessionGrantsOnlyThatAgentSessionToolAndRule(t *testing.T) {
 	q, _ := open(t)
 	done := ask(t.Context(), q, req, 10*time.Second)
 	p := waitPending(t, q)
@@ -131,18 +132,47 @@ func TestApproveForTheSessionGrantsOnlyThatAgentSessionAndTool(t *testing.T) {
 	if a := result(t, done); !a.out.Approved {
 		t.Fatalf("Ask = %+v, %v", a.out, a.err)
 	}
-	id, ok, err := q.Granted(t.Context(), "codex", "s1", "github__create_issue")
+	id, ok, err := q.Granted(t.Context(), "codex", "s1", "github__create_issue", "key-of-rule-3")
 	if err != nil || !ok || id != p.ID {
 		t.Fatalf("Granted = %d, %v, %v; want %d, true", id, ok, err, p.ID)
 	}
-	for _, other := range [][3]string{
-		{"claude", "s1", "github__create_issue"},
-		{"codex", "s2", "github__create_issue"},
-		{"codex", "s1", "github__create_repo"},
+	for _, other := range [][4]string{
+		{"claude", "s1", "github__create_issue", "key-of-rule-3"},
+		{"codex", "s2", "github__create_issue", "key-of-rule-3"},
+		{"codex", "s1", "github__create_repo", "key-of-rule-3"},
+		{"codex", "s1", "github__create_issue", "key-of-rule-4"},
+		{"codex", "s1", "github__create_issue", ""},
 	} {
-		if _, ok, err := q.Granted(t.Context(), other[0], other[1], other[2]); err != nil || ok {
-			t.Errorf("Granted(%v) = %v, %v; the grant reaches beyond its agent, session and tool", other, ok, err)
+		if _, ok, err := q.Granted(t.Context(), other[0], other[1], other[2], other[3]); err != nil || ok {
+			t.Errorf("Granted(%v) = %v, %v; the grant reaches beyond its agent, session, tool and rule", other, ok, err)
 		}
+	}
+}
+
+// A call that no rule key names, such as one asked before grants followed the rule, can be approved
+// for the session, but that approval covers nothing later.
+func TestAnEmptyRuleKeyNeverMatchesAGrant(t *testing.T) {
+	q, db := open(t)
+	keyless := req
+	keyless.RuleKey = ""
+	done := ask(t.Context(), q, keyless, 10*time.Second)
+	p := waitPending(t, q)
+	if err := q.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if a := result(t, done); !a.out.Approved {
+		t.Fatalf("Ask = %+v, %v", a.out, a.err)
+	}
+	if _, ok, err := q.Granted(t.Context(), keyless.Agent, keyless.Session, keyless.Tool, ""); err != nil || ok {
+		t.Fatalf("Granted with no rule key = %v, %v; want no grant", ok, err)
+	}
+	// Even a grant row with an empty key, which Decide never writes, matches nothing.
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO grants (agent, session, tool, rule_key, approval_id)
+		VALUES (?, ?, ?, '', ?)`, keyless.Agent, keyless.Session, keyless.Tool, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := q.Granted(t.Context(), keyless.Agent, keyless.Session, keyless.Tool, ""); err != nil || ok {
+		t.Fatalf("Granted with no rule key = %v, %v; want no grant", ok, err)
 	}
 }
 

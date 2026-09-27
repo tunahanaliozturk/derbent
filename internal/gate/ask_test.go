@@ -191,6 +191,54 @@ func TestApprovalForTheSessionCoversLaterCallsOfThatSessionOnly(t *testing.T) {
 	}
 }
 
+// A session grant covers the calls the same rule asks about, not every call of the tool: approving a
+// deploy note for the session does not let a release note through that another ask rule holds.
+func TestApprovalForTheSessionCoversOnlyTheRuleThatAsked(t *testing.T) {
+	e := newEnv(t)
+	deploys := rule.Spec{Tool: "memory_write", Args: map[string]string{"title": "deploy*"}, Action: rule.Ask}
+	releases := rule.Spec{Tool: "memory_write", Args: map[string]string{"title": "release*"}, Action: rule.Ask}
+	g := e.gate(t, "codex", deploys, releases, allowRest)
+	g.ApprovalTimeout = 300 * time.Millisecond
+	cs := connect(t, g)
+	done := callAsync(t.Context(), cs, "memory_write", map[string]any{"title": "deploy one", "body": "b"})
+	p := waitPending(t, e.approvals)
+	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if c := awaitCall(t, done); c.err != nil || c.res.IsError {
+		t.Fatalf("first call: %+v, %v", c.res, c.err)
+	}
+	if res := call(t, cs, "memory_write", map[string]any{"title": "deploy two", "body": "b"}); res.IsError {
+		t.Fatalf("second deploy note: %s", text(res))
+	}
+	if res := call(t, cs, "memory_write", map[string]any{"title": "release one", "body": "b"}); !res.IsError {
+		t.Fatal("a grant for the deploy rule let a call through that the release rule asks about")
+	}
+	var rules []int
+	rows, err := e.db.QueryContext(t.Context(), `SELECT rule FROM approvals ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n int
+		if err = rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, n)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(rules, []int{1, 2}) {
+		t.Fatalf("approvals asked by rules %v, want [1 2]: the release note should have asked", rules)
+	}
+	by := decidedBy(t, e.db)
+	if len(by) != 3 || by[0] != fmt.Sprintf("user:%d", p.ID) || by[1] != fmt.Sprintf("grant:%d", p.ID) || !strings.HasPrefix(by[2], "timeout:") {
+		t.Fatalf("decided_by = %v, want user:%d, grant:%d, timeout:<id>", by, p.ID, p.ID)
+	}
+}
+
 func TestAgentGivingUpLeavesAReceiptThatTheCallDidNotRun(t *testing.T) {
 	e := newEnv(t)
 	cs := connect(t, e.gate(t, "codex", askWrites, allowRest))

@@ -503,7 +503,7 @@ func TestApproveForTheSessionLeavesAGrant(t *testing.T) {
 	if err := run(t.Context(), []string{"approve", "--session", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if want := fmt.Sprintf("approved for the rest of the session: %d", p.ID); !strings.Contains(out.String(), want) {
+	if want := fmt.Sprintf("approved echo__echo calls that rule %d asks about, for the rest of codex's session: %d", p.Rule, p.ID); !strings.Contains(out.String(), want) {
 		t.Fatalf("approve output %q lacks %q", out.String(), want)
 	}
 	if res := callResult(t, done); res.IsError || resultText(res) != "echo:hi" {
@@ -514,7 +514,7 @@ func TestApproveForTheSessionLeavesAGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	id, granted, err := approval.NewQueue(db).Granted(t.Context(), "codex", p.Session, "echo__echo")
+	id, granted, err := approval.NewQueue(db).Granted(t.Context(), "codex", p.Session, "echo__echo", p.RuleKey)
 	if err != nil || !granted || id != p.ID {
 		t.Fatalf("Granted = %d, %v, %v; want %d, true", id, granted, err, p.ID)
 	}

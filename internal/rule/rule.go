@@ -3,9 +3,13 @@
 package rule
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -51,6 +55,7 @@ type compiled struct {
 	agent, tool glob
 	args        map[string]glob
 	action      Action
+	key         string
 }
 
 // Compile checks specs and compiles their patterns. The last rule must be unconditional, so every
@@ -72,7 +77,7 @@ func Compile(specs []Spec) (Set, error) {
 		if !agentPattern.MatchString(sp.Agent) {
 			return Set{}, fmt.Errorf("%w: rule %d: agent %q can never match: agent names are lower-case letters, digits, dashes and underscores", ErrInvalid, i+1, sp.Agent)
 		}
-		c := compiled{agent: newGlob(sp.Agent), tool: newGlob(sp.Tool), action: sp.Action}
+		c := compiled{agent: newGlob(sp.Agent), tool: newGlob(sp.Tool), action: sp.Action, key: key(sp)}
 		if len(sp.Args) > 0 {
 			c.args = make(map[string]glob, len(sp.Args))
 			for name, pattern := range sp.Args {
@@ -87,6 +92,32 @@ func Compile(specs []Spec) (Set, error) {
 // Len is the number of rules in the set.
 func (s Set) Len() int {
 	return len(s.rules)
+}
+
+// Key returns a fingerprint of rule n (1-based, as Decision.Rule), or "" when there is no such rule.
+// It follows the rule's content, not its position, so a session grant keyed on it covers only what the
+// same rule asks about: moving a rule keeps its key, and editing it gives a new one (ADR 0011).
+func (s Set) Key(n int) string {
+	if n < 1 || n > len(s.rules) {
+		return ""
+	}
+	return s.rules[n-1].key
+}
+
+// key is the SHA-256, in hex, of a canonical form of sp: its agent, tool and action, then its args
+// conditions sorted by name, each string written as its length, a colon and its bytes so that no two
+// different rules share a form.
+func key(sp Spec) string {
+	h := sha256.New()
+	field := func(s string) { fmt.Fprintf(h, "%d:%s", len(s), s) }
+	field(sp.Agent)
+	field(sp.Tool)
+	field(string(sp.Action))
+	for _, name := range slices.Sorted(maps.Keys(sp.Args)) {
+		field(name)
+		field(sp.Args[name])
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Decide returns the decision of the first rule matching the call. args holds the call's arguments

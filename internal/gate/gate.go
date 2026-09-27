@@ -185,13 +185,16 @@ func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isO
 }
 
 // ask settles a call a rule sends to the user. A grant from an earlier "approve for this session" lets
-// it through at once. Otherwise the call waits in the approval queue until the user decides, the
-// timeout passes, the agent gives up, or the gate is told to stop.
+// it through at once, when the same rule asked for that grant: grants are keyed on the rule's
+// fingerprint, so one rule's grant never covers a call that another rule holds (ADR 0011). Otherwise
+// the call waits in the approval queue until the user decides, the timeout passes, the agent gives
+// up, or the gate is told to stop.
 func (g *Gate) ask(ctx context.Context, name, redacted string, ruleIndex int, byRule string) settled {
 	if g.Approvals == nil {
 		return settled{by: byRule, text: name + " needs the user's approval, and this gate cannot ask for it"}
 	}
-	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name)
+	ruleKey := g.Rules.Key(ruleIndex)
+	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name, ruleKey)
 	if err != nil {
 		return settled{by: byRule, text: name + " needs the user's approval, which could not be checked: " + err.Error()}
 	}
@@ -211,7 +214,7 @@ func (g *Gate) ask(ctx context.Context, name, redacted string, ruleIndex int, by
 		defer stop()
 	}
 	out, err := g.Approvals.Ask(wait, approval.Request{
-		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: redacted, Rule: ruleIndex,
+		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: redacted, Rule: ruleIndex, RuleKey: ruleKey,
 	}, g.ApprovalTimeout)
 	ref := strconv.FormatInt(out.ID, 10)
 	withdrawn := "withdrawn:" + ref

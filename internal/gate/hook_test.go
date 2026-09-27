@@ -117,6 +117,65 @@ func TestHookAskWaitsForTheUserAndASessionGrantCoversLaterHookCalls(t *testing.T
 	}
 }
 
+// Built-in tools are coarse: every shell command is native__Bash. A session grant from one ask rule
+// must not let through a command another ask rule holds, and it follows the rule, not its position,
+// so the same grant holds under a reordered config and a rule edited since asks again.
+func TestHookSessionGrantCoversOnlyTheRuleThatAsked(t *testing.T) {
+	e := newEnv(t)
+	push := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push*"}, Action: rule.Ask}
+	apply := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "terraform apply*"}, Action: rule.Ask}
+	g := e.gate(t, "claude", push, apply, rule.Spec{Action: rule.Allow})
+	g.ApprovalTimeout = 300 * time.Millisecond
+	done := hookAsync(t, g, `{"command":"git push origin main"}`)
+	p := waitPending(t, e.approvals)
+	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if ans := awaitHook(t, done); ans.Verdict != gate.Allowed {
+		t.Fatalf("answer = %+v", ans)
+	}
+	hook := func(g *gate.Gate, command string) gate.HookAnswer {
+		t.Helper()
+		ans, err := g.Hook(t.Context(), "native__Bash", json.RawMessage(`{"command":"`+command+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ans
+	}
+	if ans := hook(g, "git push --tags"); ans.Verdict != gate.Allowed {
+		t.Fatalf("next push = %+v, want it let through by the grant", ans)
+	}
+	if ans := hook(g, "terraform apply -auto-approve"); ans.Verdict != gate.Denied || !strings.Contains(ans.Reason, "none came within") {
+		t.Fatalf("terraform apply = %+v, want it asked about and timed out", ans)
+	}
+
+	reordered := e.gate(t, "claude", apply, push, rule.Spec{Action: rule.Allow})
+	reordered.ApprovalTimeout = 300 * time.Millisecond
+	if ans := hook(reordered, "git push"); ans.Verdict != gate.Allowed {
+		t.Fatalf("push under a reordered config = %+v, want the same grant to hold", ans)
+	}
+	edited := e.gate(t, "claude", rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push origin*"}, Action: rule.Ask},
+		rule.Spec{Action: rule.Allow})
+	edited.ApprovalTimeout = 300 * time.Millisecond
+	if ans := hook(edited, "git push origin main"); ans.Verdict != gate.Denied {
+		t.Fatalf("push under an edited rule = %+v, want it asked about again", ans)
+	}
+
+	var asked int
+	if err := e.db.QueryRowContext(t.Context(), `SELECT count(*) FROM approvals`).Scan(&asked); err != nil || asked != 3 {
+		t.Fatalf("approvals written = %d, err %v; want 3: the push, the terraform apply and the edited rule's push", asked, err)
+	}
+	var by []string
+	for _, r := range hookReceipts(t, e) {
+		by = append(by, r.decidedBy)
+	}
+	grant := fmt.Sprintf("grant:%d", p.ID)
+	if len(by) != 5 || by[0] != fmt.Sprintf("user:%d", p.ID) || by[1] != grant || !strings.HasPrefix(by[2], "timeout:") ||
+		by[3] != grant || !strings.HasPrefix(by[4], "timeout:") {
+		t.Fatalf("decided_by = %v", by)
+	}
+}
+
 // A grant is for one tool, and a hook call's tool is always a native__ name, which no MCP tool can have
 // ("native" is a reserved server name). So a grant from the hook path never covers an MCP call, even
 // in the same gate, agent and session: the MCP call asks the user again.

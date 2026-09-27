@@ -62,8 +62,48 @@ func TestOpenTwiceKeepsVersion(t *testing.T) {
 	first.Close()
 	db := open(t, path)
 	var v int
-	if err := db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&v); err != nil || v != 2 {
+	if err := db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&v); err != nil || v != 3 {
 		t.Fatalf("user_version = %d, err %v", v, err)
+	}
+}
+
+// Grants are keyed on the rule that asked (ADR 0011). A database from before that keeps its approvals,
+// each with no rule key, and loses its grants, which lasted one agent session anyway.
+func TestOpenMigratesGrantsToRuleKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"0001_init.sql", "0002_approvals.sql"} {
+		script, readErr := os.ReadFile(filepath.Join("migrations", name))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if _, err = old.ExecContext(t.Context(), string(script)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err = old.ExecContext(t.Context(), `INSERT INTO approvals
+		(id, created_ms, deadline_ms, project, agent, session, tool, args, rule, state) VALUES (7, 1, 2, 'p', 'codex', 's1', 'native__Bash', '{}', 1, 'approved');
+		INSERT INTO grants (agent, session, tool, approval_id) VALUES ('codex', 's1', 'native__Bash', 7);
+		PRAGMA user_version = 2`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	db := open(t, path)
+	var key string
+	if err = db.QueryRowContext(t.Context(), `SELECT rule_key FROM approvals WHERE id = 7`).Scan(&key); err != nil || key != "" {
+		t.Fatalf("rule_key = %q, err %v; want the old approval kept with no rule key", key, err)
+	}
+	var n int
+	if err = db.QueryRowContext(t.Context(), `SELECT count(*) FROM grants`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("grants = %d, err %v; want the old grants dropped", n, err)
+	}
+	if _, err = db.ExecContext(t.Context(), `INSERT INTO grants (agent, session, tool, rule_key, approval_id)
+		VALUES ('codex', 's1', 'native__Bash', 'k1', 7), ('codex', 's1', 'native__Bash', 'k2', 7)`); err != nil {
+		t.Fatalf("two rules' grants for one tool in one session: %v", err)
 	}
 }
 

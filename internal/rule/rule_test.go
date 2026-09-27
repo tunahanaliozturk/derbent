@@ -180,3 +180,50 @@ func TestAsk(t *testing.T) {
 		t.Fatal("a tool only a plain deny matches is listed")
 	}
 }
+
+// A session grant is keyed on the rule that asked, so the key must follow a rule's content and not its
+// position: moving a rule keeps its key, and any change to what it matches or does gives a new one.
+func TestKeyFollowsTheRuleNotItsPosition(t *testing.T) {
+	push := rule.Spec{Agent: "codex", Tool: "native__Bash", Args: map[string]string{"command": "git push*", "cwd": "/work/*"}, Action: rule.Ask}
+	set := mustCompile(t,
+		push,
+		rule.Spec{Tool: "memory_*", Action: rule.Allow},
+		push,
+		rule.Spec{Action: rule.Allow},
+	)
+	if set.Key(1) == "" || set.Key(1) != set.Key(3) {
+		t.Fatalf("equal rules at 1 and 3 have keys %q and %q", set.Key(1), set.Key(3))
+	}
+	for name, n := range map[string]int{"no rule": 0, "past the end": 5, "negative": -1} {
+		if got := set.Key(n); got != "" {
+			t.Errorf("%s: Key(%d) = %q, want empty", name, n, got)
+		}
+	}
+
+	key := func(sp rule.Spec) string {
+		t.Helper()
+		return mustCompile(t, sp, rule.Spec{Action: rule.Allow}).Key(1)
+	}
+	with := func(change func(sp *rule.Spec)) rule.Spec {
+		sp := push
+		sp.Args = map[string]string{"command": "git push*", "cwd": "/work/*"}
+		change(&sp)
+		return sp
+	}
+	reordered := rule.Spec{Agent: "codex", Tool: "native__Bash", Args: map[string]string{"cwd": "/work/*", "command": "git push*"}, Action: rule.Ask}
+	if key(reordered) != set.Key(1) {
+		t.Fatal("the order args are written in changed the key")
+	}
+	for name, sp := range map[string]rule.Spec{
+		"agent":        with(func(sp *rule.Spec) { sp.Agent = "claude" }),
+		"tool":         with(func(sp *rule.Spec) { sp.Tool = "native__Shell" }),
+		"args pattern": with(func(sp *rule.Spec) { sp.Args["command"] = "terraform apply*" }),
+		"args name":    with(func(sp *rule.Spec) { delete(sp.Args, "cwd"); sp.Args["dir"] = "/work/*" }),
+		"fewer args":   with(func(sp *rule.Spec) { delete(sp.Args, "cwd") }),
+		"action":       with(func(sp *rule.Spec) { sp.Action = rule.Deny }),
+	} {
+		if key(sp) == set.Key(1) {
+			t.Errorf("a different %s kept the key", name)
+		}
+	}
+}

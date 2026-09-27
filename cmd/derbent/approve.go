@@ -6,11 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
 // runDecide approves or denies one pending approval, as the UI's a, A and d keys do.
@@ -20,7 +22,7 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	dbFlag := flags.String("db", "", "database file (default: derbent.db in the user state directory)")
 	session := false
 	if command == "approve" {
-		flags.BoolVar(&session, "session", false, "approve this tool for the rest of the agent's session")
+		flags.BoolVar(&session, "session", false, "approve this tool's calls that the same rule asks about, for the rest of the agent's session")
 	}
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -39,7 +41,7 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	verdict, done := approval.Deny, "denied"
 	switch {
 	case command == "approve" && session:
-		verdict, done = approval.ApproveSession, "approved for the rest of the session:"
+		verdict = approval.ApproveSession // done names the grant's scope once the approval is read
 	case command == "approve":
 		verdict, done = approval.ApproveOnce, "approved"
 	}
@@ -54,9 +56,26 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 		return err
 	}
 	defer db.Close()
-	if err = approval.NewQueue(db).Decide(ctx, id, verdict); err != nil {
+	q := approval.NewQueue(db)
+	notPending := fmt.Errorf("approval %d is not pending: it was already decided, timed out, or its agent gave up", id)
+	if verdict == approval.ApproveSession {
+		// Say what the grant covers: the tool's calls that the rule which asked holds, in one agent's
+		// session. The approval's row names all three.
+		var list []approval.Pending
+		if list, err = q.Pending(ctx); err != nil {
+			return err
+		}
+		i := slices.IndexFunc(list, func(p approval.Pending) bool { return p.ID == id })
+		if i < 0 {
+			return notPending
+		}
+		p := list[i]
+		done = fmt.Sprintf("approved %s calls that rule %d asks about, for the rest of %s's session:",
+			visible.Escape(p.Tool), p.Rule, visible.Escape(p.Agent))
+	}
+	if err = q.Decide(ctx, id, verdict); err != nil {
 		if errors.Is(err, approval.ErrNotPending) {
-			return fmt.Errorf("approval %d is not pending: it was already decided, timed out, or its agent gave up", id)
+			return notPending
 		}
 		return err
 	}

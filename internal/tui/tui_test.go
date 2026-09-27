@@ -139,6 +139,7 @@ func screen(m Model) string {
 
 var askReq = approval.Request{
 	Project: "/work/shop", Agent: "codex", Session: "s1", Tool: "github__create_issue", Args: `{"title":"Fix login"}`, Rule: 2,
+	RuleKey: "key-of-rule-2",
 }
 
 // sneaky holds runes a terminal draws as nothing, as a blank, or uses to change how text reads: a tag
@@ -260,7 +261,7 @@ func TestKeysDecideTheSelectedCall(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("the selected call was not decided")
 			}
-			if _, granted, err := d.q.Granted(t.Context(), "codex", "s1", second.Tool); err != nil || granted != tc.granted {
+			if _, granted, err := d.q.Granted(t.Context(), "codex", "s1", second.Tool, second.RuleKey); err != nil || granted != tc.granted {
 				t.Fatalf("granted = %v, err %v; want %v", granted, err, tc.granted)
 			}
 			if !strings.Contains(screen(m), tc.status) {
@@ -311,7 +312,7 @@ func TestVerifyKey(t *testing.T) {
 func TestHelpAndQuit(t *testing.T) {
 	m, _ := newModel(t)
 	m, _ = press(m, "?")
-	if !strings.Contains(screen(m), "approve this tool for the rest of that agent's session") {
+	if !strings.Contains(screen(m), "approve this tool's calls that the same rule asks about, for the") {
 		t.Fatalf("help:\n%s", screen(m))
 	}
 	m, _ = press(m, "x")
@@ -576,7 +577,7 @@ func TestSessionApprovalNeedsASecondA(t *testing.T) {
 				}
 				m = settle(m, cmd)
 			}
-			if _, granted, err := d.q.Granted(t.Context(), "codex", "s1", askReq.Tool); err != nil || granted != tc.granted {
+			if _, granted, err := d.q.Granted(t.Context(), "codex", "s1", askReq.Tool, askReq.RuleKey); err != nil || granted != tc.granted {
 				t.Fatalf("granted = %v, err %v; want %v", granted, err, tc.granted)
 			}
 			if tc.granted {
@@ -586,7 +587,7 @@ func TestSessionApprovalNeedsASecondA(t *testing.T) {
 			if p, err := d.q.Pending(t.Context()); err != nil || len(p) != 1 {
 				t.Fatalf("pending = %+v, %v; the call should still wait", p, err)
 			}
-			want := "press A again to approve github__create_issue for the rest of codex's session"
+			want := "press A again to approve github__create_issue calls that rule 2 asks about, for the rest of codex's session"
 			if !strings.Contains(screen(m), want) {
 				t.Fatalf("screen lacks %q:\n%s", want, screen(m))
 			}
@@ -609,7 +610,7 @@ func TestCapsLockAApprovesOnce(t *testing.T) {
 	if out := <-done; !out.Approved {
 		t.Fatalf("outcome = %+v, want it approved", out)
 	}
-	if _, granted, err := d.q.Granted(t.Context(), "codex", "s1", askReq.Tool); err != nil || granted {
+	if _, granted, err := d.q.Granted(t.Context(), "codex", "s1", askReq.Tool, askReq.RuleKey); err != nil || granted {
 		t.Fatalf("granted = %v, err %v; a Caps Lock a granted the session", granted, err)
 	}
 	if !strings.Contains(screen(m), "approved once") {
