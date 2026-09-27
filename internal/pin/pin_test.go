@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -42,11 +43,21 @@ func TestDefinitionIsCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"annotations":{"idempotentHint":false,"readOnlyHint":true},"description":"Who am I <b> & you",` +
+	want := `{"annotations":{"destructiveHint":null,"idempotentHint":false,"openWorldHint":null,"readOnlyHint":true,"title":""},` +
+		`"description":"Who am I <b> & you",` +
 		`"inputSchema":{"properties":{"a":{"type":"string"},"b":{"maximum":3,"type":"number"}},"type":"object"},` +
 		`"name":"get_me","outputSchema":null,"title":"Me"}`
 	if got != want {
 		t.Fatalf("Definition =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// Definition writes each annotation field itself, since the SDK's encoder drops or keeps false hints
+// depending on its version and on MCPGODEBUG=hintomitempty. A field a newer SDK adds would be served but
+// not pinned, so this fails until Definition writes it too.
+func TestDefinitionPinsEveryAnnotationField(t *testing.T) {
+	if n := reflect.TypeFor[mcp.ToolAnnotations]().NumField(); n != 5 {
+		t.Fatalf("mcp.ToolAnnotations has %d fields; pin.Definition writes 5", n)
 	}
 }
 

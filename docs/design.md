@@ -293,8 +293,9 @@ agent reads and follows. The gate pins each downstream tool (ADR 0013).
 
 - A pin is the SHA-256 of the tool's definition as the gate receives it: name, title, description, input
   schema, output schema and annotations, encoded as JSON with sorted object keys and no insignificant
-  whitespace. Pins live in the database, keyed on server and tool name, and every gate process shares
-  them.
+  whitespace. Every key is present, the five annotation keys included, which Derbent writes itself: the
+  SDK's own encoding of them changes with its version and with `MCPGODEBUG=hintomitempty`. Pins live in
+  the database, keyed on server and tool name, and every gate process shares them.
 - The first time a gate sees a tool, it pins it and serves it (trust on first use). Pins are taken for
   every tool the gate could serve, including tools the rules hide from one agent, since another agent may
   see them. A tool the rules hide from this agent is refused by the rule that hides it whether or not it
