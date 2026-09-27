@@ -192,7 +192,9 @@ the UI the pending call shows at the top with the agent, the tool, the time left
 arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's tool list.
 
 - `a` approves once, `d` denies, and `A` approves this tool for the rest of that agent's gate session.
-  `A` takes a second press within five seconds, so Caps Lock cannot turn an `a` into a session grant.
+  `A` takes a second press within five seconds, so one press can never grant the session. An `a` typed
+  with Caps Lock on arrives as `a` with Caps Lock from a terminal that reports modifiers, and the UI
+  takes it as `a`; a terminal that reports none sends `A`, which still needs the second press.
   Nothing the UI does changes the config file.
 - `derbent approve [--session] <id>` and `derbent deny <id>` do the same from any shell, by the id the
   UI shows, written `12` or `#12`. `derbent pending` lists the waiting calls with their whole arguments,
@@ -209,8 +211,9 @@ arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's
 - The receipt of an asked call records the final decision and names the approval behind it:
   `user:<id>` for the user's decision, `grant:<id>` for a call covered by an earlier `A`, `timeout:<id>`
   when no decision came, and `withdrawn:<id>` when the agent gave up or the gate was told to stop
-  (SIGINT or SIGTERM), so that no call can be approved while its gate shuts down. A gate that cannot ask
-  at all refuses the call and keeps the rule's `rule:<n>`.
+  (SIGINT or SIGTERM), so that no call can be approved while its gate shuts down. A call that reaches a
+  gate already told to stop writes no approval and is refused with `gate`, since it never waited. A
+  gate that cannot ask at all refuses the call and keeps the rule's `rule:<n>`.
 - The approval queue and the UI hold arguments only after redaction.
 
 ## Built-in tools
@@ -241,14 +244,17 @@ whole text. The preview escapes and wraps only what it can show, so megabytes of
 the screen. `enter` opens a detail view of the highlighted call: agent, tool, time left and the whole
 arguments, wrapped to the window and scrolled with up, down, page up, page down, home and end; `a`, `A`
 and `d` work there too, and if the call stops waiting the view says so and takes no decision. A run of
-more than eight spaces is shown as `␠×N`, so padding cannot push the rest out of sight. The terminal
-bell rings when a new call starts waiting.
+more than eight spaces of any kind (ASCII, no-break, ideographic, em and the other Unicode spaces) is
+shown as `␠×N`, so padding cannot push the rest out of sight. The preview reads no further into the
+arguments than it shows, spaces included, and writes a run that goes on past that as `␠×N+`. The
+terminal bell rings when a new call starts waiting.
 
 `a`, `A` and `d` act only on the highlighted call. After it leaves the list nothing is highlighted until
 the user picks a call with up or down, and when calls arrive while nothing was waiting, the oldest is
 highlighted at once. A call newly highlighted either way takes those keys only after 750 ms on screen,
 measured with the UI's clock, so a key pressed for the call before it, or twice, cannot land on a call
-the user has not seen.
+the user has not seen. A call can be highlighted while the help, the detail view or the memory browser
+hides the main screen, so the 750 ms start again whenever the main screen comes back.
 
 Below the waiting calls are the agents seen in the last hour and a live feed of receipts (time, agent,
 tool, decision, what decided it, outcome, duration). `m` opens a memory browser that searches every
@@ -258,8 +264,9 @@ running agents: their calls that need an approval wait for the timeout and are d
 
 Text from agents, tools and the database is drawn with control characters, bidirectional overrides and
 invisible characters (zero-width characters, tag characters, line separators, variation selectors)
-escaped, and newlines and tabs written as `\n` and `\t`, so a value cannot add lines of its own or hide
-text. Every screen line, the help screen's included, is clipped to the window.
+escaped, along with the runes that draw as nothing or as a blank without being any of those (the four
+Hangul fillers, the combining grapheme joiner and the braille blank), and newlines and tabs written as
+`\n` and `\t`, so a value cannot add lines of its own or hide text. Every screen line, the help screen's included, is clipped to the window.
 
 ## State
 

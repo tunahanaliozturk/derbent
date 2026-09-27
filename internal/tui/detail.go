@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,8 +30,7 @@ func (m Model) detailCall() (approval.Pending, bool) {
 func (m Model) detailKey(k tea.KeyPressMsg, asked int64) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
-		m.detail = 0
-		return m, nil
+		return m.backToMain(), nil
 	case "q":
 		return m, tea.Quit
 	}
@@ -38,7 +38,7 @@ func (m Model) detailKey(k tea.KeyPressMsg, asked int64) (tea.Model, tea.Cmd) {
 	if !waiting {
 		return m, nil
 	}
-	if v, ok := verdicts[k.String()]; ok {
+	if v, ok := verdict(k); ok {
 		return m.decide(v, asked)
 	}
 	page := m.detailRoom()
@@ -104,35 +104,43 @@ func (m Model) detailRoom() int {
 }
 
 // argText escapes arguments for the preview and the detail view, and writes a run of more than eight
-// spaces as ␠×N, so that padding cannot push what follows out of sight. It stops once it has written
-// limit bytes or more and returns how many bytes of s it used, so the preview pays for a screenful of
-// megabytes of arguments and no more.
+// spaces of any kind as ␠×N, so that padding cannot push what follows out of sight. It stops once it
+// has read or written limit bytes and returns how many bytes of s it used, so the preview pays for a
+// screenful of megabytes of arguments and no more, spaces or not. A run of spaces that goes on past
+// what it read is written ␠×N+.
 func argText(s string, limit int) (string, int) {
-	const nine = "         "
 	var b strings.Builder
-	used := 0
-	for used < len(s) && b.Len() < limit {
-		seg := head(s[used:], limit-b.Len())
-		if i := strings.Index(seg, nine); i >= 0 {
-			seg = seg[:i]
+	start, i := 0, 0 // s[start:i] has been read and not yet written
+	for i < len(s) && i < limit && b.Len()+i-start < limit {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if !padding(r) {
+			i += size
+			continue
 		}
-		b.WriteString(visible.Escape(seg))
-		used += len(seg)
-		run := len(s[used:]) - len(strings.TrimLeft(s[used:], " "))
-		if run > 8 {
-			fmt.Fprintf(&b, "␠×%d", run)
-			used += run
+		end, n := i, 0
+		for end < len(s) && end < limit {
+			r, size := utf8.DecodeRuneInString(s[end:])
+			if !padding(r) {
+				break
+			}
+			end, n = end+size, n+1
 		}
+		if n > 8 {
+			b.WriteString(visible.Escape(s[start:i]))
+			fmt.Fprintf(&b, "␠×%d", n)
+			if r, _ := utf8.DecodeRuneInString(s[end:]); padding(r) {
+				b.WriteString("+")
+			}
+			start = end
+		}
+		i = end
 	}
-	return b.String(), used
+	b.WriteString(visible.Escape(s[start:i]))
+	return b.String(), i
 }
 
-// head returns at least the first n bytes of s, or all of it, cut at a rune boundary and not inside a
-// run of spaces, so that argText counts the whole run.
-func head(s string, n int) string {
-	n = min(n, len(s))
-	for n < len(s) && (s[n] == ' ' || !utf8.RuneStart(s[n])) {
-		n++
-	}
-	return s[:n]
+// padding reports whether r is a space of any kind but a newline or a tab, which Escape writes as \n
+// and \t. unicode.IsSpace covers every space separator (category Zs).
+func padding(r rune) bool {
+	return r != '\n' && r != '\t' && unicode.IsSpace(r)
 }

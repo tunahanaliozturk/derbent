@@ -183,6 +183,10 @@ func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest,
 	if granted {
 		return run("grant:" + strconv.FormatInt(id, 10))
 	}
+	// A gate told to stop asks nothing more: the call never waits, so the gate itself refuses it.
+	if g.Stop != nil && g.Stop.Err() != nil {
+		return refuse("gate", name+" was refused because the gate is stopping; it did not run")
+	}
 	// The call waits until the agent gives up or the gate is told to stop, whichever comes first.
 	wait, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -194,12 +198,16 @@ func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest,
 		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: rec.Args, Rule: ruleIndex,
 	}, g.ApprovalTimeout)
 	ref := strconv.FormatInt(out.ID, 10)
+	withdrawn := "withdrawn:" + ref
+	if out.ID == 0 {
+		withdrawn = "gate" // the wait ended before the approval row was written, so nothing was withdrawn
+	}
 	switch {
 	case err != nil && ctx.Err() != nil:
-		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), "withdrawn:"+ref, "refused"
+		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), withdrawn, "refused"
 		return nil, err
 	case err != nil && wait.Err() != nil:
-		return refuse("withdrawn:"+ref, name+" was withdrawn before the user decided, because the gate is stopping; it did not run")
+		return refuse(withdrawn, name+" was withdrawn before the user decided, because the gate is stopping; it did not run")
 	case err != nil:
 		return refuse(rec.DecidedBy, name+" needs the user's approval, which could not be asked for: "+err.Error())
 	case out.Approved:

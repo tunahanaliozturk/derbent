@@ -52,7 +52,7 @@ func (m Model) browseKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.search(b.query, m.lookups)
 		case "esc":
 			if len(b.hits) == 0 {
-				m.notes = nil
+				m = m.backToMain()
 			} else {
 				b.typing, b.query = false, b.searched
 			}
@@ -73,7 +73,7 @@ func (m Model) browseKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	default:
 		switch k.String() {
 		case "esc":
-			m.notes = nil
+			m = m.backToMain()
 		case "q":
 			return m, tea.Quit
 		case "/":

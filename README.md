@@ -114,12 +114,14 @@ terminal bell rings when a new one arrives. `enter` shows the highlighted call's
 up, down, page up, page down, home and end scroll them. The keys act on the highlighted call: `a`
 approves it once, `A` pressed twice within five seconds approves the tool for the rest of that agent's
 session, `d` denies it, and up and down pick another call. A call that has just been highlighted takes
-none of these keys for its first 750 ms, so a key meant for the call before it cannot land on it. A call
-nobody answers is denied after the timeout, and the agent is told why. Below the waiting calls are the
-agents seen in the last hour and a live feed of receipts; `/` filters the feed, `m` searches memory
-across projects, `v` verifies the receipt chain, `?` lists the keys and `q` quits. Text from agents and
-tools is escaped before it is drawn, so it cannot send control sequences to your terminal or hide
-behind invisible characters.
+none of these keys for its first 750 ms on the main screen, so a key meant for the call before it cannot
+land on it. A call nobody answers is denied after the timeout, and the agent is told why. Below the
+waiting calls are the agents seen in the last hour and a live feed of receipts; `/` filters the feed, `m`
+searches memory across projects, `v` verifies the receipt chain, `?` lists the keys and `q` quits. Text
+from agents and tools is escaped before it is drawn: control characters, bidirectional overrides,
+zero-width and other format characters, line and paragraph separators, variation selectors, tag
+characters, the Hangul fillers, the combining grapheme joiner and the braille blank are written as
+`\uXXXX`, and in arguments a run of more than eight spaces of any kind is shown as `␠×N`.
 
 The same decisions work from any shell, by the id the UI shows, written `12` or `#12`, and the waiting
 calls and the receipts can be listed without the UI:

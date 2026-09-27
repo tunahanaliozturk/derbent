@@ -20,6 +20,8 @@ func TestEscape(t *testing.T) {
 		{"line and paragraph separators", "\U00002028\U00002029", "\\u2028\\u2029"},
 		{"variation selectors", "\U00002764\U0000fe0f\U000e0100", "\U00002764\\ufe0f\\U000e0100"},
 		{"tag characters", "\U000e0000\U000e0041\U000e007f", "\\U000e0000\\U000e0041\\U000e007f"},
+		{"Hangul fillers", "a\U0000115fb\U00001160c\U00003164d\U0000ffa0", "a\\u115fb\\u1160c\\u3164d\\uffa0"},
+		{"combining grapheme joiner and braille blank", "a\U0000034fb\U00002800", "a\\u034fb\\u2800"},
 		{"bytes that are not UTF-8", "a\xffb\xc3", `a\xffb\xc3`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -34,6 +36,7 @@ func TestUnsafe(t *testing.T) {
 	unsafe := []rune{
 		0, '\n', 0x1b, 0x7f, 0x9b, 0x202e, 0x2066, 0x200b, 0x200d, 0xad, 0x2060, 0xfeff, 0x2028, 0x2029,
 		0xfe0f, 0xe0000, 0xe0041, 0xe007f, 0xe0100, 0xd800, 0x110000,
+		0x115f, 0x1160, 0x3164, 0xffa0, 0x34f, 0x2800,
 	}
 	for _, r := range unsafe {
 		if !visible.Unsafe(r) {

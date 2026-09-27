@@ -294,6 +294,30 @@ func TestStoppingTheGateWithdrawsWaitingCalls(t *testing.T) {
 	}
 }
 
+// A call that reaches a gate already told to stop never waits: the gate refuses it without writing an
+// approval row, and its receipt says the gate decided, not that a call was withdrawn.
+func TestAGateAlreadyStoppingAsksNothing(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "codex", askWrites, allowRest)
+	stop, cancel := context.WithCancel(t.Context())
+	cancel()
+	g.Stop = stop
+	res := call(t, connect(t, g), "memory_write", map[string]any{"title": "t", "body": "b"})
+	if !res.IsError || !strings.Contains(text(res), "the gate is stopping") {
+		t.Fatalf("result = %s", text(res))
+	}
+	var asked int
+	if err := e.db.QueryRowContext(t.Context(), `SELECT count(*) FROM approvals`).Scan(&asked); err != nil || asked != 0 {
+		t.Fatalf("approvals written = %d, err %v; want none", asked, err)
+	}
+	if by := decidedBy(t, e.db); !slices.Equal(by, []string{"gate"}) {
+		t.Fatalf("decided_by = %v, want [gate]", by)
+	}
+	if got := receipts(t, e.db); got[0].decision != "deny" || got[0].outcome != "refused" {
+		t.Fatalf("receipts = %+v", got)
+	}
+}
+
 func TestAskedToolIsListed(t *testing.T) {
 	e := newEnv(t)
 	cs := connect(t, e.gate(t, "codex", askWrites, rule.Spec{Action: rule.Deny}))

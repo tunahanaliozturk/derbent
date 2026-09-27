@@ -25,8 +25,8 @@ const (
 	pollEvery = 200 * time.Millisecond // as often as a waiting call polls (ADR 0001)
 	feedSize  = 500                    // receipts the feed keeps
 	bell      = "\a"
-	// armAfter is how long a call must have been highlighted before a, A or d decides it, so a key
-	// meant for the call before it cannot land on it.
+	// armAfter is how long a call must have been highlighted on screen before a, A or d decides it, so
+	// a key meant for the call before it cannot land on it.
 	armAfter = 750 * time.Millisecond
 	// confirmFor is how long a first A waits for the second that grants the session approval.
 	confirmFor = 5 * time.Second
@@ -54,7 +54,7 @@ type Model struct {
 	pending       []approval.Pending
 	// selected is the ID of the highlighted call, 0 for none. It is an ID, not a position, so that a
 	// key never lands on a call the user did not highlight when the list changes under it. since is
-	// when it became highlighted, which a, A and d wait armAfter from.
+	// when it became highlighted or the main screen last came back, which a, A and d wait armAfter from.
 	selected int64
 	since    time.Time
 	// confirm is the call a first A asked about, 0 for none, and confirmAt when; a second A on it
@@ -192,8 +192,26 @@ func (m Model) highlight(id int64) Model {
 	return m
 }
 
+// backToMain closes the help, the detail view and the memory browser. The highlighted call may have
+// been highlighted while one of them hid it, so its arming time starts again now that it is on screen.
+func (m Model) backToMain() Model {
+	m.help, m.detail, m.notes, m.since = false, 0, nil, m.now()
+	return m
+}
+
 // verdicts are the keys that decide the highlighted call.
 var verdicts = map[string]approval.Verdict{"a": approval.ApproveOnce, "A": approval.ApproveSession, "d": approval.Deny}
+
+// verdict is the decision key k stands for, if any. An a typed with Caps Lock on, from a terminal that
+// reports modifiers, is an a: Caps Lock without Shift does not make it an A.
+func verdict(k tea.KeyPressMsg) (approval.Verdict, bool) {
+	name := k.String()
+	if k.Code == 'a' && k.Mod.Contains(tea.ModCapsLock) && !k.Mod.Contains(tea.ModShift) {
+		name = "a"
+	}
+	v, ok := verdicts[name]
+	return v, ok
+}
 
 // key handles a key. Any key but a second A forgets a first A.
 func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -207,12 +225,11 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case m.editing:
 		return m.editFilter(k), nil
 	case m.help:
-		m.help = false
-		return m, nil
+		return m.backToMain(), nil
 	case m.detail != 0:
 		return m.detailKey(k, asked)
 	}
-	if v, ok := verdicts[k.String()]; ok {
+	if v, ok := verdict(k); ok {
 		return m.decide(v, asked)
 	}
 	switch k.String() {

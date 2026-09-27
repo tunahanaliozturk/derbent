@@ -12,13 +12,18 @@ import (
 // Unsafe reports whether r must not reach a terminal as it is: a control character, which can move
 // the cursor, set the clipboard or ring the bell; a format character, which is invisible (zero-width
 // spaces and joiners, the soft hyphen, the word joiner, the byte order mark, tag characters) or
-// reorders text (bidirectional controls); a line or paragraph separator; a variation selector; or a
-// value that is not a rune at all.
+// reorders text (bidirectional controls); a line or paragraph separator; a variation selector; a
+// letter or mark that draws as nothing or as a blank (blanks); or a value that is not a rune at all.
 func Unsafe(r rune) bool {
 	return !utf8.ValidRune(r) || unicode.IsControl(r) ||
 		unicode.In(r, unicode.Bidi_Control, unicode.Cf, unicode.Zl, unicode.Zp, unicode.Variation_Selector) ||
-		(r >= 0xE0000 && r <= 0xE007F) // every tag character, assigned or not
+		(r >= 0xE0000 && r <= 0xE007F) || // every tag character, assigned or not
+		strings.ContainsRune(blanks, r)
 }
+
+// blanks are runes outside the categories above that a terminal draws as nothing or as a space: the
+// four Hangul fillers, the combining grapheme joiner and the braille blank.
+const blanks = "ᅟᅠㅤﾠ͏⠀"
 
 // Escape returns s with every unsafe rune written as an escape: \n and \t for a newline and a tab, so
 // one value stays one line, \uXXXX, or \UXXXXXXXX above U+FFFF, for the others, and \xNN for a byte

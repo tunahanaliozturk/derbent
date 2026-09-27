@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -139,11 +140,14 @@ var askReq = approval.Request{
 	Project: "/work/shop", Agent: "codex", Session: "s1", Tool: "github__create_issue", Args: `{"title":"Fix login"}`, Rule: 2,
 }
 
-// sneaky holds runes a terminal draws as nothing or uses to change how text reads: a tag character, a
-// zero-width space, a zero-width joiner, a line separator and a variation selector.
+// sneaky holds runes a terminal draws as nothing, as a blank, or uses to change how text reads: a tag
+// character, a zero-width space, a zero-width joiner, a line separator, a variation selector, the four
+// Hangul fillers, the combining grapheme joiner and the braille blank.
 const (
-	sneaky        = "\U000e0041\U0000200b\U0000200d\U00002028\U0000fe0f"
-	sneakyEscaped = "\\U000e0041\\u200b\\u200d\\u2028\\ufe0f"
+	sneaky = "\U000e0041\U0000200b\U0000200d\U00002028\U0000fe0f" +
+		"\U0000115f\U00001160\U00003164\U0000ffa0\U0000034f\U00002800"
+	sneakyEscaped = "\\U000e0041\\u200b\\u200d\\u2028\\ufe0f" +
+		"\\u115f\\u1160\\u3164\\uffa0\\u034f\\u2800"
 )
 
 // noRawText fails the test when s holds an escape sequence, a bell, a C1 control, a bidirectional
@@ -436,7 +440,6 @@ func TestTheSelectedCallShowsItsWholeArguments(t *testing.T) {
 // detail view scrolls to the end whatever comes before it.
 func TestTheDetailViewReachesTheTailPastARunOfSpaces(t *testing.T) {
 	m, d := newModel(t)
-	m, _ = update(m, tea.WindowSizeMsg{Width: 60, Height: 20})
 	long := askReq
 	long.Args = `{"cmd":"rm -rf` + strings.Repeat(" ", 2000) + strings.Repeat("b", 2000) + ` TAIL"}`
 	waiting(t, d.q, long)
@@ -445,6 +448,7 @@ func TestTheDetailViewReachesTheTailPastARunOfSpaces(t *testing.T) {
 	if s := screen(m); !strings.Contains(s, "rm -rf␠×2000bbb") {
 		t.Fatalf("the preview does not show the run of spaces by its length:\n%s", s)
 	}
+	m, _ = update(m, tea.WindowSizeMsg{Width: 60, Height: 20})
 	m, _ = press(m, "enter")
 	for _, step := range []struct{ key, want string }{
 		{"", "lines 1-14 of 34"},
@@ -492,10 +496,42 @@ func TestAHugeArgumentKeepsTheScreenFast(t *testing.T) {
 	}
 }
 
+// Padding costs a frame no more than letters do: the preview reads no further into the arguments than
+// its limit, however the spaces run, and says when a run of spaces goes on past what it read.
+func TestThePreviewReadsNoFurtherIntoSpacesThanItsLimit(t *testing.T) {
+	const limit = 4096
+	for _, tc := range []struct{ name, args, want string }{
+		{"one run of 8 MiB", strings.Repeat(" ", 8<<20), "␠×4096+"},
+		{"ideographic spaces", strings.Repeat("\U00003000", 3<<20), "␠×1366+"},
+		{"8 MiB of short runs", strings.Repeat("x"+strings.Repeat(" ", 1000), 8<<10), ""},
+		{"a run that ends at the limit", strings.Repeat(" ", limit) + "x", "␠×4096"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text, used := argText(tc.args, limit)
+			if used > limit+utf8.UTFMax {
+				t.Fatalf("read %d bytes of %d, limit %d", used, len(tc.args), limit)
+			}
+			if tc.want != "" && text != tc.want {
+				t.Fatalf("argText = %q, want %q", text, tc.want)
+			}
+		})
+	}
+	m, _ := newModel(t)
+	calls := pendingCalls(2)
+	calls[0].Args = strings.Repeat(" ", 8<<20)
+	calls[1].Args = calls[0].Args
+	m, _ = update(m, snapshotMsg{pending: calls})
+	s := screen(m)
+	if !regexp.MustCompile(`␠×\d+\+`).MatchString(s) || !strings.Contains(s, "more lines, enter to read all") {
+		t.Fatalf("the preview does not say the spaces go on:\n%s", s)
+	}
+}
+
 // A approves a tool for the rest of an agent's session, so it takes a second press within five
-// seconds: with Caps Lock on, an a meant to approve once arrives as A.
+// seconds: a terminal that reports no modifiers sends an a typed with Caps Lock on as the byte A, which
+// Bubble Tea reads as shift+a.
 func TestSessionApprovalNeedsASecondA(t *testing.T) {
-	capsA := tea.KeyPressMsg{Code: 'a', Text: "A", Mod: tea.ModCapsLock}
+	legacyCapsA := tea.KeyPressMsg{Code: 'a', Text: "A", Mod: tea.ModShift}
 	for _, tc := range []struct {
 		name    string
 		steps   []any // a key name, a key message, or a time.Duration to move the clock by
@@ -505,7 +541,7 @@ func TestSessionApprovalNeedsASecondA(t *testing.T) {
 		{"twice", []any{"A", "A"}, true},
 		{"another key between", []any{"A", "down", "A"}, false},
 		{"more than five seconds apart", []any{"A", confirmFor + time.Millisecond, "A"}, false},
-		{"Caps Lock a", []any{capsA}, false},
+		{"Caps Lock a, modifiers not reported", []any{legacyCapsA}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, d := newModel(t)
@@ -540,6 +576,29 @@ func TestSessionApprovalNeedsASecondA(t *testing.T) {
 				t.Fatalf("screen lacks %q:\n%s", want, screen(m))
 			}
 		})
+	}
+}
+
+// A terminal that reports modifiers sends an a typed with Caps Lock on as the a key with Caps Lock and
+// the text A. That is an a: it approves the call once and grants nothing.
+func TestCapsLockAApprovesOnce(t *testing.T) {
+	m, d := newModel(t)
+	done := waiting(t, d.q, askReq)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	m, cmd := update(later(m, armAfter), tea.KeyPressMsg{Code: 'a', Text: "A", Mod: tea.ModCapsLock})
+	m = settle(m, cmd)
+	if p, err := d.q.Pending(t.Context()); err != nil || len(p) != 0 {
+		t.Fatalf("pending = %+v, %v; a Caps Lock a should approve the call once:\n%s", p, err, screen(m))
+	}
+	if out := <-done; !out.Approved {
+		t.Fatalf("outcome = %+v, want it approved", out)
+	}
+	if _, granted, err := d.q.Granted(t.Context(), "codex", "s1", askReq.Tool); err != nil || granted {
+		t.Fatalf("granted = %v, err %v; a Caps Lock a granted the session", granted, err)
+	}
+	if !strings.Contains(screen(m), "approved once") {
+		t.Fatalf("screen lacks %q:\n%s", "approved once", screen(m))
 	}
 }
 
@@ -579,6 +638,72 @@ func TestANewlyHighlightedCallIgnoresKeysAtFirst(t *testing.T) {
 	settle(m, cmd)
 	if out := <-done; !out.Approved {
 		t.Fatalf("outcome = %+v, want it approved once it had been on screen", out)
+	}
+}
+
+// A call highlighted while the help, the detail view or the memory browser hides the main screen has not
+// been seen: it takes a, A or d only once the main screen has shown it for a moment.
+func TestACallHighlightedOutOfSightArmsWhenTheMainScreenReturns(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(t *testing.T, m Model, d deps) Model // opens the other screen
+		back string                                    // the key that closes it
+	}{
+		{"help", func(_ *testing.T, m Model, _ deps) Model {
+			m, _ = press(m, "?")
+			return m
+		}, "x"},
+		{"memory browser", func(_ *testing.T, m Model, _ deps) Model {
+			m, _ = press(m, "m")
+			return m
+		}, "esc"},
+		{"detail view", func(t *testing.T, m Model, d deps) Model {
+			t.Helper()
+			waiting(t, d.q, askReq)
+			waitPending(t, d.q, 1)
+			m, _ = refresh(m)
+			m, _ = press(m, "enter")
+			p, err := d.q.Pending(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = d.q.Decide(t.Context(), p[0].ID, approval.Deny); err != nil {
+				t.Fatal(err)
+			}
+			m, _ = refresh(m) // an empty poll: the view says its call has gone
+			return m
+		}, "esc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, d := newModel(t)
+			m = tc.open(t, m, d)
+			next := askReq
+			next.Tool = "github__create_pull_request"
+			done := waiting(t, d.q, next)
+			waitPending(t, d.q, 1)
+			m, _ = refresh(m) // highlights the call while the other screen is open
+			if strings.Contains(screen(m), "RECEIPTS") {
+				t.Fatalf("the %s should still hide the main screen:\n%s", tc.name, screen(m))
+			}
+			m, cmd := press(later(m, armAfter), tc.back, "a")
+			m = settle(m, cmd)
+			if left, err := d.q.Pending(t.Context()); err != nil || len(left) != 1 {
+				t.Fatalf("pending = %+v, %v; a at once after the %s decided a call not yet seen", left, err, tc.name)
+			}
+			if !strings.Contains(screen(m), "just appeared") {
+				t.Fatalf("the screen does not say why the key did nothing:\n%s", screen(m))
+			}
+			m, cmd = press(later(m, armAfter), "a")
+			settle(m, cmd)
+			select {
+			case out := <-done:
+				if !out.Approved {
+					t.Fatalf("outcome = %+v, want it approved once it had been on screen", out)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("a 750 ms after the main screen came back did not decide the call")
+			}
+		})
 	}
 }
 
@@ -788,15 +913,17 @@ func TestHostileTextCannotReachTheTerminal(t *testing.T) {
 	hostile := askReq
 	hostile.Agent = "co\x1b[2Jdex"
 	hostile.Tool = "gh\u009b2Jissue" + strings.Repeat("T", 200)
-	hostile.Args = sneaky + "{\"x\":\"\x1b]52;c;ZXZpbA==\x07\U0000202egnp.exe\nsecond line" + strings.Repeat("A", 5000) + "\"}"
+	// Ideographic, no-break and em spaces pad as well as ASCII ones do.
+	wide := strings.Repeat("\U00003000\U000000a0\U00002003", 7)
+	hostile.Args = sneaky + wide + "{\"x\":\"\x1b]52;c;ZXZpbA==\x07\U0000202egnp.exe\nsecond line" + strings.Repeat("A", 5000) + "\"}"
 	appendReceipt(t, d.log, "cl\x1b[2Jaude", "mem\U0000202eory\x1b]0;title\x07"+sneaky, "al\alow"+strings.Repeat("D", 200))
 	waiting(t, d.q, hostile)
 	waitPending(t, d.q, 1)
 	m, _ = refresh(m)
 	s := screen(m)
 	noRawText(t, s, 60)
-	for _, want := range []string{`\u001b]52`, `co\u001b[2Jdex`, `cl\u001b[2Jaude`, "mem\\u202eory", sneakyEscaped} {
-		if !strings.Contains(s, want) {
+	for _, want := range []string{`\u001b]52`, `co\u001b[2Jdex`, `cl\u001b[2Jaude`, "mem\\u202eory", sneakyEscaped + "␠×21{"} {
+		if !strings.Contains(joined(s), want) {
 			t.Errorf("screen lacks %q, the escaped form:\n%s", want, s)
 		}
 	}
@@ -804,8 +931,8 @@ func TestHostileTextCannotReachTheTerminal(t *testing.T) {
 	m, _ = press(m, "enter")
 	s = screen(m)
 	noRawText(t, s, 60)
-	for _, want := range []string{`\u001b]52`, `co\u001b[2Jdex`, `gh\u009b2Jissue`, sneakyEscaped} {
-		if !strings.Contains(s, want) {
+	for _, want := range []string{`\u001b]52`, `co\u001b[2Jdex`, `gh\u009b2Jissue`, sneakyEscaped + "␠×21{"} {
+		if !strings.Contains(joined(s), want) {
 			t.Errorf("the detail view lacks %q, the escaped form:\n%s", want, s)
 		}
 	}
@@ -816,7 +943,7 @@ func TestHostileTextCannotReachTheTerminal(t *testing.T) {
 	}
 	noRawText(t, s, 60)
 	m, _ = press(m, "esc")
-	m, cmd := press(m, "a")
+	m, cmd := press(later(m, armAfter), "a") // back on the main screen, the call arms again
 	m = settle(m, cmd)
 	if s = screen(m); !strings.Contains(s, `approved once: co\u001b[2Jdex`) {
 		t.Errorf("the status line does not show the decision, escaped:\n%s", s)

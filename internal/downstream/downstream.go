@@ -127,8 +127,8 @@ func (m *Manager) Started() <-chan struct{} {
 }
 
 // Close shuts every server down and waits for every goroutine the Manager started. Sessions are closed
-// first, which lets a command server exit on its own once its stdin closes (it is killed if it has not
-// within five seconds); then supervision is cancelled, which also ends attempts still connecting.
+// first, which lets a command server exit on its own once its stdin closes (it is stopped if it has not
+// within two seconds); then supervision is cancelled, which also ends attempts still connecting.
 // Calling it more than once is harmless.
 func (m *Manager) Close() {
 	m.mu.Lock()
