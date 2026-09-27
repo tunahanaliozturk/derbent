@@ -48,8 +48,8 @@ protocol, bad flags, or an answer that cannot be written exit with status 2.
   `CommandLine`).
 - Derbent cannot hide a CLI's built-in tools, so a `deny` on one refuses each call instead.
 - A session grant never covers both paths. `A` on a hook tool covers later calls of that `native__` tool
-  that the same rule asks about, in the same CLI session (ADR 0011); the MCP gate's session is one
-  `derbent mcp` process with a random id, and its tools have other names.
+  that the same rule asks about under the same rules above it, in the same CLI session (ADR 0011); the
+  MCP gate's session is one `derbent mcp` process with a random id, and its tools have other names.
 - Hook receipts mask only the secrets set in the hook's own environment, and whatever the `redact`
   patterns match. A secret that only the CLI's MCP entry holds needs a `redact` pattern to be masked in
   them.

@@ -191,10 +191,11 @@ When a rule says `ask`, the gate writes a pending approval and polls for a decis
 the UI the pending call shows at the top with the agent, the tool, the time left and the redacted
 arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's tool list.
 
-- `a` approves once, `d` denies, and `A` approves the tool's calls that the same rule asks about, for
-  the rest of that agent's gate session: one `derbent mcp` process for an MCP call, the CLI's own
-  session for a hook call (see Built-in tools). Under first match, which calls a rule catches depends
-  on the rules above it, so the grant is keyed on a fingerprint of the rule and every rule above it.
+- `a` approves once, `d` denies, and `A` approves the tool's calls that the same rule asks about under
+  the same rules above it, for the rest of that agent's gate session: one `derbent mcp` process for an
+  MCP call, the CLI's own session for a hook call (see Built-in tools). Under first match, which calls a
+  rule catches depends on the rules above it, so the grant is keyed on a fingerprint of the rule and
+  every rule above it.
   Editing or reordering the config never widens a grant: a change to the granted rule or to any rule
   above it asks again, and a change below it keeps the grant (ADR 0011). `A` takes a second press
   within five seconds, so one press can never grant the session, and the question and the status after
@@ -230,7 +231,7 @@ arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's
 reads the hook's JSON from standard input, treats the call as tool `native__<tool_name>` with the tool's
 input as arguments, applies the same rules, waits for an approval when a rule says `ask`, and appends a
 receipt. Its gate session is the hook input's `session_id`, so `A` covers the tool's calls that the same
-rule asks about for the rest of that Claude Code session.
+rule asks about under the same rules above it, for the rest of that Claude Code session.
 
 - Calls to Derbent's own tools (see below) get no decision and no receipt from the hook.
   The gate already decides and records them, and would otherwise ask for and record each one twice.
@@ -243,9 +244,9 @@ rule asks about for the rest of that Claude Code session.
 
 Codex, GitHub Copilot CLI and Antigravity CLI have the same kind of hook, and `derbent gate` speaks
 each one's protocol (`--cli codex|copilot|antigravity`, which defaults to the `--agent` value). The
-README's coverage table says, per CLI, which tools the hook sees, which name each CLI gives Derbent's
-own tools, and how the hook is installed with a timeout above `approvals.timeout` (ADR 0006). One
-process runs per tool call, and for every CLI:
+README's quick start shows how each hook is installed with a timeout above `approvals.timeout`, and its
+coverage table says, per CLI, which tools the hook sees and which name each CLI gives Derbent's own
+tools (ADR 0006). One process runs per tool call, and for every CLI:
 
 - A call is the gate's own only when three things hold. Its name starts with the CLI's prefix for the
   MCP entry named by `--server` (default `derbent`): `mcp__derbent__` in Claude Code and Codex,
@@ -258,8 +259,9 @@ process runs per tool call, and for every CLI:
   `native__mcp__github__get_me`.
 - The gate session is the CLI's session id (Claude Code, Codex, Copilot CLI) or conversation id
   (Antigravity CLI). `A` on a hook tool covers later calls of that `native__` tool that the same rule
-  asks about, in the same CLI session. Every shell command is one tool, such as `native__Bash`, so an
-  `A` on a `git push` does not let through a `terraform apply` that another rule asks about (ADR 0011).
+  asks about under the same rules above it, in the same CLI session. Every shell command is one tool,
+  such as `native__Bash`, so an `A` on a `git push` does not let through a `terraform apply` that
+  another rule asks about (ADR 0011).
   It cannot cover an MCP tool: the MCP gate's session is one `derbent mcp` process with a random id, and
   its tools have other names.
 - The project is `--project`, else the git root of the directory the CLI reports, else that of the
@@ -316,10 +318,10 @@ screen's included, is clipped to the window.
 `%LOCALAPPDATA%\derbent\derbent.db` on Windows, `$XDG_STATE_HOME/derbent/derbent.db` or
 `~/.local/state/derbent/derbent.db` on Linux, and `~/Library/Application Support/derbent/` on
 macOS, never inside a synced folder.
-`modernc.org/sqlite` needs no cgo, so the Windows binary builds without a C toolchain (ADR 0008); FTS5
-support in it is confirmed when the repository is scaffolded. WAL mode with a thirty-second busy timeout
-(ADR 0008). Migrations are embedded, numbered and forward only, and the first process to open an older
-database migrates it inside `BEGIN IMMEDIATE`.
+`modernc.org/sqlite` needs no cgo, so the Windows binary builds without a C toolchain, and it includes
+the FTS5 that memory search uses (ADR 0008). WAL mode with a thirty-second busy timeout (ADR 0008).
+Migrations are embedded, numbered and forward only, and the first process to open an older database
+migrates it inside `BEGIN IMMEDIATE`.
 
 ## Security
 
@@ -357,11 +359,15 @@ database migrates it inside `BEGIN IMMEDIATE`.
   while a call another ask rule holds on the same tool still asks. On the hook path the grant holds
   when the rules below it are reordered or edited, and the call asks again when the granted rule is
   edited, when a rule above it is narrowed, and when `ask git push*--force*` and `ask git push*` swap
-  places after an `A` on a plain push. Rule tests check that a rule's fingerprint changes with any
-  change at or above it and with none below it, and that two different rule lists never hash the same
-  bytes. A store test migrates a database from before grants were keyed on the rule and finds its
-  grants dropped. UI and command tests check that an approval with no rule key is approved once by `A`
-  and refused by `derbent approve --session`.
+  places after an `A` on a plain push. Rule tests check a sample of edits: rule 2's fingerprint changes
+  when its agent, tool, action, an `args` pattern, an `args` name or the number of `args` changes, when
+  the rule above it is edited or removed, when the two swap places, and when a rule is added above; it
+  stays the same when a rule below it is edited, removed or added, when the rules below are reordered,
+  and when a rule with eight `args` is compiled 65 times, so Go reads its args in many orders. One pair
+  of rule lists, built so that without the length written before each rule's form they would hash the
+  same bytes, gets two different fingerprints. A store test migrates a database from before grants were
+  keyed on the rule and finds its grants dropped. UI and command tests check that an approval with no
+  rule key is approved once by `A` and refused by `derbent approve --session`.
 - **Escaping.** A test feeds the UI escape sequences, a clipboard write, a bell, a bidirectional
   override and invisible characters in the agent, tool and argument fields, and asserts that none reaches
   the main screen, the detail view or the memory browser raw and no line is wider than the window. Tests
@@ -381,9 +387,11 @@ database migrates it inside `BEGIN IMMEDIATE`.
   its approval, and that a hook whose answer cannot be written returns the error that exits
   with status 2. A store test holds the write lock and opens a current database without waiting for
   it. The README's coverage table records what a real session showed.
-- **Overhead.** A benchmark calls an echo MCP server directly and through the gate with an allow rule,
-  and reports p50, p99 and calls per second, compared with `benchstat` over ten runs, on Windows and
-  Linux. Results live under `docs/benchmark-results/`, and the README states only numbers in those files.
+- **Overhead.** One benchmark calls an echo MCP server directly and through the gate with an allow rule;
+  another runs `derbent gate` as a CLI would, with an allowed call, against starting the same binary and
+  exiting. Both report p50, p99 and calls per second, compared with `benchstat` over ten runs, on GitHub's
+  Windows and Linux runners. The results, from one workflow run, live under `docs/benchmark-results/`
+  with the runners named, and the README states only numbers in those files.
 - **Demo.** A recorded session: Claude Code writes a decision to memory, Codex finds it, then asks for
   `github__create_issue` and the user approves it from the UI; `derbent verify` ends clean.
 
@@ -391,18 +399,21 @@ database migrates it inside `BEGIN IMMEDIATE`.
 
 ```
 derbent/
-├── cmd/derbent/               wiring: subcommands, config, signals
-├── internal/config/              TOML decoding and validation
-├── internal/rule/                matching and decisions
-├── internal/gate/                the MCP server facing agents, tool listing, forwarding
+├── cmd/derbent/                  wiring: subcommands, config, signals; end-to-end tests and benchmarks
+├── internal/config/              TOML decoding and validation, default paths, projects
+├── internal/rule/                matching, decisions, rule fingerprints
+├── internal/gate/                the MCP server facing agents, tool listing, forwarding, hook decisions
 ├── internal/downstream/          MCP clients for stdio and HTTP servers, restarts
-├── internal/memory/              memory tools over FTS5
-├── internal/receipt/             appending, redaction, verify
-├── internal/approval/            pending approvals and polling
-├── internal/hook/                pre-tool hook protocols of the four CLIs
+├── internal/memory/              memory over FTS5
+├── internal/receipt/             appending, verify, listing
+├── internal/redact/              masking secrets in stored arguments
+├── internal/approval/            pending approvals, polling, session grants
+├── internal/hook/                pre-tool hook protocols of the four CLIs, with golden files in testdata/
 ├── internal/store/               SQLite, migrations
 ├── internal/tui/                 Bubble Tea UI
-├── testdata/                     golden files, fuzz corpus, echo server
+├── internal/visible/             escaping text before it reaches a terminal
+├── scripts/release.sh            reproducible release builds
+├── .github/workflows/            ci, bench and release
 ├── docs/adr/  docs/benchmark-results/  docs/design.md
 ├── .golangci.yml  go.mod  go.sum
 └── README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md  LICENSE
@@ -411,10 +422,10 @@ derbent/
 ## Toolchain and gates
 
 - Go 1.27.1, verified on go.dev on 2026-09-26. `go.mod` carries `go 1.27` and `toolchain go1.27.1`.
-- Dependencies: the MCP Go SDK v1.8.0 (Apache-2.0, with older parts still MIT while the project
-  relicenses), `modernc.org/sqlite` v1.59.0 (BSD-3-Clause), `BurntSushi/toml` (MIT), Bubble Tea and Lip
-  Gloss (MIT), `golang.org/x/sync` (BSD-3-Clause), goleak (MIT). Versions verified on the module proxy on
-  2026-09-26 where given, and the rest when the repository is scaffolded.
+- Direct dependencies, as `go.mod` pins them: the MCP Go SDK v1.8.0 (Apache-2.0, with older parts still
+  MIT while the project relicenses), `modernc.org/sqlite` v1.59.0 (BSD-3-Clause), `BurntSushi/toml`
+  v1.6.0 (MIT), Bubble Tea v2.0.10, Lip Gloss v2.0.6 and `charmbracelet/x/ansi` v0.11.8 (MIT), and
+  goleak v1.3.0 (MIT) for the tests.
 - `gofumpt` and `golangci-lint` v2 as build gates, with at least `errcheck`, `govet`, `staticcheck`,
   `noctx`, `errorlint`, `gosec`, `exhaustive`, `sqlclosecheck` and `rowserrcheck`.
 - `go mod tidy` leaves `go.mod` and `go.sum` unchanged, and `go test ./... -race -count=1` passes with
@@ -422,7 +433,12 @@ derbent/
 - A licence check reads the licence each module in the build graph ships and fails on anything outside
   an allow list kept in the repository.
 - GitHub Actions runs every gate on `windows-latest` and `ubuntu-latest`, and builds on `macos-latest`.
-  Release binaries are built with `-trimpath` and CGO off, and two builds must produce the same `sha256`.
+- `scripts/release.sh` builds Windows, Linux and macOS binaries for amd64 and arm64 with `-trimpath`, CGO
+  off and no build id, each twice, the second time from an empty build cache, and fails unless every pair
+  is byte-identical; it then writes `SHA256SUMS`. CI's `reproducible` job runs it on every push, and the
+  release workflow runs it on the tag, without a restored cache, before it publishes. A clean checkout of
+  a tag, built with go1.27.1 and no `GOFLAGS`, `GOAMD64` or `GOARM64` overrides, gives the published
+  checksums.
 
 ## Decisions
 
@@ -438,7 +454,7 @@ derbent/
 | 0008 | SQLite through `modernc.org/sqlite`, with no cgo. |
 | 0009 | Downstream servers are supervised from the moment the gate starts. |
 | 0010 | Derbent is written in Go. |
-| 0011 | A session grant covers only the calls that the same rule asks about, keyed on a fingerprint of that rule and the rules above it. |
+| 0011 | A session grant covers only the calls the same rule asks about under the same rules above it, keyed on a fingerprint of that rule and every rule above it. |
 
 ## Milestones
 
@@ -454,6 +470,14 @@ Each milestone gets its own implementation plan and ends with a green CI run.
    where they exist. Exit: the coverage table is filled from real sessions.
 5. **Proof and release.** The overhead benchmark, the demo recording, README, ADRs finished,
    reproducible binaries, `v1.0.0`.
+
+How the exit checks went: milestone 1 as planned, its tests running in CI on Windows and Linux, and
+milestone 2 as planned, with the GitHub MCP server answering a real Claude Code session through the
+gate. Milestone 3's check ran with a real Claude Code session whose held call was approved with
+`derbent approve` from another process, not with Codex approved from the UI: the owner left Codex out,
+and the UI's keys are covered by tests instead. Milestone 4's coverage table has one real session,
+Claude Code's; Codex was left out, Copilot CLI's monthly quota ran out before any tool call, and
+Antigravity CLI was not installed, so those three rows come from each CLI's documentation.
 
 ## Later
 
@@ -509,3 +533,9 @@ Not in v1, in rough order of value:
   itself. Approvals and `args` rules on shell tools guard against mistakes and prompt injection that stay
   inside MCP, not against an agent that already has a shell.
 - Approvals depend on the user watching. Unattended, `ask` means denied after the timeout.
+- A session grant cannot be listed or revoked. It ends with the session, or early when the granted rule or
+  a rule above it is edited (ADR 0011).
+- Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call
+  took 68.96 ms at p50, 46.87 ms of it for starting the binary; on Linux, 6.374 ms
+  (`docs/benchmark-results/`).
+- CI runs the tests on Windows and Linux; on macOS it only builds.

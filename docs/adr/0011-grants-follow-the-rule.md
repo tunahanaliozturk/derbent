@@ -1,4 +1,4 @@
-# 0011. A session grant covers only the calls the same rule asks about
+# 0011. A session grant covers only the calls the same rule asks about under the same rules above it
 
 Date: 2026-09-27
 Status: accepted
