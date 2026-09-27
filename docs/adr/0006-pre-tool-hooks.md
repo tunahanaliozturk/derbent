@@ -53,10 +53,13 @@ protocol, bad flags, or an answer that cannot be written exit with status 2.
 - Hook receipts mask only the secrets set in the hook's own environment, and whatever the `redact`
   patterns match. A secret that only the CLI's MCP entry holds needs a `redact` pattern to be masked in
   them.
-- For CLIs that do not name the MCP server in the hook input, a foreign MCP entry named so that its tool
-  names start with Derbent's prefix and `<configured server>__`, such as `derbent__github` in Codex, looks
-  like Derbent's own, and its calls get no decision and no receipt from the hook.
-- Every tool call starts a short process that opens the database, and the first one creates it. Opening a
-  current database takes no write lock, so a hook call does not queue behind other gates' appends.
+- For CLIs that do not name the MCP server in the hook input, a foreign MCP entry whose name and tool
+  join, under the CLI's naming, into Derbent's prefix followed by a name Derbent serves looks like
+  Derbent's own, and its calls get no decision and no receipt from the hook. The name can collide with
+  a configured server, such as an entry called `derbent__github` in Codex, or with a memory tool, such
+  as an entry called `derbent_memory` with a tool called `write` under Antigravity's assumed naming.
+- Every tool call starts a short process, and every call the hook decides opens the database; the first
+  one creates it. Opening a current database takes no write lock, so a hook call does not queue behind
+  other gates' appends before it decides. Its own receipt still takes the write lock to append.
 - Hosted tools that never reach the hook, such as Codex's web search, are outside the gate, and the README
   says so per CLI.

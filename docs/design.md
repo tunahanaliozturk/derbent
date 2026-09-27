@@ -354,10 +354,12 @@ database migrates it inside `BEGIN IMMEDIATE`.
   a foreign entry whose name starts with `derbent` and a Claude Code call whose `mcp_server` is another
   entry. Tests run `derbent gate` as its own process: a call a rule allows gets no output, a denied call
   gets `deny`, the gate's own tools pass with no decision and no receipt, an `ask` is approved from
-  another process, a hook stopped while waiting withdraws its approval, unusable input, a bad agent name,
-  a broken config and input over 16 MiB are denied, an unknown `--cli` exits with status 2, and a config
-  whose server secrets are unset still loads. A store test holds the write lock and opens a current
-  database without waiting for it. The README's coverage table records what a real session showed.
+  another process, unusable input, a bad agent name, a broken config and input over 16 MiB are denied,
+  an unknown `--cli` exits with status 2, and a config whose server secrets are unset still loads. Tests
+  that run it inside the test process show that a hook whose context ends while it waits, as on a
+  signal, withdraws its approval, and that a hook whose answer cannot be written returns the error that
+  exits with status 2. A store test holds the write lock and opens a current database without waiting
+  for it. The README's coverage table records what a real session showed.
 - **Overhead.** A benchmark calls an echo MCP server directly and through the gate with an allow rule,
   and reports p50, p99 and calls per second, compared with `benchstat` over ten runs, on Windows and
   Linux. Results live under `docs/benchmark-results/`, and the README states only numbers in those files.
@@ -462,9 +464,11 @@ Not in v1, in rough order of value:
   Code, assumed for the others). The hook timeout in each CLI's configuration must stay above
   `approvals.timeout`.
 - For CLIs whose hook input does not name the MCP server (Codex, Copilot CLI, Antigravity CLI, and Claude
-  Code before 2.1.274), a foreign MCP entry named so that its tool names start with Derbent's prefix and
-  `<configured server>__`, such as `derbent__github` in Codex, looks like Derbent's own: the hook skips
-  its calls, so they get no decision and no receipt.
+  Code before 2.1.274), a foreign MCP entry whose name and tool join, under the CLI's naming, into
+  Derbent's prefix followed by a name the gate serves looks like Derbent's own: the hook skips its calls,
+  so they get no decision and no receipt. The name can collide with a configured server, such as an
+  entry called `derbent__github` in Codex, or with a memory tool, such as an entry called
+  `derbent_memory` with a tool called `write` under Antigravity CLI's assumed naming.
 - Only Claude Code's hook has been checked in a real session. The Codex, Copilot CLI and Antigravity CLI
   adapters follow each CLI's documentation, and Antigravity CLI's name for Derbent's tools is assumed.
 - Every agent session starts its own downstream servers. A server that keeps state in memory does not

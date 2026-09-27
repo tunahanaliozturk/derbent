@@ -204,14 +204,19 @@ Antigravity CLI, in `~/.gemini/config/hooks.json`:
 }
 ```
 
-A CLI that times out on its hook lets the call through its own permission flow, so the hook's timeout
-must stay above `[approvals] timeout`. Claude Code and Codex give a hook 600 seconds by default;
-Copilot CLI and Antigravity CLI give it 30, which is why their examples set 120.
+Claude Code documents that a hook it times out on decides nothing, and the call goes on through its own
+permission flow. The other CLIs do not say, and Derbent assumes they behave the same, so the hook's
+timeout must stay above `[approvals] timeout`. Claude Code and Codex give a hook 600 seconds by
+default; Copilot CLI and Antigravity CLI give it 30, which is why their examples set 120.
 
 `--agent` is the name your rules match, so give it the same value as the CLI's `derbent mcp` entry. The
 hook protocol follows the agent name; for any other name add `--cli claude`, `codex`, `copilot` or
 `antigravity`. If Derbent's MCP entry in the CLI has another name than `derbent`, pass it with
-`--server`, or each call to Derbent's own tools is decided and recorded twice. The hook fails closed:
+`--server`, or each call to Derbent's own tools is decided and recorded twice. Where the CLI does not
+name the MCP server in the hook's input, the reverse can happen: another MCP entry whose tool names
+come out as Derbent's prefix followed by a name Derbent serves, such as an entry called
+`derbent__github` in Codex, is taken for Derbent's own, and its calls get no decision and no receipt
+from the hook (see [Known limits](docs/design.md#known-limits-and-risks)). The hook fails closed:
 when it cannot read the call, load the config, open the database or write the receipt, it denies the
 call and says why, so a mistake in the config stops every built-in tool until it is fixed.
 
@@ -252,8 +257,8 @@ What each CLI's hook covers, from its documentation and, where marked, a real se
 | CLI | Built-in tools gated | Derbent's own tools appear as | Not seen by the gate | Checked in a real session |
 |---|---|---|---|---|
 | Claude Code | every tool, through PreToolUse | `mcp__derbent__*` | nothing known | Claude Code 2.1.283, on 2026-09-27, with `claude -p --settings`: `echo derbent-allow` ran with a receipt `native__Bash allow rule:2 gated`; `echo derbent-deny` was blocked with Derbent's reason and a receipt `deny rule:1 refused`; `memory_write` through the derbent MCP server, which Claude Code names `mcp__derbent__memory_write`, got one receipt, from the MCP gate, because the hook skipped it; other built-in tools such as ToolSearch reach the hook too, as `native__ToolSearch`. |
-| Codex | shell commands (`Bash`), `apply_patch` for every file edit, and other local function tools such as `update_plan` | `mcp__derbent__*` | hosted tools such as web search | Not checked: Codex was not installed, and was left out by choice. |
-| Copilot CLI | shell (`bash`, `powershell`), file tools (`view`, `create`, `edit`, `apply_patch`), `grep`, `glob`, `web_fetch`, `web_search` and its other documented tools | `derbent-*`, with names capped at 64 characters | possibly MCP calls: the documentation does not say whether the hook sees them | Not checked: Copilot CLI 1.0.88 stopped at "monthly quota exceeded" before any tool call. |
+| Codex | shell commands (`Bash`), `apply_patch` for every file edit, and other local function tools such as `update_plan` | `mcp__derbent__*` | hosted tools such as web search | Not checked: left out by the owner's choice. |
+| Copilot CLI | shell (`bash`, `powershell`), file tools (`view`, `create`, `edit`, `apply_patch`), `grep`, `glob`, `web_fetch`, `web_search` and its other documented tools | `derbent-*`, with names capped at 64 characters | possibly MCP calls: the documentation does not say whether the hook sees them | Not checked: Copilot CLI 1.0.88 stopped at "You have exceeded your monthly quota" before any tool call. |
 | Antigravity CLI | built-in tools such as `run_command`, `view_file`, `write_to_file` and `replace_file_content` | `mcp_derbent_*`, an assumption until checked | not documented | Not checked: not installed. |
 
 ## Licence

@@ -40,7 +40,8 @@ stopped while waiting drops out of the UI and cannot be approved from then on.
 - The CLI's timeout covers the whole call, so the time a tool takes after a late approval comes out of
   the same margin. A Codex call approved at 49 seconds has about eleven seconds left to run.
 - Antigravity's timeout is unknown. If it proves shorter than 50 seconds, its users see a transport
-  timeout rather than a clear denial; milestone 4 checks it in a real session.
+  timeout rather than a clear denial. It is still unchecked: Antigravity CLI was not installed when
+  milestone 4 was checked in real sessions.
 - A decision reaches the waiting call within one poll, 200 ms. The approval row is written before the
   wait starts and the receipt after the call, and under heavy write contention either write can wait up
   to the busy timeout (ADR 0008); the ten seconds of margin cover ordinary contention, not a database
