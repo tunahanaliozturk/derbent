@@ -260,7 +260,8 @@ so a key meant for the call before it cannot land on it.
 
 Below the waiting calls are the agents seen in the last hour and a live feed of receipts. `/` filters the
 feed, `m` searches memory across projects, `g` lists session grants, `v` verifies the receipt chain, `?`
-lists the keys and `q` quits. Quitting the UI changes nothing for running agents: their waiting calls are denied at the timeout.
+lists the keys and `q` quits. Quitting the UI changes nothing for running agents: their waiting calls are
+denied at the timeout.
 
 Text from agents and tools is escaped before it is drawn: control characters, bidirectional overrides,
 zero-width and other format characters, line and paragraph separators, variation selectors, tag
@@ -445,8 +446,8 @@ derbent pins accept github__create_issue <sha256>  # takes the whole hash that p
 ```
 
 `pins show` ends with the `accept` command, ready to copy. An accept of a hash that is not the change on
-record is refused, as is a shortened hash, so what is accepted is what was read. After `accept`, running gates
-serve the tool again within two seconds. `derbent config check` shows each tool's pin state and pins
+record is refused, as is a shortened hash, so what is accepted is what was read. After `accept`, running
+gates serve the tool again within two seconds. `derbent config check` shows each tool's pin state and pins
 nothing, and the UI says how many tools changed. A server whose descriptions change on every start can opt
 out with `pin = false` in its `[servers.<name>]` table. Pins trust what they see first, so look at a new
 server's tools with `derbent config check` before an agent uses them.

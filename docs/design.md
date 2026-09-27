@@ -678,12 +678,12 @@ subscription with no API key, and scratch config, settings and databases), the h
 scratch repository's `.claude/settings.json`. A budget of two Bash calls an hour let `echo one` and
 `echo two` through and refused `echo three` before it ran, with the receipt
 `native__Bash deny budget:1 refused`. A `.derbent.toml` in a scratch repository made `git status` ask
-under a config that allows everything: `derbent pending` showed it as `project rule 1`, `derbent approve` approved it once from
-another process, and its receipt says `user:1`. The echo test server's tool, whose description changed
-between two gate starts, was left out of the second session's tools, and the model said it had no such
-tool. After `derbent pins accept` with the whole hash that `derbent pins show` printed, a third session
-listed the tool again and got `echo:hello` back. The changed description was a harmless sentence, not an
-instruction, since the third session reads it.
+under a config that allows everything: `derbent pending` showed it as `project rule 1`,
+`derbent approve` approved it once from another process, and its receipt says `user:1`. The echo test
+server's tool, whose description changed between two gate starts, was left out of the second session's
+tools, and the model said it had no such tool. After `derbent pins accept` with the whole hash that
+`derbent pins show` printed, a third session listed the tool again and got `echo:hello` back. The changed
+description was a harmless sentence, not an instruction, since the third session reads it.
 
 ## Later
 
