@@ -13,9 +13,8 @@ anyone who can open a pull request, or any agent that can write a file, turn off
 ## Decision
 
 - A `.derbent.toml` at the root of the checkout the agent works in may hold `[[rule]]` tables and nothing
-  else. Project rules use the
-  rule syntax, first match wins, and they need no final catch-all: when none matches, the project adds
-  nothing.
+  else. Project rules use the rule syntax, first match wins, and they need no final catch-all: when none
+  matches, the project adds nothing.
 - The call's action is the stricter of the user's decision and the project's: deny, then ask, then allow.
   The rule that set it is named, `rule:<n>` or `project:<n>`, the user's on a tie.
 - Project rules decide calls only. They never change tool listings: a tool the project denies stays listed,
@@ -24,9 +23,10 @@ anyone who can open a pull request, or any agent that can write a file, turn off
   names the file and the error. A missing file changes nothing.
 - Only a regular file of at most 64 KiB is read. A symbolic link, anything else that is not a regular
   file, such as a directory, a FIFO or a device, and a larger file are refused as invalid, with a reason
-  that says which. The file is read with the same limit, so one that grows after it was checked is refused
-  too. The `.git` file that marks a linked worktree, and the `commondir` file it leads to, are read under
-  the same limits, and one that fails them is taken as not a linked worktree.
+  that says which. The open does not wait for a FIFO's writer, the type is checked again on what was
+  opened, and the read stops one byte past the limit, so a file replaced or grown after the check is
+  refused too. The `.git` file that marks a linked worktree, and the `commondir` file it leads to, are
+  read under the same limits, and one that fails them is taken as not a linked worktree.
 - The file is read for each call and kept by path, size and modification time. It is looked up under the
   checkout's root in its own case: the nearest directory holding `.git`, which for a linked worktree is
   the worktree's own root, or the project directory itself outside git.

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -200,10 +201,12 @@ func checkSmallFile(fi fs.FileInfo) error {
 	return nil
 }
 
-// readSmallFile reads a file that checkSmallFile accepted. It reads at most one byte past the limit, so
-// a file that grew or was replaced since the check is still refused rather than read whole.
+// readSmallFile reads a file that checkSmallFile accepted. A file replaced since the check is refused
+// unless it is still a regular file: the open does not wait for a FIFO's writer (O_NONBLOCK, which
+// Windows ignores), and the type is checked again on what was opened. It reads at most one byte past
+// the limit, so a file that grew since the check is refused rather than read whole.
 func readSmallFile(path string) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // a rules or .git file in the project being worked on, checked by checkSmallFile
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // a rules or .git file that checkSmallFile accepted
 	if err != nil {
 		return nil, err
 	}
