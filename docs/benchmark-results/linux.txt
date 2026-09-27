@@ -1,0 +1,40 @@
+runner-image: ubuntu24 20260920.314.1
+goos: linux
+goarch: amd64
+pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
+cpu: AMD EPYC 9V74 80-Core Processor                
+       │   direct    │                 gate                 │
+       │   sec/op    │   sec/op     vs base                 │
+Echo-4   311.9µ ± 2%   801.2µ ± 1%  +156.84% (p=0.000 n=10)
+
+       │   direct    │                gate                 │
+       │   calls/s   │   calls/s    vs base                │
+Echo-4   3.205k ± 2%   1.248k ± 0%  -61.07% (p=0.000 n=10)
+
+       │   direct   │                gate                 │
+       │   p50-us   │   p50-us    vs base                 │
+Echo-4   264.0 ± 3%   731.5 ± 1%  +177.08% (p=0.000 n=10)
+
+       │   direct   │                 gate                 │
+       │   p99-us   │   p99-us     vs base                 │
+Echo-4   664.0 ± 2%   1438.0 ± 3%  +116.57% (p=0.000 n=10)
+runner-image: ubuntu24 20260920.314.1
+goos: linux
+goarch: amd64
+pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
+cpu: AMD EPYC 9V74 80-Core Processor                
+       │    spawn    │                hook                 │
+       │   sec/op    │   sec/op     vs base                │
+Hook-4   4.290m ± 1%   6.390m ± 1%  +48.94% (p=0.000 n=10)
+
+       │   spawn    │                hook                │
+       │  calls/s   │  calls/s    vs base                │
+Hook-4   233.1 ± 1%   156.5 ± 1%  -32.86% (p=0.000 n=10)
+
+       │    spawn    │                hook                 │
+       │   p50-us    │   p50-us     vs base                │
+Hook-4   4.282k ± 0%   6.374k ± 1%  +48.84% (p=0.000 n=10)
+
+       │    spawn    │                hook                 │
+       │   p99-us    │   p99-us     vs base                │
+Hook-4   4.673k ± 4%   6.907k ± 7%  +47.82% (p=0.000 n=10)
