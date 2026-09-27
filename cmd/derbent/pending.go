@@ -16,16 +16,19 @@ import (
 // pendingLine is one waiting call as `derbent pending --json` prints it.
 type pendingLine struct {
 	ID       int64  `json:"id"`
+	Project  string `json:"project"`
 	Agent    string `json:"agent"`
 	Session  string `json:"session"`
 	Tool     string `json:"tool"`
+	Rule     int    `json:"rule"`
 	Args     string `json:"args"`
 	Created  string `json:"created"`
 	Deadline string `json:"deadline"`
 }
 
-// runPending lists the calls waiting for the user, oldest first, each with its whole arguments, so they
-// can be read before an approve or deny from a shell. It opens the database read-only.
+// runPending lists the calls waiting for the user, oldest first, each with the rule that asked, its
+// project and its whole arguments, so they can be read before an approve or deny from a shell. It opens
+// the database read-only.
 func runPending(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("pending", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -55,7 +58,7 @@ func runPending(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		if *asJSON {
 			var line []byte
 			if line, err = json.Marshal(pendingLine{
-				ID: p.ID, Agent: p.Agent, Session: p.Session, Tool: p.Tool, Args: p.Args,
+				ID: p.ID, Project: p.Project, Agent: p.Agent, Session: p.Session, Tool: p.Tool, Rule: p.Rule, Args: p.Args,
 				Created: p.Created.Format(time.RFC3339Nano), Deadline: p.Deadline.Format(time.RFC3339Nano),
 			}); err != nil {
 				return err
@@ -66,8 +69,8 @@ func runPending(ctx context.Context, args []string, stdout, stderr io.Writer) er
 			continue
 		}
 		left := max(p.Deadline.Sub(now), 0).Round(time.Second)
-		if _, err = fmt.Fprintf(stdout, "#%d  %s  %s  %s left\n    %s\n", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool),
-			left, visible.Escape(p.Args)); err != nil {
+		if _, err = fmt.Fprintf(stdout, "#%d  %s  %s  %s left  rule %d  %s\n    %s\n", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool),
+			left, p.Rule, visible.Escape(p.Project), visible.Escape(p.Args)); err != nil {
 			return err
 		}
 	}

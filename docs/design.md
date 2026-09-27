@@ -201,8 +201,8 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
 ## Approvals
 
 When a rule says `ask`, the gate writes a pending approval and polls for a decision every 200 ms. In
-the UI the pending call shows at the top with the agent, the tool, the time left and the redacted
-arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's tool list.
+the UI the pending call shows at the top with the agent, the tool, the time left, the number of the
+rule that asked, the project and the redacted arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's tool list.
 
 - `a` approves once, `d` denies, and `A` approves the tool's calls that the same rule asks about under
   the same rules above it, for the rest of that agent's gate session: one `derbent mcp` process for an
@@ -225,8 +225,9 @@ arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's
   read, or one written by a gate from before grants followed the rule, still running after the upgrade,
   names no rule and grants nothing: `A` in the UI says it approves the call once, and
   `derbent approve --session` refuses it and says to approve it once. `derbent pending`
-  lists the waiting calls with their whole arguments, read-only, as rows or JSON lines, so they can be
-  read before deciding. The deciding commands, and the UI given `--db`, refuse a database path that does
+  lists the waiting calls with the rule that asked, the project and their whole arguments, read-only, as
+  rows or JSON lines, so they can be read before deciding. `derbent approve` and `derbent deny` say what
+  they decided, such as `approved #12 once: native__Bash for claude`. The deciding commands, and the UI given `--db`, refuse a database path that does
   not exist instead of creating one.
 - If no decision arrives within `approvals.timeout`, the call is denied with a tool error that says no
   approval came in time and tells the agent to try again and ask the user to approve it in the UI while
@@ -304,8 +305,8 @@ tools (ADR 0006). One process runs per tool call, and for every CLI:
 Bubble Tea. Calls waiting for the user sit at the top, one line each, with the highlighted call's
 arguments wrapped below it over about a third of the window, at least three lines, with enter for the
 whole text. The preview escapes and wraps only what it can show, so megabytes of arguments do not slow
-the screen. `enter` opens a detail view of the highlighted call: agent, tool, time left and the whole
-arguments, wrapped to the window and scrolled with up, down, page up, page down, home and end; `a`, `A`
+the screen. `enter` opens a detail view of the highlighted call: agent, tool, time left, rule, project
+and the whole arguments, wrapped to the window and scrolled with up, down, page up, page down, home and end; `a`, `A`
 and `d` work there too, and if the call stops waiting the view says so and takes no decision. A run of
 more than eight spaces of any kind (ASCII, no-break, ideographic, em and the other Unicode spaces) is
 shown as `␠×N`, so padding cannot push the rest out of sight. The preview reads no further into the

@@ -231,6 +231,30 @@ func TestWaitingCallIsShownAndRingsTheBellOnce(t *testing.T) {
 	}
 }
 
+// Each waiting call names its project and the rule that asked, on its row whether highlighted or not
+// and in the detail view, with the project escaped like any other text from an agent.
+func TestWaitingCallsNameTheirProjectAndRule(t *testing.T) {
+	m, d := newModel(t)
+	other := askReq
+	other.Project, other.Rule = "/work/\x1b]0;x\x07blog", 5
+	waiting(t, d.q, askReq)
+	waitPending(t, d.q, 1)
+	waiting(t, d.q, other)
+	waitPending(t, d.q, 2)
+	m, _ = refresh(m)
+	s := screen(m)
+	noRawText(t, s, 140)
+	for _, want := range []string{"left  rule 2  /work/shop", `left  rule 5  /work/\u001b]0;x\u0007blog  {"title"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("screen lacks %q:\n%s", want, s)
+		}
+	}
+	m, _ = press(m, "enter")
+	if s = screen(m); !strings.Contains(s, "left  rule 2  /work/shop") {
+		t.Errorf("the detail view lacks the project and rule:\n%s", s)
+	}
+}
+
 func TestKeysDecideTheSelectedCall(t *testing.T) {
 	for _, tc := range []struct {
 		keys              []string

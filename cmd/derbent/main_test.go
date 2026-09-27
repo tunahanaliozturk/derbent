@@ -578,7 +578,7 @@ func TestApprovalFromAnotherProcess(t *testing.T) {
 	if err := run(t.Context(), []string{"approve", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), fmt.Sprintf("approved %d", p.ID)) {
+	if !strings.Contains(out.String(), fmt.Sprintf("approved #%d once: echo__echo for codex", p.ID)) {
 		t.Fatalf("approve output: %q", out.String())
 	}
 	if res := callResult(t, done); res.IsError || resultText(res) != "echo:hi" {
@@ -643,7 +643,7 @@ func TestApproveForTheSessionRefusesAnApprovalWithNoRuleKey(t *testing.T) {
 	if err = run(t.Context(), []string{"approve", "--db", path, fmt.Sprint(id)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatalf("approving once after the refusal: %v", err)
 	}
-	if !strings.Contains(out.String(), fmt.Sprintf("approved %d", id)) {
+	if !strings.Contains(out.String(), fmt.Sprintf("approved #%d once: echo__echo for codex", id)) {
 		t.Fatalf("approve output: %q", out.String())
 	}
 }
@@ -655,7 +655,7 @@ func TestDenyRefusesTheWaitingCall(t *testing.T) {
 	if err := run(t.Context(), []string{"deny", "--db", path, fmt.Sprintf("#%d", p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), fmt.Sprintf("denied %d", p.ID)) {
+	if !strings.Contains(out.String(), fmt.Sprintf("denied #%d: echo__echo for codex", p.ID)) {
 		t.Fatalf("deny output: %q", out.String())
 	}
 	if res := callResult(t, done); !res.IsError || !strings.Contains(resultText(res), "the user denied echo__echo") {
@@ -721,7 +721,7 @@ func TestPendingListsWaitingCallsWithTheirWholeArguments(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n")
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], fmt.Sprintf("#%d  codex  echo__echo  ", p.ID)) ||
-		!strings.HasSuffix(lines[0], " left") || lines[1] != `    {"text":"`+text+`"}` {
+		!strings.HasSuffix(lines[0], fmt.Sprintf(" left  rule %d  %s", p.Rule, p.Project)) || lines[1] != `    {"text":"`+text+`"}` {
 		t.Fatalf("pending table:\n%s", table.String())
 	}
 	var js bytes.Buffer
@@ -732,7 +732,8 @@ func TestPendingListsWaitingCallsWithTheirWholeArguments(t *testing.T) {
 	if err := json.Unmarshal(js.Bytes(), &got); err != nil {
 		t.Fatalf("not one JSON line: %v: %q", err, js.String())
 	}
-	if got.ID != p.ID || got.Agent != "codex" || got.Session != p.Session || got.Tool != "echo__echo" || got.Args != `{"text":"`+text+`"}` {
+	if got.ID != p.ID || got.Project != p.Project || got.Agent != "codex" || got.Session != p.Session || got.Tool != "echo__echo" ||
+		got.Rule != p.Rule || got.Args != `{"text":"`+text+`"}` {
 		t.Fatalf("pending line = %+v", got)
 	}
 	for _, at := range []string{got.Created, got.Deadline} {
@@ -746,22 +747,32 @@ func TestPendingListsWaitingCallsWithTheirWholeArguments(t *testing.T) {
 	callResult(t, done)
 }
 
-// A waiting call's agent, tool and arguments come from an agent, so pending escapes them as receipts
-// does, in rows and in JSON lines.
+// A waiting call's project, agent, tool and arguments come from an agent, so pending escapes them as
+// receipts does, in rows and in JSON lines, and approve and deny escape the names they print.
 func TestPendingEscapesAgentText(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
 	db, err := store.Open(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, tool, args := "co\x1b[2Jdex", "gh\u009b2Jissue\U0000202e"+sneaky, "{\"x\":\"\x1b]52;c;ZXZpbA==\x07\nnext"+sneaky+"\"}"
-	_, err = db.ExecContext(t.Context(), `INSERT INTO approvals
-		(created_ms, deadline_ms, project, agent, session, tool, args, rule) VALUES (?, ?, 'p', ?, 's', ?, ?, 1)`,
-		time.Now().UnixMilli(), time.Now().Add(time.Minute).UnixMilli(), agent, tool, args)
-	db.Close()
-	if err != nil {
-		t.Fatal(err)
+	defer db.Close()
+	project, agent, tool := "/work/\x1b]0;x\x07shop", "co\x1b[2Jdex", "gh\u009b2Jissue\U0000202e"+sneaky
+	args := "{\"x\":\"\x1b]52;c;ZXZpbA==\x07\nnext" + sneaky + "\"}"
+	insert := func() int64 {
+		t.Helper()
+		res, execErr := db.ExecContext(t.Context(), `INSERT INTO approvals
+			(created_ms, deadline_ms, project, agent, session, tool, args, rule) VALUES (?, ?, ?, ?, 's', ?, ?, 1)`,
+			time.Now().UnixMilli(), time.Now().Add(time.Minute).UnixMilli(), project, agent, tool, args)
+		if execErr != nil {
+			t.Fatal(execErr)
+		}
+		id, idErr := res.LastInsertId()
+		if idErr != nil {
+			t.Fatal(idErr)
+		}
+		return id
 	}
+	id := insert()
 	var table bytes.Buffer
 	if err = run(t.Context(), []string{"pending", "--db", path}, strings.NewReader(""), &table, io.Discard); err != nil {
 		t.Fatal(err)
@@ -770,7 +781,8 @@ func TestPendingEscapesAgentText(t *testing.T) {
 	if strings.ContainsAny(out, "\x1b\a\u009b\U0000202e"+sneaky) || strings.Count(out, "\n") != 2 {
 		t.Fatalf("raw control characters reached the table:\n%q", out)
 	}
-	for _, want := range []string{`co\u001b[2Jdex`, `gh\u009b2Jissue` + "\\u202e" + sneakyEscaped, `\u001b]52;c;ZXZpbA==\u0007\nnext` + sneakyEscaped} {
+	escapedTool := `gh\u009b2Jissue` + "\\u202e" + sneakyEscaped
+	for _, want := range []string{`co\u001b[2Jdex`, escapedTool, `/work/\u001b]0;x\u0007shop`, `\u001b]52;c;ZXZpbA==\u0007\nnext` + sneakyEscaped} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table lacks %q:\n%q", want, out)
 		}
@@ -787,8 +799,18 @@ func TestPendingEscapesAgentText(t *testing.T) {
 	if err = json.Unmarshal([]byte(line), &got); err != nil {
 		t.Fatalf("the line is not JSON: %v: %q", err, line)
 	}
-	if got.Agent != agent || got.Tool != tool || got.Args != args {
-		t.Fatalf("decoded %+v; want agent %q, tool %q, args %q", got, agent, tool, args)
+	if got.Project != project || got.Agent != agent || got.Tool != tool || got.Args != args {
+		t.Fatalf("decoded %+v; want project %q, agent %q, tool %q, args %q", got, project, agent, tool, args)
+	}
+	for _, command := range []string{"approve", "deny"} {
+		var said bytes.Buffer
+		if err = run(t.Context(), []string{command, "--db", path, fmt.Sprint(id)}, strings.NewReader(""), &said, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		if s := said.String(); strings.ContainsAny(s, "\x1b\u009b\U0000202e"+sneaky) || !strings.Contains(s, escapedTool+` for co\u001b[2Jdex`) {
+			t.Fatalf("%s printed %q, want the tool and agent escaped", command, s)
+		}
+		id = insert() // a call for deny to decide
 	}
 }
 

@@ -28,8 +28,9 @@ The first release.
 - Approvals: an `ask` rule holds the call until you decide, or denies it when `[approvals] timeout` (50
   seconds unless you set it) runs out. `derbent` opens a terminal UI with the waiting calls, the agents
   seen in the last hour, a live receipt feed, a memory browser and verify. `derbent approve [--session]
-  <id>` and `derbent deny <id>` decide from any shell, and `derbent pending` lists the waiting calls with
-  their whole arguments.
+  <id>` and `derbent deny <id>` decide from any shell and say what they decided, and `derbent pending`
+  lists the waiting calls with the rule that asked, the project and their whole arguments. The UI shows
+  the rule and the project too.
 - The UI's detail view: `enter` shows a waiting call's whole arguments, escaped and scrollable, and `a`,
   `A` and `d` work there too.
 - `A` approves the tool's calls for the rest of the agent's session and needs a second press within 5

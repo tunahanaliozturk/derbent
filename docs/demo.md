@@ -192,6 +192,10 @@ It exited with status 0. Its output, where the lines starting with `#` are the s
 approved 1
 ```
 
+The build recorded here printed less than the current one: `derbent pending` now also names the rule
+that asked and the project, in rows and in `--json`, and `derbent approve 1` prints
+`approved #1 once: memory_write for reviewer`.
+
 The reviewer session then went on. It exited with status 0 and wrote nothing to `reviewer.err`. Its
 stream:
 

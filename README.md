@@ -227,8 +227,8 @@ The timeout is optional: 50 seconds unless you set it, and at least one second. 
 denied when it runs out, and the agent is told why.
 
 Run `derbent` in a terminal of its own. Calls waiting for you sit at the top, each as `#12` with the
-agent, the tool, the time left and the start of its arguments, masked as they are in receipts, and the
-terminal bell rings when a new one arrives. `enter` shows the highlighted call's whole arguments, and up,
+agent, the tool, the time left, the number of the rule that asked, the project and the start of its
+arguments, masked as they are in receipts, and the terminal bell rings when a new one arrives. `enter` shows the highlighted call's whole arguments, and up,
 down, page up, page down, home and end scroll them. The keys act on the highlighted call: `a` approves it
 once, `d` denies it, and `A` pressed twice within five seconds approves the tool's calls that the same
 rule asks about under the same rules above it, for the rest of that agent's session; a call whose rule
@@ -248,7 +248,7 @@ or `\U` codes, and in arguments a run of more than eight spaces of any kind is s
 The same decisions work from any shell, by the id the UI shows, written `12` or `#12`:
 
 ```bash
-derbent pending                # the waiting calls with their whole arguments; --json for JSON lines
+derbent pending                # the waiting calls, their rules, projects and whole arguments; --json too
 derbent approve 12             # approves once, like a
 derbent approve --session 12   # like A; flags go before the id
 derbent deny '#12'             # quote the # in a shell that reads it as a comment

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -71,8 +70,7 @@ func (m Model) detailView() string {
 	if !waiting {
 		l.add(pendingStyle, fmt.Sprintf("#%d is no longer waiting   esc back", m.detail))
 	} else {
-		left := max(p.Deadline.Sub(m.now()), 0).Round(time.Second)
-		l.add(selectedStyle, fmt.Sprintf("#%d  %s  %s  %s left", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left))
+		l.add(selectedStyle, m.callLine(p))
 		l.add(pendingStyle, "a approve   A twice for this session   d deny   esc back")
 		args := m.detailLines(p)
 		room := m.detailRoom()

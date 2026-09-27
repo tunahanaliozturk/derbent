@@ -38,12 +38,12 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	if err != nil {
 		return fmt.Errorf("%s: %q is not an approval id", command, flags.Arg(0))
 	}
-	verdict, done := approval.Deny, "denied"
+	verdict := approval.Deny
 	switch {
 	case command == "approve" && session:
-		verdict = approval.ApproveSession // done names the grant's scope once the approval is read
+		verdict = approval.ApproveSession
 	case command == "approve":
-		verdict, done = approval.ApproveOnce, "approved"
+		verdict = approval.ApproveOnce
 	}
 	path, err := databasePath(*dbFlag)
 	if err != nil {
@@ -58,18 +58,24 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	defer db.Close()
 	q := approval.NewQueue(db)
 	notPending := fmt.Errorf("approval %d is not pending: it was already decided, timed out, or its agent gave up", id)
-	if verdict == approval.ApproveSession {
-		// Say what the grant covers: the tool's calls that the rule which asked holds, under the same rules
-		// above it, in one agent's session. The approval's row names all three.
-		var list []approval.Pending
-		if list, err = q.Pending(ctx); err != nil {
-			return err
-		}
-		i := slices.IndexFunc(list, func(p approval.Pending) bool { return p.ID == id })
-		if i < 0 {
-			return notPending
-		}
-		p := list[i]
+	// Say what was decided, from the approval's row: the tool and the agent, and for a session approval
+	// the rule, since the grant covers the tool's calls that the rule which asked holds, under the same
+	// rules above it, in one agent's session.
+	list, err := q.Pending(ctx)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(list, func(p approval.Pending) bool { return p.ID == id })
+	if i < 0 {
+		return notPending
+	}
+	p := list[i]
+	agent, tool := visible.Escape(p.Agent), visible.Escape(p.Tool)
+	done := fmt.Sprintf("denied #%d: %s for %s", id, tool, agent)
+	switch verdict {
+	case approval.ApproveOnce:
+		done = fmt.Sprintf("approved #%d once: %s for %s", id, tool, agent)
+	case approval.ApproveSession:
 		// An approval with no rule key grants nothing (ADR 0011): its rule matched on an argument it could not
 		// read, or a gate from before grants followed the rule, still running after the upgrade, asked. There
 		// is no question to confirm here, so refuse rather than approve once when the user asked for the session.
@@ -77,8 +83,8 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 			return fmt.Errorf("%s: approval %d cannot be approved for the session: its rule could not read one of its arguments, "+
 				"or the gate that asked predates rule-scoped grants; approve it once with derbent approve %d", command, id, id)
 		}
-		done = fmt.Sprintf("approved %s calls that rule %d asks about, for the rest of %s's session:",
-			visible.Escape(p.Tool), p.Rule, visible.Escape(p.Agent))
+		done = fmt.Sprintf("approved %s calls that rule %d asks about, for the rest of %s's session: %d", tool, p.Rule, agent, id)
+	case approval.Deny:
 	}
 	if err = q.Decide(ctx, id, verdict); err != nil {
 		if errors.Is(err, approval.ErrNotPending) {
@@ -86,6 +92,6 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 		}
 		return err
 	}
-	_, err = fmt.Fprintf(stdout, "%s %d\n", done, id)
+	_, err = fmt.Fprintln(stdout, done)
 	return err
 }

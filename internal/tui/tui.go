@@ -483,13 +483,12 @@ func (m Model) drawWaiting(l *lines) {
 		rows = rows[start : start+room]
 	}
 	for _, p := range rows {
-		left := max(p.Deadline.Sub(m.now()), 0).Round(time.Second)
 		if p.ID != m.selected {
 			text, _ := argText(p.Args, 4*m.width)
-			l.add(plainStyle, fmt.Sprintf("#%d  %s  %s  %s left  %s", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left, text))
+			l.add(plainStyle, m.callLine(p)+"  "+text)
 			continue
 		}
-		l.add(selectedStyle, fmt.Sprintf("#%d  %s  %s  %s left", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left))
+		l.add(selectedStyle, m.callLine(p))
 		for _, a := range args {
 			l.add(plainStyle, a)
 		}
@@ -497,6 +496,13 @@ func (m Model) drawWaiting(l *lines) {
 	if hidden := len(m.pending) - len(rows); hidden > 0 {
 		l.add(faintStyle, fmt.Sprintf("+%d more waiting", hidden))
 	}
+}
+
+// callLine is a waiting call's row: its id, agent, tool, time left, the rule that asked and its project.
+func (m Model) callLine(p approval.Pending) string {
+	left := max(p.Deadline.Sub(m.now()), 0).Round(time.Second)
+	return fmt.Sprintf("#%d  %s  %s  %s left  rule %d  %s", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left, p.Rule,
+		visible.Escape(p.Project))
 }
 
 // argLines wraps the highlighted call's arguments, which the agent controls, over about a third of the
