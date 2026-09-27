@@ -656,6 +656,14 @@ func TestReceiptsCommand(t *testing.T) {
 	}
 }
 
+func TestUINamesAStrayArgument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	err := run(t.Context(), []string{"--db", path, "extra"}, strings.NewReader("q"), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), `"extra"`) {
+		t.Fatalf("err = %v, want one naming %q", err, "extra")
+	}
+}
+
 func TestUIOpensAndQuits(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
 	var out bytes.Buffer

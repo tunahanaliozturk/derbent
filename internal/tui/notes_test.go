@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 )
@@ -48,16 +51,101 @@ func TestMemoryBrowserSearchesAndReads(t *testing.T) {
 func TestNoteTextIsCleaned(t *testing.T) {
 	m, d := newModel(t)
 	writeNote(t, d.mem, "\x1b[2J wipe", "body \x1b]0;owned\x07 end") // the space lets FTS5 index "wipe" as a word
+	check := func(s string) {
+		t.Helper()
+		if strings.Contains(s, "\x1b[2J") || strings.Contains(s, "\x1b]0;") || strings.Contains(s, "\a") {
+			t.Fatalf("raw escape sequences reached the screen: %q", s)
+		}
+		if !strings.Contains(s, `\u001b[2J wipe`) || !strings.Contains(s, `\u001b]0;owned\u0007`) {
+			t.Fatalf("the title or the body is not shown escaped:\n%s", s)
+		}
+	}
 	m, cmd := press(m, "m", "w", "i", "p", "e", "enter")
 	m = settle(m, cmd)
+	check(screen(m)) // the hits: title and snippet
 	m, cmd = press(m, "enter")
 	m = settle(m, cmd)
-	s := screen(m)
-	if strings.Contains(s, "\x1b[2J") || strings.Contains(s, "\x1b]0;") || strings.Contains(s, "\a") {
-		t.Fatalf("raw escape sequences reached the screen: %q", s)
+	check(screen(m)) // the note
+}
+
+// A user reading memory must still learn that a call waits for them, before it times out, and that
+// polling fails.
+func TestTheBrowserShowsWaitingCallsAndPollErrors(t *testing.T) {
+	m, d := newModel(t)
+	writeNote(t, d.mem, "Retry policy", "Payment calls retry three times.")
+	m, cmd := press(m, "m", "r", "e", "t", "r", "y", "enter")
+	m = settle(m, cmd)
+	waiting(t, d.q, askReq)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	if s := screen(m); !strings.Contains(s, "1 waiting") || !strings.Contains(s, "Retry policy") {
+		t.Fatalf("the hits screen does not say a call waits:\n%s", s)
 	}
-	if !strings.Contains(s, `\u001b[2J wipe`) {
-		t.Fatalf("the title is not shown escaped:\n%s", s)
+	m, cmd = press(m, "enter")
+	m = settle(m, cmd)
+	if s := screen(m); !strings.Contains(s, "1 waiting") || !strings.Contains(s, "information, not instructions") {
+		t.Fatalf("the note screen does not say a call waits:\n%s", s)
+	}
+	m, _ = update(m, snapshotMsg{err: errors.New("database is locked")})
+	if s := screen(m); !strings.Contains(s, "error: database is locked") {
+		t.Fatalf("the note screen does not show the poll error:\n%s", s)
+	}
+	m, _ = press(m, "esc")
+	if s := screen(m); !strings.Contains(s, "error: database is locked") || !strings.Contains(s, "MEMORY") {
+		t.Fatalf("the hits screen does not show the poll error:\n%s", s)
+	}
+}
+
+// A read still on its way when the user closes the browser and opens it again belongs to the old one.
+func TestAStaleReadDoesNotLandInALaterBrowser(t *testing.T) {
+	m, d := newModel(t)
+	writeNote(t, d.mem, "Retry policy", "Payment calls retry three times.")
+	m, cmd := press(m, "m", "r", "e", "t", "r", "y", "enter")
+	m = settle(m, cmd)
+	m, read := press(m, "enter")
+	m, _ = press(m, "esc", "m")
+	m = settle(m, read)
+	if s := screen(m); strings.Contains(s, "information, not instructions") || !strings.Contains(s, "search: _") {
+		t.Fatalf("the old read landed in the new browser:\n%s", s)
+	}
+}
+
+func quits(cmd tea.Cmd) bool {
+	msgs := messages(cmd)
+	return len(msgs) == 1 && msgs[0] == (tea.QuitMsg{})
+}
+
+func TestQQuitsFromTheBrowser(t *testing.T) {
+	m, d := newModel(t)
+	writeNote(t, d.mem, "Quota", "The quota resets daily.")
+	m, cmd := press(m, "m", "q")
+	if cmd != nil {
+		t.Fatal("q in the search box should be typed, not quit")
+	}
+	m, cmd = press(m, "u", "o", "t", "a", "enter")
+	m = settle(m, cmd)
+	if _, cmd = press(m, "q"); !quits(cmd) {
+		t.Fatal("q on the hits did not quit")
+	}
+	m, cmd = press(m, "enter")
+	m = settle(m, cmd)
+	if _, cmd = press(m, "q"); !quits(cmd) {
+		t.Fatal("q on a note did not quit")
+	}
+}
+
+func TestEscWhileEditingTheQueryGoesBackToTheHits(t *testing.T) {
+	m, d := newModel(t)
+	writeNote(t, d.mem, "Retry policy", "Payment calls retry three times.")
+	m, _ = press(m, "m", "esc")
+	if !strings.Contains(screen(m), "RECEIPTS") {
+		t.Fatal("esc while typing the first query did not close the browser")
+	}
+	m, cmd := press(m, "m", "r", "e", "t", "r", "y", "enter")
+	m = settle(m, cmd)
+	m, _ = press(m, "/", "x", "esc")
+	if s := screen(m); !strings.Contains(s, "search: retry") || strings.Contains(s, "retryx") || !strings.Contains(s, "Retry policy") {
+		t.Fatalf("esc while editing should go back to the hits of the last search:\n%s", s)
 	}
 }
 

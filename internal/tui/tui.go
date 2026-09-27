@@ -58,6 +58,7 @@ type Model struct {
 	editing  bool // typing a filter
 	help     bool
 	notes    *browser // the memory browser while it is open
+	lookups  int      // memory searches and reads sent; each result carries its number
 }
 
 // New returns the UI over the shared database's approvals, receipts and memory.

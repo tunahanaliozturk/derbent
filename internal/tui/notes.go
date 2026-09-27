@@ -11,19 +11,26 @@ import (
 
 // browser is the memory browser: a search box, the hits, and one note read in full.
 type browser struct {
-	query  string
-	typing bool
-	hits   []memory.Hit
-	cursor int
-	entry  *memory.Entry
+	query    string
+	searched string // the query the hits answer
+	typing   bool
+	hits     []memory.Hit
+	cursor   int
+	entry    *memory.Entry
+	awaiting int // the number of the search or read whose result is still wanted, 0 for none
 }
 
+// A search or read result carries the number it was sent under, so one the browser no longer waits for
+// is dropped.
 type (
 	hitsMsg struct {
-		hits []memory.Hit
-		err  error
+		tag   int
+		query string
+		hits  []memory.Hit
+		err   error
 	}
 	entryMsg struct {
+		tag   int
 		entry memory.Entry
 		err   error
 	}
@@ -39,9 +46,15 @@ func (m Model) browseKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch k.String() {
 		case "enter":
 			b.typing = false
-			return m, m.search(b.query)
+			m.lookups++
+			b.awaiting = m.lookups
+			return m, m.search(b.query, m.lookups)
 		case "esc":
-			m.notes = nil
+			if len(b.hits) == 0 {
+				m.notes = nil
+			} else {
+				b.typing, b.query = false, b.searched
+			}
 		case "backspace":
 			if r := []rune(b.query); len(r) > 0 {
 				b.query = string(r[:len(r)-1])
@@ -53,24 +66,26 @@ func (m Model) browseKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch k.String() {
 		case "esc":
 			b.entry = nil
-		case "q", "ctrl+c":
+		case "q":
 			return m, tea.Quit
 		}
 	default:
 		switch k.String() {
 		case "esc":
 			m.notes = nil
-		case "q", "ctrl+c":
+		case "q":
 			return m, tea.Quit
 		case "/":
-			b.typing = true
+			b.typing, b.awaiting = true, 0 // a result still on its way answers the old query
 		case "up":
 			b.cursor = max(b.cursor-1, 0)
 		case "down":
 			b.cursor = min(b.cursor+1, max(len(b.hits)-1, 0))
 		case "enter":
 			if len(b.hits) > 0 {
-				return m, m.read(b.hits[b.cursor].ID)
+				m.lookups++
+				b.awaiting = m.lookups
+				return m, m.read(b.hits[b.cursor].ID, m.lookups)
 			}
 		}
 	}
@@ -78,21 +93,22 @@ func (m Model) browseKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // search looks in every project: the UI belongs to no project.
-func (m Model) search(query string) tea.Cmd {
+func (m Model) search(query string, tag int) tea.Cmd {
 	return func() tea.Msg {
 		hits, err := m.memory.Search(m.ctx, "", query, 50, true)
-		return hitsMsg{hits: hits, err: err}
+		return hitsMsg{tag: tag, query: query, hits: hits, err: err}
 	}
 }
 
-func (m Model) read(id int64) tea.Cmd {
+func (m Model) read(id int64, tag int) tea.Cmd {
 	return func() tea.Msg {
 		e, err := m.memory.Read(m.ctx, id)
-		return entryMsg{entry: e, err: err}
+		return entryMsg{tag: tag, entry: e, err: err}
 	}
 }
 
-// browsed takes in a search or read result, if the browser is still open.
+// browsed takes in a search or read result if the browser still waits for it. A result for a browser
+// since closed, or for a query since changed, is dropped.
 func (m Model) browsed(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.notes == nil {
 		return m, nil
@@ -101,13 +117,21 @@ func (m Model) browsed(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.notes = &b
 	switch msg := msg.(type) {
 	case hitsMsg:
+		if msg.tag != b.awaiting {
+			return m, nil
+		}
+		b.awaiting = 0
 		if msg.err != nil {
 			m.status = "memory: " + msg.err.Error()
 			return m, nil
 		}
-		b.hits, b.cursor = msg.hits, 0
+		b.hits, b.cursor, b.searched = msg.hits, 0, msg.query
 		m.status = fmt.Sprintf("%d notes match", len(msg.hits))
 	case entryMsg:
+		if msg.tag != b.awaiting {
+			return m, nil
+		}
+		b.awaiting = 0
 		if msg.err != nil {
 			m.status = "memory: " + msg.err.Error()
 			return m, nil
@@ -118,10 +142,17 @@ func (m Model) browsed(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // notesView draws the browser. Notes are text other agents wrote, so the screen says so, and each line
-// of a note is cleaned before it is drawn.
+// of a note is cleaned before it is drawn. Calls waiting for the user and a failing poll head both
+// screens: the bell alone does not say why it rang, and a call left waiting times out.
 func (m Model) notesView() string {
 	b := m.notes
 	l := &lines{width: m.width}
+	if n := len(m.pending); n > 0 {
+		l.add(pendingStyle, fmt.Sprintf("%d waiting, esc back to the main screen to decide", n))
+	}
+	if m.pollErr != "" {
+		l.add(faintStyle, clean("error: "+m.pollErr))
+	}
 	if e := b.entry; e != nil {
 		l.add(titleStyle, clean(e.Title))
 		l.add(faintStyle, fmt.Sprintf("#%d  %s  by %s  %s  tags: %s", e.ID, clean(e.Project), clean(e.Author),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,7 +24,7 @@ func runUI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 		return err
 	}
 	if flags.NArg() > 0 {
-		return errUsage
+		return fmt.Errorf("unexpected argument %q: %w", flags.Arg(0), errUsage)
 	}
 	db, err := openDB(ctx, *dbPath)
 	if err != nil {
@@ -35,7 +36,10 @@ func runUI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 	// not one. A terminal's own size replaces this one.
 	size := tea.WithWindowSize(100, 30)
 	_, err = tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(stdin), tea.WithOutput(stdout), size).Run()
-	if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
+	switch {
+	case errors.Is(err, tea.ErrInterrupted):
+		return nil // a SIGINT reached the program: the user wants out, which is no error
+	case errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil:
 		return nil // the process was told to stop
 	}
 	return err
