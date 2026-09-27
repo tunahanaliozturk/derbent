@@ -433,3 +433,34 @@ func TestGateWithoutAQueueRefusesAskedCalls(t *testing.T) {
 		t.Fatalf("decided_by = %v", by)
 	}
 }
+
+// Both paths read the grants table on every call, so a grant revoked while the gate runs stops covering
+// calls at once: the next call asks again.
+func TestARevokedGrantStopsCoveringMCPCallsAtOnce(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "codex", askWrites, allowRest)
+	g.ApprovalTimeout = 2 * time.Second
+	cs := connect(t, g)
+	done := callAsync(t.Context(), cs, "memory_write", map[string]any{"title": "one", "body": "b"})
+	p := waitPending(t, e.approvals)
+	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if c := awaitCall(t, done); c.err != nil || c.res.IsError {
+		t.Fatalf("first call: %+v, %v", c.res, c.err)
+	}
+	if res := call(t, cs, "memory_write", map[string]any{"title": "two", "body": "b"}); res.IsError {
+		t.Fatalf("second call: %s", text(res))
+	}
+	if _, err := e.approvals.Revoke(t.Context(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	res := call(t, cs, "memory_write", map[string]any{"title": "three", "body": "b"})
+	if !res.IsError || !strings.Contains(text(res), "none came within 2s") {
+		t.Fatalf("third call = %q, want it asked about again and timed out", text(res))
+	}
+	by := decidedBy(t, e.db)
+	if len(by) != 3 || by[0] != fmt.Sprintf("user:%d", p.ID) || by[1] != fmt.Sprintf("grant:%d", p.ID) || !strings.HasPrefix(by[2], "timeout:") {
+		t.Fatalf("decided_by = %v", by)
+	}
+}

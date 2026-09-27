@@ -367,3 +367,88 @@ func TestConcurrentDecisionsOnOneApprovalHaveOneWinner(t *testing.T) {
 		}
 	}
 }
+
+// grantFor asks r and approves it for the session, as A does, and returns the approval's id.
+func grantFor(t *testing.T, q *approval.Queue, r approval.Request) int64 {
+	t.Helper()
+	done := ask(t.Context(), q, r, 10*time.Second)
+	p := waitPending(t, q)
+	if err := q.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if a := result(t, done); !a.out.Approved {
+		t.Fatalf("outcome = %+v, want it approved", a.out)
+	}
+	return p.ID
+}
+
+// covered reports whether a grant covers codex's calls to req's tool in session under req's rule.
+func covered(t *testing.T, q *approval.Queue, session string) bool {
+	t.Helper()
+	_, ok, err := q.Granted(t.Context(), "codex", session, req.Tool, req.RuleKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
+func TestGrantsListsTheSessionGrants(t *testing.T) {
+	q, _ := open(t)
+	before := time.Now().Add(-time.Second)
+	id := grantFor(t, q, req)
+	once := req
+	once.Session = "s2"
+	done := ask(t.Context(), q, once, 10*time.Second)
+	p := waitPending(t, q)
+	if err := q.Decide(t.Context(), p.ID, approval.ApproveOnce); err != nil {
+		t.Fatal(err)
+	}
+	result(t, done)
+	list, err := q.Grants(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("grants = %+v, want only the session approval's", list)
+	}
+	if g := list[0]; g.ID != id || g.Agent != "codex" || g.Session != "s1" || g.Tool != "github__create_issue" ||
+		g.Rule != 3 || g.Granted.Before(before) {
+		t.Fatalf("grant = %+v", g)
+	}
+}
+
+func TestRevokeDeletesOneGrantAndSaysWhichItWas(t *testing.T) {
+	q, _ := open(t)
+	id := grantFor(t, q, req)
+	other := req
+	other.Session = "s2"
+	grantFor(t, q, other)
+	g, err := q.Revoke(t.Context(), id)
+	if err != nil || g.ID != id || g.Session != "s1" || g.Tool != req.Tool || g.Rule != 3 {
+		t.Fatalf("Revoke = %+v, %v", g, err)
+	}
+	if covered(t, q, "s1") {
+		t.Fatal("the revoked grant still covers calls")
+	}
+	if !covered(t, q, "s2") {
+		t.Fatal("revoking one grant took the other too")
+	}
+	if _, err = q.Revoke(t.Context(), id); !errors.Is(err, approval.ErrNoGrant) {
+		t.Fatalf("revoking twice: err = %v, want ErrNoGrant", err)
+	}
+}
+
+func TestRevokeAllDeletesEveryGrant(t *testing.T) {
+	q, _ := open(t)
+	grantFor(t, q, req)
+	other := req
+	other.Session = "s2"
+	grantFor(t, q, other)
+	n, err := q.RevokeAll(t.Context())
+	if err != nil || n != 2 {
+		t.Fatalf("RevokeAll = %d, %v; want 2", n, err)
+	}
+	if list, err := q.Grants(t.Context()); err != nil || len(list) != 0 {
+		t.Fatalf("grants after RevokeAll = %+v, %v", list, err)
+	}
+}

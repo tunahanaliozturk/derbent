@@ -251,6 +251,88 @@ func (q *Queue) Granted(ctx context.Context, agent, session, tool, ruleKey strin
 	return id, true, nil
 }
 
+// ErrNoGrant marks a revoke of an approval id that holds no session grant.
+var ErrNoGrant = errors.New("no session grant")
+
+// Grant is a session grant: the approval that made it, whose id names it, and what it covers.
+type Grant struct {
+	ID      int64 // the approval the user approved for the session
+	Agent   string
+	Session string
+	Tool    string
+	Rule    int       // the rule that asked, from the approval
+	Granted time.Time // when the user approved it
+}
+
+// grantColumns reads a grant together with the approval behind it, in the order scanGrant takes them.
+const grantColumns = `SELECT g.approval_id, g.agent, g.session, g.tool, a.rule, coalesce(a.decided_ms, 0)
+	FROM grants g JOIN approvals a ON a.id = g.approval_id`
+
+func scanGrant(row interface{ Scan(dest ...any) error }) (Grant, error) {
+	var g Grant
+	var decided int64
+	if err := row.Scan(&g.ID, &g.Agent, &g.Session, &g.Tool, &g.Rule, &decided); err != nil {
+		return Grant{}, err
+	}
+	g.Granted = time.UnixMilli(decided)
+	return g, nil
+}
+
+// Grants lists every session grant, oldest approval first.
+func (q *Queue) Grants(ctx context.Context) ([]Grant, error) {
+	rows, err := q.db.QueryContext(ctx, grantColumns+` ORDER BY g.approval_id`)
+	if err != nil {
+		return nil, fmt.Errorf("read grants: %w", err)
+	}
+	defer rows.Close()
+	var out []Grant
+	for rows.Next() {
+		var g Grant
+		if g, err = scanGrant(rows); err != nil {
+			return nil, fmt.Errorf("read grant: %w", err)
+		}
+		out = append(out, g)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("read grants: %w", err)
+	}
+	return out, nil
+}
+
+// Revoke deletes the session grant that approval id made and returns it. Both paths read the grants on
+// every call, so the next call it covered asks again. An id that holds no grant gives ErrNoGrant.
+func (q *Queue) Revoke(ctx context.Context, id int64) (Grant, error) {
+	var revoked Grant
+	err := store.Immediate(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
+		g, err := scanGrant(conn.QueryRowContext(ctx, grantColumns+` WHERE g.approval_id = ?`, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("grant #%d: %w", id, ErrNoGrant)
+		}
+		if err != nil {
+			return fmt.Errorf("read grant #%d: %w", id, err)
+		}
+		if _, err = conn.ExecContext(ctx, `DELETE FROM grants WHERE approval_id = ?`, id); err != nil {
+			return fmt.Errorf("revoke grant #%d: %w", id, err)
+		}
+		revoked = g
+		return nil
+	})
+	return revoked, err
+}
+
+// RevokeAll deletes every session grant and returns how many there were.
+func (q *Queue) RevokeAll(ctx context.Context) (int64, error) {
+	res, err := q.db.ExecContext(ctx, `DELETE FROM grants`)
+	if err != nil {
+		return 0, fmt.Errorf("revoke grants: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("revoke grants: %w", err)
+	}
+	return n, nil
+}
+
 // end moves a pending approval to state and reports whether it was still pending.
 func (q *Queue) end(ctx context.Context, id int64, state string) (bool, error) {
 	res, err := q.db.ExecContext(ctx, `UPDATE approvals SET state = ?, decided_ms = ? WHERE id = ? AND state = 'pending'`,

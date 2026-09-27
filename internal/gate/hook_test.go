@@ -437,3 +437,27 @@ func TestAGateThatStopsBeforeTheApprovalIsWrittenRefusesTheCall(t *testing.T) {
 		t.Fatalf("decided_by = %v, want [gate]", by)
 	}
 }
+
+func TestARevokedGrantStopsCoveringHookCallsAtOnce(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "claude", shellRules...)
+	g.ApprovalTimeout = 2 * time.Second
+	done := hookAsync(t, g, `{"command":"git push origin main"}`)
+	p := waitPending(t, e.approvals)
+	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if ans := awaitHook(t, done); ans.Verdict != gate.Allowed {
+		t.Fatalf("first call = %+v", ans)
+	}
+	if ans, err := g.Hook(t.Context(), "native__Bash", json.RawMessage(`{"command":"git push --tags"}`)); err != nil || ans.Verdict != gate.Allowed {
+		t.Fatalf("second call = %+v, %v", ans, err)
+	}
+	if _, err := e.approvals.Revoke(t.Context(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	ans, err := g.Hook(t.Context(), "native__Bash", json.RawMessage(`{"command":"git push --tags"}`))
+	if err != nil || ans.Verdict != gate.Denied || !strings.Contains(ans.Reason, "none came within 2s") {
+		t.Fatalf("third call = %+v, %v; want it asked about again and timed out", ans, err)
+	}
+}

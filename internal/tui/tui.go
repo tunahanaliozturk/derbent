@@ -57,8 +57,8 @@ type Model struct {
 	// when it became highlighted or the main screen last came back, which a, A and d wait armAfter from.
 	selected int64
 	since    time.Time
-	// confirm is the call a first A asked about, 0 for none, and confirmAt when; a second A on it
-	// within confirmFor approves it for the session.
+	// confirm is the call a first A, or the grant a first r, asked about, 0 for none, and confirmAt
+	// when; a second press on it within confirmFor goes ahead.
 	confirm   int64
 	confirmAt time.Time
 	// detail is the call whose whole arguments are open, 0 for none, and scroll the first line shown.
@@ -72,8 +72,9 @@ type Model struct {
 	filter  string
 	editing bool // typing a filter
 	help    bool
-	notes   *browser // the memory browser while it is open
-	lookups int      // memory searches and reads sent; each result carries its number
+	notes   *browser   // the memory browser while it is open
+	grants  *grantList // the grants screen while it is open
+	lookups int        // memory searches and reads sent; each result carries its number
 }
 
 // New returns the UI over the shared database's approvals, receipts and memory.
@@ -121,6 +122,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tickMsg:
+		if m.grants != nil {
+			return m, tea.Batch(m.load, m.loadGrants)
+		}
 		return m, m.load
 	case snapshotMsg:
 		return m.apply(msg)
@@ -128,6 +132,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 	case hitsMsg, entryMsg:
 		return m.browsed(msg)
+	case grantsMsg:
+		return m.grantsLoaded(msg)
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
@@ -192,10 +198,11 @@ func (m Model) highlight(id int64) Model {
 	return m
 }
 
-// backToMain closes the help, the detail view and the memory browser. The highlighted call may have
-// been highlighted while one of them hid it, so its arming time starts again now that it is on screen.
+// backToMain closes the help, the detail view, the memory browser and the grants screen. The
+// highlighted call may have been highlighted while one of them hid it, so its arming time starts again
+// now that it is on screen.
 func (m Model) backToMain() Model {
-	m.help, m.detail, m.notes, m.since = false, 0, nil, m.now()
+	m.help, m.detail, m.notes, m.grants, m.since = false, 0, nil, nil, m.now()
 	return m
 }
 
@@ -222,6 +229,8 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case m.notes != nil:
 		return m.browseKey(k)
+	case m.grants != nil:
+		return m.grantsKey(k, asked)
 	case m.editing:
 		return m.editFilter(k), nil
 	case m.help:
@@ -241,6 +250,9 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.editing = true
 	case "m":
 		m.notes = &browser{typing: true}
+	case "g":
+		m.grants = &grantList{}
+		return m, m.loadGrants
 	case "esc":
 		m.filter = ""
 	case "enter":
@@ -364,6 +376,8 @@ func (m Model) View() tea.View {
 		content = l.String()
 	case m.notes != nil:
 		content = m.notesView()
+	case m.grants != nil:
+		content = m.grantsView()
 	case m.detail != 0:
 		content = m.detailView()
 	default:
@@ -384,6 +398,7 @@ const helpText = `derbent keys
   enter      read the selected call's whole arguments; esc goes back
   up, down   select a waiting call
   m          search and read memory
+  g          list session grants; r twice revokes the selected one
   v          verify the receipt chain
   /          filter the receipt feed by agent or tool; esc clears it
   ?          this help; any key closes it
