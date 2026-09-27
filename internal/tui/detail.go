@@ -86,6 +86,7 @@ func (m Model) detailView() string {
 	for _, s := range m.statusLines() {
 		l.add(faintStyle, visible.Escape(s))
 	}
+	l.fit(m.height, len(m.statusLines()))
 	return l.String()
 }
 

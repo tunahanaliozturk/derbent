@@ -910,6 +910,33 @@ func TestWaitingRowsFitTheWindow(t *testing.T) {
 	}
 }
 
+// However short the window, the main screen and the detail view fit it, with the header at the top and
+// the status line, which may be asking for a second A, at the bottom, even with two calls waiting and
+// long arguments.
+func TestTheScreenFitsAShortWindow(t *testing.T) {
+	for _, height := range []int{12, 16} {
+		m, _ := newModel(t)
+		m, _ = update(m, tea.WindowSizeMsg{Width: 60, Height: height})
+		calls := pendingCalls(2)
+		for i := range calls {
+			calls[i].Args = `{"command":"` + strings.Repeat("x", 2000) + `"}`
+		}
+		m, _ = update(m, snapshotMsg{pending: calls})
+		m, _ = press(later(m, armAfter), "A")
+		for _, view := range []struct{ name, keys, first string }{{"main screen", "", "derbent"}, {"detail view", "enter", "#1"}} {
+			if view.keys != "" {
+				m, _ = press(m, view.keys, "A")
+			}
+			s := screen(m)
+			lines := strings.Split(s, "\n")
+			if len(lines) > height || !strings.Contains(lines[0], view.first) || !strings.Contains(lines[len(lines)-1], "press A again") {
+				t.Errorf("%s in %d rows: %d lines, want at most %d with %q first and the question last:\n%s",
+					view.name, height, len(lines), height, view.first, s)
+			}
+		}
+	}
+}
+
 func TestAPollErrorClearsWhenAPollSucceeds(t *testing.T) {
 	m, _ := newModel(t)
 	m, _ = update(m, statusMsg("#7 approved once: codex x"))

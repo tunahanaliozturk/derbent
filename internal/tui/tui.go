@@ -403,6 +403,18 @@ func (l *lines) String() string {
 	return strings.Join(l.out, "\n")
 }
 
+// fit keeps the lines within height rows. When there are more it drops lines from the middle, keeping
+// the first ones and the last keep, so the header and the status lines stay on screen however short
+// the window is.
+func (l *lines) fit(height, keep int) {
+	height = max(height, 0)
+	if len(l.out) <= height {
+		return
+	}
+	keep = min(keep, height)
+	l.out = append(l.out[:height-keep], l.out[len(l.out)-keep:]...)
+}
+
 // main draws the header, the waiting calls, the agents, the receipt feed and the status line.
 func (m Model) main() string {
 	l := &lines{width: m.width}
@@ -449,6 +461,7 @@ func (m Model) main() string {
 	for _, s := range status {
 		l.add(faintStyle, visible.Escape(s))
 	}
+	l.fit(m.height, len(status)) // long arguments in a short window leave too little room for the rest
 	return l.String()
 }
 

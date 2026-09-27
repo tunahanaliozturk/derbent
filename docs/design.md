@@ -306,12 +306,14 @@ Bubble Tea. Calls waiting for the user sit at the top, one line each, with the h
 arguments wrapped below it over about a third of the window, at least three lines, with enter for the
 whole text. The preview escapes and wraps only what it can show, so megabytes of arguments do not slow
 the screen. `enter` opens a detail view of the highlighted call: agent, tool, time left, rule, project
-and the whole arguments, wrapped to the window and scrolled with up, down, page up, page down, home and end; `a`, `A`
-and `d` work there too, and if the call stops waiting the view says so and takes no decision. A run of
-more than eight spaces of any kind (ASCII, no-break, ideographic, em and the other Unicode spaces) is
-shown as `␠×N`, so padding cannot push the rest out of sight. The preview reads no further into the
-arguments than it shows, spaces included, and writes a run that goes on past that as `␠×N+`. The
-terminal bell rings when a new call starts waiting.
+and the whole arguments, wrapped to the window and scrolled with up, down, page up, page down, home and
+end; `a`, `A` and `d` work there too, and if the call stops waiting the view says so and takes no
+decision. A run of more than eight space separators (ASCII, no-break, ideographic, em and the other
+Unicode space separators) is shown as `␠×N`, so padding cannot push the rest out of sight. The preview
+reads no further into the arguments than it shows, spaces included, and writes a run that goes on past
+that as `␠×N+`. The terminal bell rings when a new call starts waiting. In a window too short for
+everything, lines drop out of the middle of the main screen and the detail view, so neither is ever
+taller than the window and the header and the status line stay on screen.
 
 `a`, `A` and `d` act only on the highlighted call. After it leaves the list nothing is highlighted until
 the user picks a call with up or down, and when calls arrive while nothing was waiting, the oldest is
