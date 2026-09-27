@@ -178,7 +178,7 @@ func showPin(ctx context.Context, path, dbFlag, server, tool string, stdout io.W
 	return err
 }
 
-// acceptPin makes the change recorded for a tool its pin when its hash starts with given, the hash
+// acceptPin makes the change recorded for a tool its pin when its whole hash equals given, the hash
 // derbent pins show printed, and prints the hash it accepted.
 func acceptPin(ctx context.Context, path, server, tool, given string, stdout io.Writer) error {
 	db, err := store.OpenExistingWritable(ctx, path)

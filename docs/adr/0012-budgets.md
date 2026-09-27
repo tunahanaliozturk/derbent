@@ -18,8 +18,8 @@ glob matches, within a sliding window `per` of one minute to 24 hours.
   alternatives, so there is no first match: a call under a wide budget can still be over a narrow one.
 - The count reads the receipts. A call counts when its receipt says `decision` = `allow`, whatever let it
   through, and its time is inside the window. Receipts are already shared by every gate process and hook
-  on the machine, so a budget holds across them with no new state. Migration 0004 indexes receipts on
-  `(agent, at)` so the count reads only that agent's window.
+  that uses the same database, so a budget holds across them with no new state. Migration 0004 indexes
+  receipts on `(agent, at)` so the count reads only that agent's window.
 - The rules decide first, and a `deny` stays a deny. Otherwise a used-up budget refuses the call without
   asking: `decided_by` = `budget:<n>`, outcome `refused`, and the agent reads which budget, the limit and
   about how long until the next call is possible.

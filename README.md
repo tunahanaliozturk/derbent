@@ -210,8 +210,8 @@ line. A `derbent mcp` gate reads the file when its CLI starts it; the hook reads
 
 ## Project rules
 
-A repository can make Derbent stricter for itself. A `.derbent.toml` at the project root (the git root)
-holds `[[rule]]` tables and nothing else:
+A repository can make Derbent stricter for itself. A `.derbent.toml` at the project root holds `[[rule]]`
+tables and nothing else:
 
 ```toml
 [[rule]]
@@ -219,6 +219,10 @@ tool   = "native__Bash"
 args   = { command = "terraform *" }
 action = "ask"
 ```
+
+The project root is the git root, and for a linked worktree the main checkout's root: a worktree follows
+the main checkout's file, as it shares its memory, and a `.derbent.toml` at the worktree's own root is not
+read.
 
 Project rules are tried in order and need no final rule; when none matches, the project adds nothing. A
 call gets the stricter of your decision and the project's, deny over ask over allow, so a project rule can
@@ -317,9 +321,10 @@ per   = "1h"
 
 `agent` and `tool` are globs as in rules, `calls` is at least 1, and `per` is a duration from `1m` to `24h`.
 Every budget that matches a call applies. A call counts when its receipt says it was let through, by a
-rule, a grant or you, so the count is shared by every gate and hook on the machine. The rules decide first
-and a `deny` stays a deny; otherwise a call over a budget is refused without asking you, its receipt says
-`budget:1`, and the agent reads when its next call is possible ([ADR 0012](docs/adr/0012-budgets.md)).
+rule, a grant or you, so the count is shared by every gate and hook that uses the same database. The rules
+decide first and a `deny` stays a deny; otherwise a call over a budget is refused without asking you, its
+receipt says `budget:1`, and the agent reads when its next call is possible
+([ADR 0012](docs/adr/0012-budgets.md)).
 Calls made at the same moment can pass a budget by at most the number of calls in flight at once.
 
 ## Built-in tools
@@ -445,12 +450,12 @@ derbent pins show github__create_issue             # the pinned and the new defi
 derbent pins accept github__create_issue <sha256>  # takes the whole hash that pins show prints
 ```
 
-`pins show` ends with the `accept` command, ready to copy. An accept of a hash that is not the change on
-record is refused, as is a shortened hash, so what is accepted is what was read. After `accept`, running
-gates serve the tool again within two seconds. `derbent config check` shows each tool's pin state and pins
-nothing, and the UI says how many tools changed. A server whose descriptions change on every start can opt
-out with `pin = false` in its `[servers.<name>]` table. Pins trust what they see first, so look at a new
-server's tools with `derbent config check` before an agent uses them.
+For a changed tool, `pins show` ends with the `accept` command, ready to copy. An accept of a hash that
+is not the change on record is refused, as is a shortened hash, so what is accepted is what was read.
+After `accept`, running gates serve the tool again within two seconds. `derbent config check` shows each
+tool's pin state and pins nothing, and the UI says how many tools changed. A server whose descriptions
+change on every start can opt out with `pin = false` in its `[servers.<name>]` table. Pins trust what they
+see first, so look at a new server's tools with `derbent config check` before an agent uses them.
 
 ## Receipts and verify
 

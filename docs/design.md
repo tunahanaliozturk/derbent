@@ -270,7 +270,7 @@ matches, within a sliding window `per`, a Go duration from one minute to 24 hour
 - Every budget whose `agent` and `tool` match the call applies; unlike rules, there is no first match. A
   call counts against a budget when its receipt says it was let through (`decision` = `allow`, whether a
   rule, a grant or the user let it through) and its time is inside the window. Counting reads the
-  receipts, so every gate process and hook on the machine shares it.
+  receipts, so every gate process and hook that uses the same database shares it.
 - The rules decide first, and a `deny` stays a deny. Otherwise, when a matching budget is used up, the
   call is refused without asking the user: `decided_by` is `budget:<n>`, the budget's 1-based position in
   the config, the outcome is `refused`, and the agent reads "derbent: budget <n> reached: <calls> calls
@@ -331,7 +331,9 @@ agent reads and follows. The gate pins each downstream tool (ADR 0013).
 
 A repository can make Derbent stricter for itself, never looser (ADR 0014). A `.derbent.toml` file at the
 project root, the directory Derbent uses for the project key, may hold `[[rule]]` tables and nothing
-else. It is looked up under the root in the path's own case, not under the lower-cased key.
+else. It is looked up under the root in the path's own case, not under the lower-cased key. The project
+root is the git root, and for a linked worktree the main checkout's root, so a worktree follows the main
+checkout's file and a `.derbent.toml` at the worktree's own root is not read.
 
 - Project rules use the rule syntax and are tried in order, first match wins, with no final catch-all:
   when none matches, the project adds nothing.
@@ -674,8 +676,9 @@ with `derbent approve` from another shell, and is published as a transcript in d
 recording of Codex approved from the UI.
 
 Milestone 6's check ran on 2026-09-28 with real Claude Code 2.1.283 sessions (`claude -p` on the owner's
-subscription with no API key, and scratch config, settings and databases), the hook coming from each
-scratch repository's `.claude/settings.json`. A budget of two Bash calls an hour let `echo one` and
+subscription with no API key, and scratch config, settings and databases). In the two Bash parts the
+hook came from the scratch repository's `.claude/settings.json`; the pins part ran through `derbent mcp`
+alone. A budget of two Bash calls an hour let `echo one` and
 `echo two` through and refused `echo three` before it ran, with the receipt
 `native__Bash deny budget:1 refused`. A `.derbent.toml` in a scratch repository made `git status` ask
 under a config that allows everything: `derbent pending` showed it as `project rule 1`,
