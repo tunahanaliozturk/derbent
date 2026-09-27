@@ -20,10 +20,11 @@ only shared state.
 
 ## Status
 
-Milestone 2 of 5 is done. The gate serves shared memory tools and the tools of your own MCP servers,
-applies allow and deny rules, masks secrets in stored arguments, and writes a hash-chained receipt for
-every call. Approvals and the terminal UI come next. The [design](docs/design.md) covers the whole plan, what Derbent does not do, and how each
-claim is tested. Decisions are recorded in [docs/adr](docs/adr).
+Milestone 3 of 5 is done. The gate serves shared memory tools and the tools of your own MCP servers,
+applies allow, deny and ask rules, masks secrets in stored arguments, and writes a hash-chained receipt
+for every call. It can hold a call until you approve it in a terminal UI. Gating Claude Code's built-in
+tools through its hooks comes next. The [design](docs/design.md) covers the whole plan, what Derbent
+does not do, and how each claim is tested. Decisions are recorded in [docs/adr](docs/adr).
 
 ## Try it
 
@@ -85,6 +86,47 @@ derbent config check
 ```
 
 starts every server once and prints the tools each would give the agents.
+
+## Approvals
+
+A rule can hold a call until you decide. It goes above the rule that allows everything else, and the
+tool stays listed to the agent:
+
+```toml
+[[rule]]
+tool   = "github__create_*"
+action = "ask"
+
+[[rule]]
+action = "allow"
+
+[approvals]
+timeout = "50s"
+```
+
+The timeout is optional: 50 seconds unless you set it, and at least one second.
+
+Run `derbent` in a terminal of its own. Calls waiting for you sit at the top with the agent, the tool,
+the time left and the arguments, masked as they are in receipts, and the terminal bell rings when a new
+one arrives. The keys act on the highlighted call: `a` approves it once, `A` approves the tool for the
+rest of that agent's session, `d` denies it, and up and down pick another call. A call nobody answers is
+denied after the timeout, and the agent is told why. Below the waiting calls are the agents seen in the
+last hour and a live feed of receipts; `/` filters the feed, `m` searches memory across projects, `v`
+verifies the receipt chain, `?` lists the keys and `q` quits. Text from agents and tools is escaped
+before it is drawn, so it cannot send control sequences to your terminal.
+
+The same decisions work from any shell, by the id the UI shows, and receipts can be listed without it:
+
+```bash
+derbent approve 12             # approves once, like a
+derbent approve --session 12   # like A; flags go before the id
+derbent deny 12
+derbent receipts --agent codex --since 1h
+derbent receipts --json        # JSON lines
+```
+
+The timeout sits below Codex's default tool timeout of 60 seconds ([ADR 0005](docs/adr/0005-approval-timeout.md)).
+If you raise it, raise `tool_timeout_sec` for the `derbent` server in Codex's config too.
 
 ## Licence
 

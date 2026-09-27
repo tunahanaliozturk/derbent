@@ -123,8 +123,9 @@ redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
 - Every value that came from `${env:...}` in `env` or `headers` and is at least eight characters long is
   masked in stored arguments, as well as whatever the `redact` patterns match. Masking works on each
   string value, so the stored arguments stay valid JSON.
-- An `args` condition that meets a value it cannot read (not a string) matches a `deny` and never an
-  `allow` (ADR 0003).
+- An `args` condition that meets a value it cannot read (not a string) matches a `deny` or an `ask` and
+  never an `allow` (ADR 0003).
+- `[approvals] timeout` is a Go duration of at least one second, 50 seconds when it is not set (ADR 0005).
 
 ## Tools
 
@@ -161,7 +162,7 @@ bm25 (ADR 0007).
 
 Each call through the gate appends one row: sequence number, time, project, agent, gate session, tool,
 arguments after redaction, SHA-256 of the arguments before redaction, the decision and what made it (a
-rule index or the user), the outcome, the size and SHA-256 of the result, the duration, the previous
+rule index, the gate itself, or an approval, see Approvals), the outcome, the size and SHA-256 of the result, the duration, the previous
 receipt's hash, and this receipt's hash.
 
 - The hash is SHA-256 over the previous hash and the stored bytes of the row's fields, each field
@@ -176,22 +177,33 @@ receipt's hash, and this receipt's hash.
   hash. Someone able to write the database could rewrite the whole chain consistently, or delete the
   newest receipts and leave a shorter chain that still verifies, and keeping a copy of the head hash
   elsewhere is what catches both (ADR 0004).
-- `derbent receipts` lists and filters receipts by agent, tool, project and time, as a table or as
-  JSON lines.
+- `derbent receipts` opens the database read-only and lists receipts filtered by agent, tool glob,
+  project and time, the newest 50 unless `--limit` says otherwise, as a table or as JSON lines. Stored
+  text can come from an agent, so control characters and bidirectional overrides are escaped in both.
 
 ## Approvals
 
-When a rule says `ask`, the gate writes a pending approval and polls for a decision. In the UI the
-pending call shows at the top with the agent, the tool and the redacted arguments, and the terminal bell
-rings.
+When a rule says `ask`, the gate writes a pending approval and polls for a decision every 200 ms. In
+the UI the pending call shows at the top with the agent, the tool, the time left and the redacted
+arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's tool list.
 
 - `a` approves once, `d` denies, and `A` approves this tool for the rest of that agent's gate session.
   Nothing the UI does changes the config file.
-- `derbent approve <id>` and `derbent deny <id>` do the same without the UI.
-- If no decision arrives within `approvals.timeout`, the call is denied with an error that tells the
-  agent the approval timed out. The default of 50 seconds sits below the shortest default tool timeout
-  among the four CLIs, which is checked against their documentation when the repository is scaffolded,
-  so the agent sees a clear denial instead of a transport timeout (ADR 0005).
+- `derbent approve [--session] <id>` and `derbent deny <id>` do the same from any shell, by the id the
+  UI shows. They refuse a database path that does not exist instead of creating one.
+- If no decision arrives within `approvals.timeout`, the call is denied with a tool error that says no
+  approval came in time and tells the agent to try again and ask the user to approve it in the UI while
+  it waits. The default of 50 seconds sits ten below Codex's 60, the shortest documented default tool
+  timeout among the four CLIs, so the agent sees a clear denial instead of a transport timeout
+  (ADR 0005).
+- Approvals live in the database with a deadline. A decision is refused once the call is no longer
+  waiting: decided, timed out, given up by its agent, or past its deadline, which is how a call left
+  behind by a gate that stopped ends.
+- The receipt of an asked call records the final decision and names the approval behind it:
+  `user:<id>` for the user's decision, `grant:<id>` for a call covered by an earlier `A`, `timeout:<id>`
+  when no decision came, and `withdrawn:<id>` when the agent gave up. A gate that cannot ask at all
+  refuses the call and keeps the rule's `rule:<n>`.
+- The approval queue and the UI hold arguments only after redaction.
 
 ## Built-in tools
 
@@ -215,10 +227,21 @@ for each CLI.
 
 ## Terminal UI
 
-Bubble Tea. Pending approvals sit at the top, above a live feed of receipts (agent, tool, decision,
-duration) and a list of the agents seen in the last hour. `m` opens a memory browser with search, `v`
-runs verify, `/` filters the feed, `?` shows the keys, `q` quits. Quitting the UI changes nothing for
+Bubble Tea. Calls waiting for the user sit at the top, one line each, with the highlighted call's
+arguments wrapped below it over up to a third of the window. The terminal bell rings when a new call
+starts waiting. `a`, `A` and `d` act only on the highlighted call. After it leaves the list nothing is
+highlighted until the user picks a call with up or down, so a key never lands on a call the user did not
+choose. When calls arrive while nothing was waiting, the oldest is highlighted at once.
+
+Below the waiting calls are the agents seen in the last hour and a live feed of receipts (time, agent,
+tool, decision, what decided it, outcome, duration). `m` opens a memory browser that searches every
+project and still shows how many calls are waiting and why a poll failed, `v` runs verify, `/` filters
+the feed by agent or tool name, `?` shows the keys, `q` quits. Quitting the UI changes nothing for
 running agents: their calls that need an approval wait for the timeout and are denied.
+
+Text from agents, tools and the database is drawn with control characters and bidirectional overrides
+escaped, and newlines and tabs written as `\n` and `\t`, so a value cannot add lines of its own. Every
+screen line is clipped to the window.
 
 ## State
 
@@ -253,7 +276,12 @@ database migrates it inside `BEGIN IMMEDIATE`.
 - **Proof the checks can fail.** Redaction, rule evaluation and tool hiding each have a test that
   switches them off through a knob visible only to tests and asserts that the matching test then fails.
 - **Approvals across processes.** A gate waits on `ask`, a second process approves, and the call goes
-  through. The timeout path denies.
+  through. The timeout path denies. A decision racing the deadline, and two decisions racing each other,
+  leave one winner in every round.
+- **Escaping.** A test feeds the UI escape sequences, a clipboard write, a bell and a bidirectional
+  override in the agent, tool and argument fields, and asserts that none reaches the screen raw and no
+  line is wider than the window. Tests of `derbent receipts` check that stored control characters come
+  out escaped in the table and in JSON lines, and that a JSON line still decodes to the stored text.
 - **MCP behaviour.** The SDK's client drives the gate end to end: initialize, tool listing, calls,
   forwarded `list_changed`, and a downstream server killed in the middle of a session.
 - **Hook.** Golden standard input and output for the Claude Code hook, including a call to the gate's
