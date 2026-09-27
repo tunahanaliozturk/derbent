@@ -273,9 +273,13 @@ matches, within a sliding window `per`, a Go duration from one minute to 24 hour
   receipts, so every gate process and hook that uses the same database shares it.
 - The rules decide first, and a `deny` stays a deny. Otherwise, when a matching budget is used up, the
   call is refused without asking the user: `decided_by` is `budget:<n>`, the budget's 1-based position in
-  the config, the outcome is `refused`, and the agent reads "derbent: budget <n> reached: <calls> calls
-  to <tool glob> per <per> for <agent>; the next call is possible in about <d>". An agent stuck in a loop
-  therefore never floods the approval queue.
+  the config, the outcome is `refused`, and the agent reads "derbent: budget <n> in the config is used
+  up: <calls> calls to <tool glob> per <per> for <agent>; the next call is possible in about <d>", with
+  "call" for a limit of one. When more than one matching budget is used up, it names the one with the
+  longest wait, since the call is refused until every one of them has room again.
+- Asked calls that the user denies, or that time out, are not let through and do not count, so a loop
+  of them still reaches the user. Once the calls let through use a budget up, further calls are refused
+  without asking.
 - Counting and appending are not one transaction across processes, so calls made at the same moment can
   pass a budget by at most the number of calls in flight at once.
 - Receipts are indexed on agent and time, so the count reads only that agent's window. A budget that

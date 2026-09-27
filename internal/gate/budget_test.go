@@ -44,7 +44,7 @@ func TestABudgetRefusesTheCallAfterItsLimit(t *testing.T) {
 		}
 	}
 	res := call(t, cs, "memory_search", map[string]any{"query": "x"})
-	want := "derbent: budget 1 reached: 2 calls to memory_search per 1h for claude; the next call is possible in about "
+	want := "derbent: budget 1 in the config is used up: 2 calls to memory_search per 1h for claude; the next call is possible in about "
 	if !res.IsError || !strings.HasPrefix(text(res), want) {
 		t.Fatalf("third call = %q, want it to start %q", text(res), want)
 	}
@@ -70,7 +70,7 @@ func TestABudgetCountsTheAgentsCallsFromEveryGate(t *testing.T) {
 		t.Fatalf("second call in the window = %+v, %v", ans, err)
 	}
 	ans, err := g.Hook(t.Context(), "native__Bash", json.RawMessage(`{"command":"ls"}`))
-	if err != nil || ans.Verdict != gate.Denied || !strings.Contains(ans.Reason, "budget 1 reached: 2 calls to native__Bash per 1h for claude") {
+	if err != nil || ans.Verdict != gate.Denied || !strings.Contains(ans.Reason, "budget 1 in the config is used up: 2 calls to native__Bash per 1h for claude") {
 		t.Fatalf("third call = %+v, %v", ans, err)
 	}
 	if got := hookReceipts(t, e); got[len(got)-1].decidedBy != "budget:1" || got[len(got)-1].outcome != "refused" {
@@ -98,7 +98,7 @@ func TestABudgetRefusesAnAskedCallWithoutAsking(t *testing.T) {
 	if c := awaitCall(t, done); c.err != nil || c.res.IsError {
 		t.Fatalf("first call: %+v, %v", c.res, c.err)
 	}
-	if res := call(t, cs, "memory_write", map[string]any{"title": "two", "body": "b"}); !res.IsError || !strings.Contains(text(res), "budget 1 reached") {
+	if res := call(t, cs, "memory_write", map[string]any{"title": "two", "body": "b"}); !res.IsError || !strings.Contains(text(res), "budget 1 in the config is used up") {
 		t.Fatalf("second call = %q, want it refused by the budget", text(res))
 	}
 	var asked int
