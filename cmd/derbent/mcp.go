@@ -74,7 +74,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	}
 	g := &gate.Gate{
 		Agent: *agent, Project: project, Session: session, Version: version,
-		Rules: cfg.Rules, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
+		Rules: cfg.Rules, Budgets: cfg.Budgets, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
 		Redact: cfg.Redact.JSON, Approvals: approval.NewQueue(db), ApprovalTimeout: cfg.ApprovalTimeout,
 		Stop: ctx, // SIGINT or SIGTERM withdraws the calls still waiting for the user
 	}

@@ -221,6 +221,42 @@ func (l *Log) Agents(ctx context.Context, since time.Time) ([]AgentSeen, error) 
 	return out, nil
 }
 
+// Allowed is a call a receipt says was let through: its tool and when.
+type Allowed struct {
+	Tool string
+	At   time.Time
+}
+
+// AllowedSince returns the calls agent had let through (decision allow, whatever let them through) at
+// or after since, in no particular order. Stored times do not compare correctly as text within one
+// second, so it reads from the start of since's second and keeps the exact ones.
+func (l *Log) AllowedSince(ctx context.Context, agent string, since time.Time) ([]Allowed, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT tool, at FROM receipts WHERE agent = ? AND at >= ? AND decision = 'allow'`,
+		agent, sinceBound(since))
+	if err != nil {
+		return nil, fmt.Errorf("read allowed calls: %w", err)
+	}
+	defer rows.Close()
+	var out []Allowed
+	for rows.Next() {
+		var a Allowed
+		var at string
+		if err = rows.Scan(&a.Tool, &at); err != nil {
+			return nil, fmt.Errorf("read allowed call: %w", err)
+		}
+		if a.At, err = time.Parse(time.RFC3339Nano, at); err != nil {
+			return nil, fmt.Errorf("read allowed call: time %q: %w", at, err)
+		}
+		if !a.At.Before(since) {
+			out = append(out, a)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("read allowed calls: %w", err)
+	}
+	return out, nil
+}
+
 // sinceBound writes t so that it compares correctly as text against stored times, which are UTC RFC
 // 3339 with a fraction of any length: to the second, without the zone, so that every time in that
 // second sorts after it.

@@ -620,6 +620,7 @@ derbent/
 | 0009 | Downstream servers are supervised from the moment the gate starts. |
 | 0010 | Derbent is written in Go. |
 | 0011 | A session grant covers only the calls the same rule asks about under the same rules above it, keyed on a fingerprint of that rule and every rule above it. |
+| 0012 | Budgets count receipts, every matching budget applies, and a used-up budget refuses without asking. |
 
 ## Milestones
 

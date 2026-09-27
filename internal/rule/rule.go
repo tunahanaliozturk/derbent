@@ -43,7 +43,7 @@ type Decision struct {
 	Unread bool
 }
 
-// ErrInvalid marks a rule list that cannot be compiled.
+// ErrInvalid marks rules or budgets that cannot be compiled.
 var ErrInvalid = errors.New("invalid rules")
 
 // agentPattern admits the characters an agent name can have, plus the wildcards, so that a rule

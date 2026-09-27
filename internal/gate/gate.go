@@ -24,11 +24,14 @@ import (
 
 // Gate serves one agent session.
 type Gate struct {
-	Agent    string
-	Project  string
-	Session  string
-	Version  string
-	Rules    rule.Set
+	Agent   string
+	Project string
+	Session string
+	Version string
+	Rules   rule.Set
+	// Budgets limit how many calls the agent may have let through to some tools within a window
+	// (ADR 0012). The zero value has none.
+	Budgets  rule.Budgets
 	Memory   *memory.Store
 	Receipts *receipt.Log
 	// Forward sends a call to a downstream server. It may be nil when no servers are configured.
@@ -170,8 +173,8 @@ type settled struct {
 
 // settle decides a call before it runs: the rules first, and for a rule that says ask, a grant from an
 // earlier "approve for this session" or the user's answer. MCP calls and pre-tool hook calls both come
-// through here, so the two paths cannot decide differently. redacted is the arguments as the approval
-// queue may show them.
+// through here, so the two paths cannot decide differently. A budget that is used up refuses a call no
+// rule denied. redacted is the arguments as the approval queue may show them.
 func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isObject bool, redacted string) settled {
 	if !isObject {
 		// Arguments are an object. Rules read named string arguments, so anything else would slip past
@@ -183,14 +186,43 @@ func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isO
 		d = rule.Decision{Action: rule.Allow}
 	}
 	byRule := "rule:" + strconv.Itoa(d.Rule)
-	switch d.Action { // rule.Compile admits these three and no other
-	case rule.Allow:
-		return settled{allow: true, by: byRule}
-	case rule.Ask:
-		return g.ask(ctx, name, redacted, d, byRule)
-	case rule.Deny:
+	if d.Action == rule.Deny {
+		return settled{by: byRule, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, d.Rule)}
 	}
-	return settled{by: byRule, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, d.Rule)}
+	// A deny stays a deny. Otherwise a used-up budget refuses the call without asking the user, so an
+	// agent stuck in a loop never floods the approval queue (ADR 0012).
+	if s, over := g.overBudget(ctx, name); over {
+		return s
+	}
+	if d.Action == rule.Ask {
+		return g.ask(ctx, name, redacted, d, byRule)
+	}
+	return settled{allow: true, by: byRule}
+}
+
+// overBudget refuses a call when a budget that applies to it is used up. The count reads the receipts,
+// which every gate and hook on the machine appends to, so it is shared; it is not one transaction with
+// the append that follows, so calls in flight at the same moment can pass a budget by their number. A
+// count that cannot be read refuses the call.
+func (g *Gate) overBudget(ctx context.Context, name string) (settled, bool) {
+	window := g.Budgets.Window(g.Agent, name)
+	if window == 0 {
+		return settled{}, false
+	}
+	now := time.Now()
+	allowed, err := g.Receipts.AllowedSince(ctx, g.Agent, now.Add(-window))
+	if err != nil {
+		return settled{by: "gate", text: name + " was refused because its budget could not be counted: " + err.Error()}, true
+	}
+	passed := make([]rule.Passed, len(allowed))
+	for i, a := range allowed {
+		passed[i] = rule.Passed{Tool: a.Tool, At: a.At}
+	}
+	r, reached := g.Budgets.Reached(g.Agent, name, passed, now)
+	if !reached {
+		return settled{}, false
+	}
+	return settled{by: "budget:" + strconv.Itoa(r.N), text: r.Message(g.Agent)}, true
 }
 
 // ask settles a call a rule sends to the user. A grant from an earlier "approve for this session" lets

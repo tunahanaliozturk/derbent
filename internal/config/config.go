@@ -21,7 +21,9 @@ const DefaultApprovalTimeout = 50 * time.Second
 
 // Config is a loaded and validated configuration.
 type Config struct {
-	Rules   rule.Set
+	Rules rule.Set
+	// Budgets limit how many calls an agent may have let through within a window (ADR 0012).
+	Budgets rule.Budgets
 	Servers []Server
 	// Redact masks secrets in arguments before they are stored in a receipt. It is never nil.
 	Redact *redact.Redactor
@@ -31,6 +33,7 @@ type Config struct {
 
 type file struct {
 	Rules     []rule.Spec           `toml:"rule"`
+	Budgets   []rule.BudgetSpec     `toml:"budget"`
 	Servers   map[string]serverFile `toml:"servers"`
 	Approvals struct {
 		Timeout string `toml:"timeout"`
@@ -106,6 +109,10 @@ func parse(name, text string, skipUnset bool) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", name, err)
 	}
+	budgets, err := rule.CompileBudgets(f.Budgets)
+	if err != nil {
+		return Config{}, fmt.Errorf("config %s: %w", name, err)
+	}
 	srvs, secrets, err := servers(f.Servers, skipUnset)
 	if err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", name, err)
@@ -118,7 +125,7 @@ func parse(name, text string, skipUnset bool) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", name, err)
 	}
-	return Config{Rules: rules, Servers: srvs, Redact: red, ApprovalTimeout: timeout}, nil
+	return Config{Rules: rules, Budgets: budgets, Servers: srvs, Redact: red, ApprovalTimeout: timeout}, nil
 }
 
 // approvalTimeout parses approvals.timeout, a Go duration such as "50s" or "2m" of at least a second.

@@ -301,3 +301,48 @@ func TestAgentsSeenSince(t *testing.T) {
 		}
 	}
 }
+
+// Stored times are RFC 3339 text with fractions of varying length, which do not sort correctly as text
+// within one second, so AllowedSince reads from the second its bound falls in and keeps exactly the calls
+// at or after the bound. It keeps the given agent's allowed calls only.
+func TestAllowedSinceCountsExactlyFromItsBound(t *testing.T) {
+	log := receipt.NewLog(openDB(t, filepath.Join(t.TempDir(), "p.db")))
+	since := time.Date(2026, 9, 27, 12, 0, 0, 500_000_000, time.UTC)
+	for _, r := range []struct {
+		agent, tool, decision string
+		at                    time.Time
+	}{
+		{"claude", "native__Bash", "allow", since.Add(-2 * time.Hour)},
+		{"claude", "native__Bash", "allow", since.Add(-200 * time.Millisecond)}, // same second, before the bound
+		{"claude", "native__Bash", "allow", since},
+		{"claude", "native__Bash", "allow", since.Add(50 * time.Millisecond)}, // stored as .55Z, which sorts before .5Z as text
+		{"claude", "native__Bash", "deny", since.Add(time.Second)},
+		{"codex", "native__Bash", "allow", since.Add(time.Second)},
+		{"claude", "memory_write", "allow", since.Add(time.Minute)},
+	} {
+		if _, err := log.Append(t.Context(), receipt.Receipt{
+			At: r.at, Project: "p", Agent: r.agent, Session: "s", Tool: r.tool, Args: "{}", Decision: r.decision,
+			DecidedBy: "rule:1", Outcome: "ok",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := log.AllowedSince(t.Context(), "claude", since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.SortFunc(got, func(a, b receipt.Allowed) int { return a.At.Compare(b.At) })
+	want := []receipt.Allowed{
+		{Tool: "native__Bash", At: since},
+		{Tool: "native__Bash", At: since.Add(50 * time.Millisecond)},
+		{Tool: "memory_write", At: since.Add(time.Minute)},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("AllowedSince = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i].Tool != want[i].Tool || !got[i].At.Equal(want[i].At) {
+			t.Fatalf("AllowedSince[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

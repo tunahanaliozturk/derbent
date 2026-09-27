@@ -118,3 +118,29 @@ func TestApprovalTimeout(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBudgets(t *testing.T) {
+	cfg, err := config.Parse("test.toml", `
+[[budget]]
+agent = "*"
+tool  = "native__Bash"
+calls = 200
+per   = "1h"
+
+[[rule]]
+action = "allow"
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Budgets.Len() != 1 || cfg.Budgets.Window("claude", "native__Bash") != time.Hour {
+		t.Fatalf("budgets = %d, window %s", cfg.Budgets.Len(), cfg.Budgets.Window("claude", "native__Bash"))
+	}
+	_, err = config.Parse("test.toml", "[[budget]]\ncalls = 0\nper = \"1h\"\n\n[[rule]]\naction = \"allow\"\n")
+	if err == nil || !strings.Contains(err.Error(), "budget 1") {
+		t.Fatalf("err = %v, want it to name budget 1", err)
+	}
+	if cfg = config.Default(); cfg.Budgets.Len() != 0 {
+		t.Fatal("the default config has budgets")
+	}
+}
