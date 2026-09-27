@@ -23,7 +23,8 @@ import (
 const maxHookInput = 16 << 20
 
 // errBlock makes main exit with status 2, which Claude Code and Codex treat as "block this call"
-// even when nothing could be written in their answer format.
+// even when nothing could be written in their answer format: the CLI is unknown, or writing the answer
+// failed.
 type errBlock struct{ err error }
 
 func (e errBlock) Error() string { return e.err.Error() }
@@ -47,13 +48,24 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		*cli = *agent
 	}
 	p, ok := hook.Lookup(*cli)
-	if !ok || !agentName.MatchString(*agent) {
-		return errBlock{fmt.Errorf("gate: --agent must be a valid agent name and --cli one of %s (got agent %q, cli %q)",
-			strings.Join(hook.Names(), ", "), *agent, *cli)}
+	if !ok {
+		return errBlock{fmt.Errorf("gate: --cli must be one of %s (got %q; it defaults to --agent)", strings.Join(hook.Names(), ", "), *cli)}
+	}
+	answer := func(a gate.HookAnswer) error {
+		out := p.Answer(a)
+		if len(out) == 0 {
+			return nil // no decision: nothing to write
+		}
+		if _, err := stdout.Write(out); err != nil {
+			return errBlock{fmt.Errorf("write the hook answer: %w", err)}
+		}
+		return nil
 	}
 	deny := func(err error) error {
-		_, werr := stdout.Write(p.Answer(gate.HookAnswer{Verdict: gate.Denied, Reason: "derbent: " + err.Error()}))
-		return werr
+		return answer(gate.HookAnswer{Verdict: gate.Denied, Reason: "derbent: " + err.Error()})
+	}
+	if !agentName.MatchString(*agent) {
+		return deny(fmt.Errorf("--agent must be 1 to 32 lower-case letters, digits, dashes or underscores, got %q", *agent))
 	}
 	in, err := io.ReadAll(io.LimitReader(stdin, maxHookInput+1))
 	if err != nil {
@@ -68,7 +80,7 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	}
 	// The config says which tools are Derbent's, so it loads first: under a config that does not load,
 	// Derbent's own tools are denied with the rest rather than skipped.
-	cfg, err := loadConfig(*configPath)
+	cfg, err := loadConfig(*configPath, config.LoadForHook)
 	if err != nil {
 		return deny(err)
 	}
@@ -100,8 +112,8 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		Stop: ctx, // SIGINT or SIGTERM withdraws the call if it waits for the user
 	}
 	ans, err := g.Hook(ctx, "native__"+call.Tool, call.Args)
-	if _, werr := stdout.Write(p.Answer(ans)); werr != nil {
-		return errors.Join(err, werr)
+	if werr := answer(ans); werr != nil {
+		return errors.Join(werr, err)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "derbent:", err)

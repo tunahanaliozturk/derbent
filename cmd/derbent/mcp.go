@@ -46,7 +46,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if !agentName.MatchString(*agent) {
 		return fmt.Errorf("mcp: --agent must be 1 to 32 lower-case letters, digits, dashes or underscores, got %q", *agent)
 	}
-	cfg, err := loadConfig(*configPath)
+	cfg, err := loadConfig(*configPath, config.Load)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,8 @@ type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
 
-func loadConfig(path string) (config.Config, error) {
+// loadConfig loads the config at path, or the default one, with load.
+func loadConfig(path string, load func(string) (config.Config, error)) (config.Config, error) {
 	if path == "" {
 		p, err := config.DefaultConfigPath()
 		if err != nil {
@@ -109,7 +110,7 @@ func loadConfig(path string) (config.Config, error) {
 		}
 		path = p
 	}
-	return config.Load(path)
+	return load(path)
 }
 
 // databasePath is the --db a command was given, or the default database when it was given none.

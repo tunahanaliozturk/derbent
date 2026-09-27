@@ -37,8 +37,9 @@ var reservedServers = []string{"memory", "native"}
 
 // servers validates the [servers] tables and resolves their environment references. It returns the
 // servers sorted by name and every value that came from an environment variable in env or headers, so
-// those values can be masked wherever arguments are stored.
-func servers(files map[string]serverFile) ([]Server, []string, error) {
+// those values can be masked wherever arguments are stored. With skipUnset, a reference to a variable
+// that is not set stays as written.
+func servers(files map[string]serverFile, skipUnset bool) ([]Server, []string, error) {
 	var out []Server
 	var secrets []string
 	for name, f := range files {
@@ -74,10 +75,10 @@ func servers(files map[string]serverFile) ([]Server, []string, error) {
 				return nil, nil, err
 			}
 		}
-		if s.Env, err = expandMap(name, f.Env, &secrets); err != nil {
+		if s.Env, err = expandMap(name, f.Env, &secrets, skipUnset); err != nil {
 			return nil, nil, err
 		}
-		if s.Headers, err = expandMap(name, f.Headers, &secrets); err != nil {
+		if s.Headers, err = expandMap(name, f.Headers, &secrets, skipUnset); err != nil {
 			return nil, nil, err
 		}
 		out = append(out, s)
@@ -87,13 +88,16 @@ func servers(files map[string]serverFile) ([]Server, []string, error) {
 }
 
 // expand replaces every ${env:NAME} in value and adds each resolved value to secrets. A variable that
-// is not set is an error naming the variable, never showing any value.
-func expand(server, value string, secrets *[]string) (string, error) {
+// is not set is an error naming the variable, never showing any value, or with skipUnset stays as written.
+func expand(server, value string, secrets *[]string, skipUnset bool) (string, error) {
 	var missing string
 	out := envRef.ReplaceAllStringFunc(value, func(ref string) string {
 		name := envRef.FindStringSubmatch(ref)[1]
 		v, ok := os.LookupEnv(name)
 		if !ok {
+			if skipUnset {
+				return ref
+			}
 			if missing == "" {
 				missing = name
 			}
@@ -108,13 +112,13 @@ func expand(server, value string, secrets *[]string) (string, error) {
 	return out, nil
 }
 
-func expandMap(server string, values map[string]string, secrets *[]string) (map[string]string, error) {
+func expandMap(server string, values map[string]string, secrets *[]string, skipUnset bool) (map[string]string, error) {
 	if values == nil {
 		return nil, nil
 	}
 	out := make(map[string]string, len(values))
 	for k, v := range values {
-		resolved, err := expand(server, v, secrets)
+		resolved, err := expand(server, v, secrets, skipUnset)
 		if err != nil {
 			return nil, err
 		}

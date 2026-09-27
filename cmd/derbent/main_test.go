@@ -1048,9 +1048,37 @@ func TestHookFailsClosed(t *testing.T) {
 			t.Fatalf("broken config: code %d, stdout %q, stderr %q", code, out, errOut)
 		}
 	}
+	// Once the CLI is known, a bad agent name is answered in that CLI's format.
+	out, errOut, code = runHook(t, dir, claudeHookInput(dir, "ls"), "--agent", "Claude Code", "--cli", "claude")
+	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "--agent") {
+		t.Fatalf("bad agent name: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
 	_, errOut, code = runHook(t, dir, claudeHookInput(dir, "ls"), "--agent", "someone")
 	if code != 2 || !strings.Contains(errOut, "--cli") {
 		t.Fatalf("unknown cli: code %d, stderr %q", code, errOut)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("pipe closed") }
+
+// A hook whose answer cannot be written exits with status 2, which the CLIs take as "block this call".
+// A call a rule allows has no answer to write, so it cannot fail that way.
+func TestHookThatCannotWriteItsAnswerBlocks(t *testing.T) {
+	dir := t.TempDir()
+	writeHookConfig(t, dir)
+	for in, wantBlock := range map[string]bool{
+		`{"tool_name":"Bash"}`:            true, // refused before any rule is read
+		claudeHookInput(dir, "rm -rf /"):  true, // refused by a rule
+		claudeHookInput(dir, "go test ."): false,
+	} {
+		err := run(t.Context(), []string{"gate", "--agent", "claude", "--db", filepath.Join(dir, "p.db"), "--config", filepath.Join(dir, "config.toml")},
+			strings.NewReader(in), failingWriter{}, io.Discard)
+		var block errBlock
+		if errors.As(err, &block) != wantBlock || (err != nil) != wantBlock {
+			t.Errorf("input %s: err = %v, want a block: %v", in, err, wantBlock)
+		}
 	}
 }
 
@@ -1059,8 +1087,41 @@ func TestHookInputIsBounded(t *testing.T) {
 	writeHookConfig(t, dir)
 	huge := `{"session_id":"s","cwd":"x","tool_name":"Bash","tool_input":{"command":"` + strings.Repeat("a", 17<<20) + `"}}`
 	out, errOut, code := runHook(t, dir, huge, "--agent", "claude")
-	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) {
+	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "larger than") {
 		t.Fatalf("code %d, stdout %.200q, stderr %q", code, out, errOut)
+	}
+}
+
+// A CLI hands the secrets in an MCP server entry's env to the MCP server only, never to its hooks. A
+// config whose servers need them must not lock the hook out, while derbent mcp and config check,
+// which start those servers, still refuse to run without them.
+func TestHookLoadsAConfigWhoseServerSecretsItLacks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	cfg := hookConfig + "\n[servers.github]\ncommand = ['github-mcp-server']\nenv = { TOKEN = \"${env:DERBENT_TEST_UNSET}\" }\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"Bash", "mcp__derbent__github__get_me"} {
+		in := claudeHookInput(dir, "ls")
+		if tool != "Bash" {
+			in = claudeToolInput(dir, tool)
+		}
+		if out, errOut, code := runHook(t, dir, in, "--agent", "claude"); code != 0 || out != "" {
+			t.Fatalf("%s: code %d, stdout %q, stderr %q; want no decision", tool, code, out, errOut)
+		}
+	}
+	if got := hookReceiptRows(t, dir); len(got) != 1 || got[0].tool != "native__Bash" {
+		t.Fatalf("receipts = %+v; want the Bash call only, the server's tool left to the MCP gate", got)
+	}
+	for _, args := range [][]string{
+		{"mcp", "--agent", "claude", "--config", path, "--db", filepath.Join(dir, "p.db")},
+		{"config", "check", "--config", path},
+	} {
+		err := run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "DERBENT_TEST_UNSET") {
+			t.Errorf("%v: err = %v, want it to name DERBENT_TEST_UNSET", args[:2], err)
+		}
 	}
 }
 

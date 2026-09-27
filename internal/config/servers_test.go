@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -71,7 +73,53 @@ func TestParseRejectsBadServers(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.wantInError) {
 				t.Fatalf("err = %v, want it to mention %q", err, tc.wantInError)
 			}
+			if name == "missing variable" {
+				return // the one mistake the hook's loader lets pass
+			}
+			path := filepath.Join(t.TempDir(), "config.toml")
+			if err = os.WriteFile(path, []byte(tc.toml+rulesTail), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = config.LoadForHook(path); err == nil || !strings.Contains(err.Error(), tc.wantInError) {
+				t.Fatalf("LoadForHook: err = %v, want it to mention %q", err, tc.wantInError)
+			}
 		})
+	}
+}
+
+// A pre-tool hook runs without the secrets a CLI gives only to its MCP server entry. Its loader leaves
+// a reference to a variable that is not set as written, and still resolves and masks one that is set.
+func TestLoadForHookLeavesUnsetServerVariables(t *testing.T) {
+	t.Setenv("DERBENT_TEST_TOKEN", "ghp_0123456789abcdef")
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := `
+[servers.a]
+command = ["x"]
+env = { A = "${env:DERBENT_TEST_TOKEN}", B = "${env:DERBENT_TEST_UNSET}" }
+
+[servers.b]
+url     = "https://b.example/mcp"
+headers = { Authorization = "Bearer ${env:DERBENT_TEST_UNSET}" }
+` + rulesTail
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path); err == nil || !strings.Contains(err.Error(), "DERBENT_TEST_UNSET") {
+		t.Fatalf("Load: err = %v, want it to name DERBENT_TEST_UNSET", err)
+	}
+	got, err := config.LoadForHook(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Servers) != 2 || got.Servers[0].Env["A"] != "ghp_0123456789abcdef" || got.Servers[0].Env["B"] != "${env:DERBENT_TEST_UNSET}" ||
+		got.Servers[1].Headers["Authorization"] != "Bearer ${env:DERBENT_TEST_UNSET}" {
+		t.Fatalf("servers = %+v", got.Servers)
+	}
+	if masked := got.Redact.JSON(`{"note":"token ghp_0123456789abcdef"}`); strings.Contains(masked, "ghp_0123456789abcdef") {
+		t.Fatalf("a resolved secret is not masked: %s", masked)
+	}
+	if _, err = config.LoadForHook(filepath.Join(t.TempDir(), "absent.toml")); err != nil {
+		t.Fatalf("a missing file: %v, want the default config", err)
 	}
 }
 

@@ -59,6 +59,18 @@ func mustRedactor() *redact.Redactor {
 
 // Load reads the config file at path. A file that does not exist gives Default.
 func Load(path string) (Config, error) {
+	return load(path, false)
+}
+
+// LoadForHook reads the config file at path as Load does, except that a ${env:NAME} in a server's env
+// or headers whose variable is not set here stays as written, and is no secret to mask. A pre-tool hook
+// runs in the agent CLI's environment, which may lack the secrets the CLI hands only to the MCP server
+// entry, and the hook starts no servers.
+func LoadForHook(path string) (Config, error) {
+	return load(path, true)
+}
+
+func load(path string, skipUnset bool) (Config, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // the path is the user's own config file
 	if errors.Is(err, fs.ErrNotExist) {
 		return Default(), nil
@@ -66,11 +78,17 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
-	return Parse(path, string(data))
+	return parse(path, string(data), skipUnset)
 }
 
 // Parse decodes and validates config text. name only appears in error messages.
 func Parse(name, text string) (Config, error) {
+	return parse(name, text, false)
+}
+
+// parse is Parse, and with skipUnset it leaves an unset ${env:NAME} in a server's env or headers as
+// written instead of failing.
+func parse(name, text string, skipUnset bool) (Config, error) {
 	var f file
 	md, err := toml.Decode(text, &f)
 	if err != nil {
@@ -87,7 +105,7 @@ func Parse(name, text string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", name, err)
 	}
-	srvs, secrets, err := servers(f.Servers)
+	srvs, secrets, err := servers(f.Servers, skipUnset)
 	if err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", name, err)
 	}
