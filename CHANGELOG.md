@@ -89,6 +89,8 @@ The first release.
 - The MCP gate refuses a `tools/call` request it cannot read instead of passing it on unchecked.
 - A downstream tool whose definition changed after a gate first saw it is left out of the agents' tool
   lists, so they never read the changed description, and calls to it are refused.
-- A `.derbent.toml` that cannot be read or holds anything but rules denies every call in its project.
+- A `.derbent.toml` that cannot be read or holds anything but rules denies every call in its project, and
+  so does one that is a symbolic link, is not a regular file, or is larger than 64 KiB, so it can never
+  hold the hook or fill its memory.
 
 [1.0.0]: https://github.com/tunahanaliozturk/derbent/releases/tag/v1.0.0

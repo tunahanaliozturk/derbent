@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -60,6 +61,10 @@ func ProjectKey(dir string) (string, error) {
 // ProjectRulesFile is the file at a project's root whose rules can only tighten the user's (ADR 0014).
 const ProjectRulesFile = ".derbent.toml"
 
+// maxSmallFile is the most a project rules file or a .git file may hold. Either is read on every call,
+// from a directory an agent may control.
+const maxSmallFile = 64 << 10
+
 // ParseProjectRules decodes a project's rules file, which may hold [[rule]] tables and nothing else.
 // name only appears in error messages.
 func ParseProjectRules(name, text string) (rule.Set, error) {
@@ -105,22 +110,25 @@ func NewProjectRules(root string) *ProjectRules {
 }
 
 // Load returns the project's rules. A missing file gives an empty set, which adds nothing to any call.
-// A file that cannot be read or is invalid gives an error that names it: the project's rules cannot be
-// known, so the caller refuses the call.
+// A file that cannot be read, is not a regular file of at most 64 KiB, or is invalid gives an error that
+// names it: the project's rules cannot be known, so the caller refuses the call.
 func (p *ProjectRules) Load() (rule.Set, error) {
-	fi, err := os.Stat(p.path)
+	fi, err := os.Lstat(p.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return rule.Set{}, nil
 	}
 	if err != nil {
 		return rule.Set{}, fmt.Errorf("project rules %s: %w; every call in this project is refused until it can be read", p.path, err)
 	}
+	if err = checkSmallFile(fi); err != nil {
+		return rule.Set{}, fmt.Errorf("project rules %s: %w; every call in this project is refused until the file is fixed or removed", p.path, err)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.read && fi.Size() == p.size && fi.ModTime().Equal(p.mod) {
 		return p.set, p.err
 	}
-	data, err := os.ReadFile(p.path) //nolint:gosec // the rules file at the root of the project being worked on
+	data, err := readSmallFile(p.path)
 	if err != nil {
 		return rule.Set{}, fmt.Errorf("project rules %s: %w; every call in this project is refused until it can be read", p.path, err)
 	}
@@ -137,7 +145,7 @@ func (p *ProjectRules) Load() (rule.Set, error) {
 // back to <repo>/.git. A submodule's .git file points at a git directory without commondir, so the
 // submodule stays a project of its own, as does anything whose .git file cannot be read.
 func mainCheckout(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, ".git")) //nolint:gosec // reading the .git file of the user's own checkout
+	data, err := lstatAndReadSmallFile(filepath.Join(dir, ".git"))
 	if err != nil {
 		return dir
 	}
@@ -149,7 +157,7 @@ func mainCheckout(dir string) string {
 	if !filepath.IsAbs(gitDir) {
 		gitDir = filepath.Join(dir, gitDir)
 	}
-	common, err := os.ReadFile(filepath.Join(gitDir, "commondir")) //nolint:gosec // a file inside the same checkout's git directory
+	common, err := lstatAndReadSmallFile(filepath.Join(gitDir, "commondir"))
 	if err != nil {
 		return dir
 	}
@@ -162,6 +170,58 @@ func mainCheckout(dir string) string {
 		return filepath.Dir(commonDir)
 	}
 	return commonDir // a worktree of a bare repository
+}
+
+// checkSmallFile refuses what os.Lstat reported unless it is a regular file of at most maxSmallFile
+// bytes. A FIFO or a device could block the read or never end it, and a symbolic link could lead to
+// either, or to a file whose start a parse error would echo.
+func checkSmallFile(fi fs.FileInfo) error {
+	switch {
+	case fi.Mode()&fs.ModeSymlink != 0:
+		return errors.New("it is a symbolic link, and only a regular file is read")
+	case !fi.Mode().IsRegular():
+		return errors.New("it is not a regular file")
+	case fi.Size() > maxSmallFile:
+		return fmt.Errorf("it is larger than %d KiB", maxSmallFile>>10)
+	}
+	return nil
+}
+
+// readSmallFile reads a file that checkSmallFile accepted. It reads at most one byte past the limit, so
+// a file that grew or was replaced since the check is still refused rather than read whole.
+func readSmallFile(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // a rules or .git file in the project being worked on, checked by checkSmallFile
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, errors.New("it is not a regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxSmallFile+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxSmallFile {
+		return nil, fmt.Errorf("it is larger than %d KiB", maxSmallFile>>10)
+	}
+	return data, nil
+}
+
+// lstatAndReadSmallFile reads path if it is a regular file of at most maxSmallFile bytes.
+func lstatAndReadSmallFile(path string) ([]byte, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if err = checkSmallFile(fi); err != nil {
+		return nil, err
+	}
+	return readSmallFile(path)
 }
 
 // resolve expands symbolic links and Windows short names, and keeps the path as it is when that fails.

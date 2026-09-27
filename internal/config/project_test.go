@@ -229,3 +229,90 @@ func TestProjectRootKeepsTheCaseOfThePath(t *testing.T) {
 		t.Fatalf("ProjectKey = %q, want %q", key, want)
 	}
 }
+
+// loadRefusal loads the rules file in dir and returns the error, failing the test unless it names the
+// file, says why with want, and says every call is refused.
+func loadRefusal(t *testing.T, dir, want string) {
+	t.Helper()
+	_, err := config.NewProjectRules(dir).Load()
+	path := filepath.Join(dir, config.ProjectRulesFile)
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), want) ||
+		!strings.Contains(err.Error(), "every call in this project is refused") {
+		t.Fatalf("err = %v, want it to name %s, say %q and refuse every call", err, path, want)
+	}
+}
+
+// Only a regular file of at most 64 KiB is read as a project's rules. Anything else could block the hook
+// or fill its memory, and a symbolic link could echo the start of the file it points at in a parse error,
+// so it is refused, which denies every call in the project.
+func TestProjectRulesReadOnlyASmallRegularFile(t *testing.T) {
+	rules := "[[rule]]\ntool = \"native__Bash\"\naction = \"deny\"\n"
+	t.Run("a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, config.ProjectRulesFile), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		loadRefusal(t, dir, "not a regular file")
+	})
+	t.Run("64 KiB", func(t *testing.T) {
+		dir := t.TempDir()
+		text := rules + "#" + strings.Repeat("x", 64<<10-len(rules)-2) + "\n"
+		if err := os.WriteFile(filepath.Join(dir, config.ProjectRulesFile), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		set, err := config.NewProjectRules(dir).Load()
+		if err != nil || set.Decide("claude", "native__Bash", nil).Rule != 1 {
+			t.Fatalf("a file of exactly 64 KiB: %v", err)
+		}
+	})
+	t.Run("larger than 64 KiB", func(t *testing.T) {
+		dir := t.TempDir()
+		text := rules + "#" + strings.Repeat("x", 64<<10) + "\n"
+		if err := os.WriteFile(filepath.Join(dir, config.ProjectRulesFile), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loadRefusal(t, dir, "larger than 64 KiB")
+	})
+	t.Run("a symbolic link", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "rules.toml")
+		if err := os.WriteFile(target, []byte(rules), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, config.ProjectRulesFile)); err != nil {
+			t.Skipf("cannot create a symbolic link here: %v", err)
+		}
+		loadRefusal(t, dir, "symbolic link")
+	})
+}
+
+// A .git file is read only when it is a small regular file. A larger one is taken as not a linked
+// worktree, so the directory is its own project, even when its first line points at a real worktree.
+func TestProjectRootReadsOnlyASmallGitFile(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "shop")
+	gitDir := filepath.Join(repo, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(gitDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "commondir"), []byte("../..\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(base, "wt")
+	if err := os.Mkdir(wt, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := "gitdir: " + gitDir + "\n"
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte(link), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := mustKey(t, wt), mustKey(t, repo); got != want {
+		t.Fatalf("a small .git file: key %q, want the main checkout's %q", got, want)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte(link+strings.Repeat("\n", 64<<10)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustKey(t, wt); !strings.HasSuffix(got, "/wt") {
+		t.Fatalf("a .git file over 64 KiB: key %q, want the directory itself", got)
+	}
+}
