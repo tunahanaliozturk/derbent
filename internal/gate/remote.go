@@ -25,8 +25,27 @@ func LeftOut(name string, t *mcp.Tool) string {
 		return "not a tool name of at most 64 letters, digits, underscores or dashes"
 	case !objectSchema(t.InputSchema):
 		return "its input schema is not an object" // the SDK serves only tools with object schemas
+	case !sdkTakes(name, t):
+		return "the MCP SDK refuses its definition, such as an x-mcp-header on a property that is not a string, integer or boolean"
 	}
 	return ""
+}
+
+// sdkTakes reports whether the SDK's Server.AddTool accepts t under name. AddTool panics on a definition
+// it cannot serve, and a panic while serving would take the whole gate down with every other server's
+// tools, so a throwaway server tries the definition first.
+func sdkTakes(name string, t *mcp.Tool) (ok bool) {
+	defer func() { _ = recover() }() // ok stays false
+	mcp.NewServer(&mcp.Implementation{Name: "derbent-check"}, nil).AddTool(servedTool(name, t), nil)
+	return true
+}
+
+// servedTool is t as the gate lists it to agents, under the gate name name.
+func servedTool(name string, t *mcp.Tool) *mcp.Tool {
+	return &mcp.Tool{
+		Name: name, Title: t.Title, Description: t.Description,
+		InputSchema: t.InputSchema, OutputSchema: t.OutputSchema, Annotations: t.Annotations,
+	}
 }
 
 // withheldTool is a downstream tool kept from the agent because its definition changed since it was
@@ -113,10 +132,7 @@ func (g *Gate) checkPins(ctx context.Context, server string, tools []*mcp.Tool) 
 // those out, and withholds none of them. g.mu must be held.
 func (g *Gate) serve(server, name string, t *mcp.Tool) {
 	g.owners[name] = server
-	g.server.AddTool(&mcp.Tool{
-		Name: name, Title: t.Title, Description: t.Description,
-		InputSchema: t.InputSchema, OutputSchema: t.OutputSchema, Annotations: t.Annotations,
-	}, g.forward(server, t.Name))
+	g.server.AddTool(servedTool(name, t), g.forward(server, t.Name))
 }
 
 // held returns the withheld tool of that gate name, if there is one.
