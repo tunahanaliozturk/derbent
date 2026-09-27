@@ -191,12 +191,14 @@ When a rule says `ask`, the gate writes a pending approval and polls for a decis
 the UI the pending call shows at the top with the agent, the tool, the time left and the redacted
 arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's tool list.
 
-- `a` approves once, `d` denies, and `A` approves this tool for the rest of that agent's gate session:
-  one `derbent mcp` process for an MCP call, the CLI's own session for a hook call (see Built-in tools).
-  `A` takes a second press within five seconds, so one press can never grant the session. An `a` typed
-  with Caps Lock on arrives as `a` with Caps Lock from a terminal that reports modifiers, and the UI
-  takes it as `a`; a terminal that reports none sends `A`, which still needs the second press.
-  Nothing the UI does changes the config file.
+- `a` approves once, `d` denies, and `A` approves the tool's calls that the same rule asks about, for
+  the rest of that agent's gate session: one `derbent mcp` process for an MCP call, the CLI's own
+  session for a hook call (see Built-in tools). The grant is keyed on a fingerprint of the rule's
+  content, not its position, so editing or reordering the config never widens it, and a rule edited
+  since asks again (ADR 0011). `A` takes a second press within five seconds, so one press can never
+  grant the session. An `a` typed with Caps Lock on arrives as `a` with Caps Lock from a terminal that
+  reports modifiers, and the UI takes it as `a`; a terminal that reports none sends `A`, which still
+  needs the second press. Nothing the UI does changes the config file.
 - `derbent approve [--session] <id>` and `derbent deny <id>` do the same from any shell, by the id the
   UI shows, written `12` or `#12`. `derbent pending` lists the waiting calls with their whole arguments,
   read-only, as rows or JSON lines, so they can be read before deciding. The deciding commands, and the
@@ -222,10 +224,10 @@ arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's
 `derbent gate --agent claude` is installed as a Claude Code `PreToolUse` hook matching every tool. It
 reads the hook's JSON from standard input, treats the call as tool `native__<tool_name>` with the tool's
 input as arguments, applies the same rules, waits for an approval when a rule says `ask`, and appends a
-receipt. Its gate session is the hook input's `session_id`, so `A` covers the rest of that Claude Code
-session.
+receipt. Its gate session is the hook input's `session_id`, so `A` covers the tool's calls that the same
+rule asks about for the rest of that Claude Code session.
 
-- Calls to the gate's own tools (`mcp__derbent__*`) get no decision and no receipt from the hook.
+- Calls to Derbent's own tools (see below) get no decision and no receipt from the hook.
   The gate already decides and records them, and would otherwise ask for and record each one twice.
 - A call allowed by a rule gets no decision from the hook, so Claude Code's own permission settings
   still apply on top.
@@ -250,9 +252,11 @@ process runs per tool call, and for every CLI:
   CLI directly, is decided as `native__` plus the CLI's name for it, such as
   `native__mcp__github__get_me`.
 - The gate session is the CLI's session id (Claude Code, Codex, Copilot CLI) or conversation id
-  (Antigravity CLI). `A` on a hook tool covers later calls of that `native__` tool in the same CLI
-  session. It cannot cover an MCP tool: the MCP gate's session is one `derbent mcp` process with a random
-  id, and its tools have other names.
+  (Antigravity CLI). `A` on a hook tool covers later calls of that `native__` tool that the same rule
+  asks about, in the same CLI session. Every shell command is one tool, such as `native__Bash`, so an
+  `A` on a `git push` does not let through a `terraform apply` that another rule asks about (ADR 0011).
+  It cannot cover an MCP tool: the MCP gate's session is one `derbent mcp` process with a random id, and
+  its tools have other names.
 - The project is `--project`, else the git root of the directory the CLI reports, else that of the
   hook's working directory (Antigravity CLI can report no workspace).
 - The hook loads the config with every check `derbent mcp` makes, except that a `${env:NAME}` in a
@@ -299,7 +303,8 @@ Text from agents, tools and the database is drawn with control characters, bidir
 invisible characters (zero-width characters, tag characters, line separators, variation selectors)
 escaped, along with the runes that draw as nothing or as a blank without being any of those (the four
 Hangul fillers, the combining grapheme joiner and the braille blank), and newlines and tabs written as
-`\n` and `\t`, so a value cannot add lines of its own or hide text. Every screen line, the help screen's included, is clipped to the window.
+`\n` and `\t`, so a value cannot add lines of its own or hide text. Every screen line, the help
+screen's included, is clipped to the window.
 
 ## State
 
@@ -342,6 +347,10 @@ database migrates it inside `BEGIN IMMEDIATE`.
   through. The timeout path denies.
 - **Approval races.** Tests in one process race a decision against the deadline, and two decisions
   against each other, and find one winner in every round.
+- **Grants follow the rule.** On the MCP path and the hook path, `A` on a call one ask rule holds lets
+  the next such call through while a call another ask rule holds on the same tool still asks; under a
+  reordered config the grant holds, and under an edited rule the call asks again. A store test migrates
+  a database from before grants were keyed on the rule and finds its grants dropped.
 - **Escaping.** A test feeds the UI escape sequences, a clipboard write, a bell, a bidirectional
   override and invisible characters in the agent, tool and argument fields, and asserts that none reaches
   the main screen, the detail view or the memory browser raw and no line is wider than the window. Tests
@@ -349,17 +358,18 @@ database migrates it inside `BEGIN IMMEDIATE`.
   the table and in JSON lines, and that a JSON line still decodes to the stored text.
 - **MCP behaviour.** The SDK's client drives the gate end to end: initialize, tool listing, calls,
   forwarded `list_changed`, and a downstream server killed in the middle of a session.
-- **Hook.** Golden standard input from each of the four CLIs and golden answers in each answer format
-  (Codex shares Claude Code's), and tests of which names count as the gate's own for each CLI, including
-  a foreign entry whose name starts with `derbent` and a Claude Code call whose `mcp_server` is another
-  entry. Tests run `derbent gate` as its own process: a call a rule allows gets no output, a denied call
-  gets `deny`, the gate's own tools pass with no decision and no receipt, an `ask` is approved from
-  another process, unusable input, a bad agent name, a broken config and input over 16 MiB are denied,
-  an unknown `--cli` exits with status 2, and a config whose server secrets are unset still loads. Tests
-  that run it inside the test process show that a hook whose context ends while it waits, as on a
-  signal, withdraws its approval, and that a hook whose answer cannot be written returns the error that
-  exits with status 2. A store test holds the write lock and opens a current database without waiting
-  for it. The README's coverage table records what a real session showed.
+- **Hook.** Golden standard input for each of the four CLIs, written from each CLI's documented format
+  rather than captured from a session, golden answers in each answer format (Codex shares Claude
+  Code's), and tests of which names count as the gate's own for each CLI, including a foreign entry
+  whose name starts with `derbent` and a Claude Code call whose `mcp_server` is another entry. Tests run
+  `derbent gate` as its own process: a call a rule allows gets no output, a denied call gets `deny`, the
+  gate's own tools pass with no decision and no receipt, an `ask` is approved from another process,
+  unusable input, a bad agent name, a broken config and input over 16 MiB are denied, an unknown `--cli`
+  exits with status 2, and a config whose server secrets are unset still loads. Tests that run it inside
+  the test process show that a hook whose context ends while it waits, as on a signal on Unix, withdraws
+  its approval, and that a hook whose answer cannot be written returns the error that exits
+  with status 2. A store test holds the write lock and opens a current database without waiting for
+  it. The README's coverage table records what a real session showed.
 - **Overhead.** A benchmark calls an echo MCP server directly and through the gate with an allow rule,
   and reports p50, p99 and calls per second, compared with `benchstat` over ten runs, on Windows and
   Linux. Results live under `docs/benchmark-results/`, and the README states only numbers in those files.
@@ -417,6 +427,7 @@ derbent/
 | 0008 | SQLite through `modernc.org/sqlite`, with no cgo. |
 | 0009 | Downstream servers are supervised from the moment the gate starts. |
 | 0010 | Derbent is written in Go. |
+| 0011 | A session grant covers only the calls that the same rule asks about, keyed on the rule's fingerprint. |
 
 ## Milestones
 
@@ -469,6 +480,12 @@ Not in v1, in rough order of value:
   so they get no decision and no receipt. The name can collide with a configured server, such as an
   entry called `derbent__github` in Codex, or with a memory tool, such as an entry called
   `derbent_memory` with a tool called `write` under Antigravity CLI's assumed naming.
+- What exit status 2 does in Copilot CLI and Antigravity CLI is not documented. A hook that exits with
+  status 2 there might not block the call: `--agent copilot-work` without `--cli`, for example, is an
+  unknown protocol and exits 2. Pass `--cli` whenever the agent label is not the CLI's name.
+- On Windows a CLI stops a hook with `TerminateProcess`, not a signal, so a hook stopped while it waits
+  cannot withdraw its approval. The approval stays pending until its deadline and can still be approved,
+  though no hook is left to act on it; an `A` there still grants the later calls.
 - Only Claude Code's hook has been checked in a real session. The Codex, Copilot CLI and Antigravity CLI
   adapters follow each CLI's documentation, and Antigravity CLI's name for Derbent's tools is assumed.
 - Every agent session starts its own downstream servers. A server that keeps state in memory does not

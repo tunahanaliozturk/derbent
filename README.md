@@ -119,16 +119,17 @@ Run `derbent` in a terminal of its own. Calls waiting for you sit at the top, ea
 agent, the tool, the time left and the start of its arguments, masked as they are in receipts, and the
 terminal bell rings when a new one arrives. `enter` shows the highlighted call's whole arguments, and
 up, down, page up, page down, home and end scroll them. The keys act on the highlighted call: `a`
-approves it once, `A` pressed twice within five seconds approves the tool for the rest of that agent's
-session, `d` denies it, and up and down pick another call. A call that has just been highlighted takes
-none of these keys for its first 750 ms on the main screen, so a key meant for the call before it cannot
-land on it. A call nobody answers is denied after the timeout, and the agent is told why. Below the
-waiting calls are the agents seen in the last hour and a live feed of receipts; `/` filters the feed, `m`
-searches memory across projects, `v` verifies the receipt chain, `?` lists the keys and `q` quits. Text
-from agents and tools is escaped before it is drawn: control characters, bidirectional overrides,
-zero-width and other format characters, line and paragraph separators, variation selectors, tag
-characters, the Hangul fillers, the combining grapheme joiner and the braille blank are written as
-`\uXXXX`, and in arguments a run of more than eight spaces of any kind is shown as `␠×N`.
+approves it once, `A` pressed twice within five seconds approves the tool's calls that the same rule
+asks about, for the rest of that agent's session, `d` denies it, and up and down pick another call. A
+call that has just been highlighted takes none of these keys for its first 750 ms on the main screen, so
+a key meant for the call before it cannot land on it. A call nobody answers is denied after the timeout,
+and the agent is told why. Below the waiting calls are the agents seen in the last hour and a live feed
+of receipts; `/` filters the feed, `m` searches memory across projects, `v` verifies the receipt chain,
+`?` lists the keys and `q` quits. Text from agents and tools is escaped before it is drawn: control
+characters, bidirectional overrides, zero-width and other format characters, line and paragraph
+separators, variation selectors, tag characters, the Hangul fillers, the combining grapheme joiner and
+the braille blank are written as `\u` or `\U` codes, and in arguments a run of more than eight spaces of
+any kind is shown as `␠×N`.
 
 The same decisions work from any shell, by the id the UI shows, written `12` or `#12`, and the waiting
 calls and the receipts can be listed without the UI:
@@ -212,13 +213,17 @@ default; Copilot CLI and Antigravity CLI give it 30, which is why their examples
 `--agent` is the name your rules match, so give it the same value as the CLI's `derbent mcp` entry. The
 hook protocol follows the agent name; for any other name add `--cli claude`, `codex`, `copilot` or
 `antigravity`. If Derbent's MCP entry in the CLI has another name than `derbent`, pass it with
-`--server`, or each call to Derbent's own tools is decided and recorded twice. Where the CLI does not
-name the MCP server in the hook's input, the reverse can happen: another MCP entry whose tool names
-come out as Derbent's prefix followed by a name Derbent serves, such as an entry called
-`derbent__github` in Codex, is taken for Derbent's own, and its calls get no decision and no receipt
-from the hook (see [Known limits](docs/design.md#known-limits-and-risks)). The hook fails closed:
-when it cannot read the call, load the config, open the database or write the receipt, it denies the
-call and says why, so a mistake in the config stops every built-in tool until it is fixed.
+`--server`, or each call to Derbent's own tools is decided and recorded twice. Two kinds of entry cannot
+be matched with `--server`, so their calls to Derbent's own tools are decided and recorded twice: a
+Derbent bundled in a Claude Code plugin, whose tools Claude Code names
+`mcp__plugin_<plugin>_<server>__`, and an entry whose name Claude Code rewrites because it holds
+characters other than letters, digits, `_` and `-`. Where the CLI does not name the MCP server in the
+hook's input, the reverse can happen: another MCP entry whose tool names come out as Derbent's prefix
+followed by a name Derbent serves, such as an entry called `derbent__github` in Codex, is taken for
+Derbent's own, and its calls get no decision and no receipt from the hook (see
+[Known limits](docs/design.md#known-limits-and-risks)). The hook fails closed: when it cannot read the
+call, load the config, open the database or write the receipt, it denies the call and says why, so a
+mistake in the config stops every built-in tool until it is fixed.
 
 Rules name a built-in tool by the CLI's own name for it, so they differ per CLI: `native__Bash` (Claude
 Code, Codex), `native__apply_patch` (Codex's file edits), `native__bash` and `native__powershell`
@@ -243,8 +248,11 @@ Derbent cannot hide a CLI's built-in tools from the model, so a `deny` on one re
 In Claude Code and Codex, which send MCP calls to the hook too, a tool of an MCP server configured in the
 CLI directly is decided the same way, as `native__mcp__<server>__<tool>`.
 
-`A` on a built-in tool approves it for the rest of the CLI's session: its session id in Claude Code,
-Codex and Copilot CLI, its conversation id in Antigravity CLI. For MCP tools the session is one
+`A` on a built-in tool approves the tool's calls that the same rule asks about, for the rest of the CLI's
+session: its session id in Claude Code, Codex and Copilot CLI, its conversation id in Antigravity CLI.
+Every shell command is one tool, such as `native__Bash`, so an `A` on a `git push` does not let through
+a `terraform apply` that another rule asks about, and editing or reordering the rules never widens a
+grant ([ADR 0011](docs/adr/0011-grants-follow-the-rule.md)). For MCP tools the session is one
 `derbent mcp` process. A grant on one path never covers the other, since the tools have different names.
 
 The hook reads the same config file but starts no servers, so a `${env:NAME}` that is not set where the
