@@ -25,6 +25,11 @@ const (
 	pollEvery = 200 * time.Millisecond // as often as a waiting call polls (ADR 0001)
 	feedSize  = 500                    // receipts the feed keeps
 	bell      = "\a"
+	// armAfter is how long a call must have been highlighted before a, A or d decides it, so a key
+	// meant for the call before it cannot land on it.
+	armAfter = 750 * time.Millisecond
+	// confirmFor is how long a first A waits for the second that grants the session approval.
+	confirmFor = 5 * time.Second
 )
 
 var (
@@ -48,18 +53,27 @@ type Model struct {
 	width, height int
 	pending       []approval.Pending
 	// selected is the ID of the highlighted call, 0 for none. It is an ID, not a position, so that a
-	// key never lands on a call the user did not highlight when the list changes under it.
+	// key never lands on a call the user did not highlight when the list changes under it. since is
+	// when it became highlighted, which a, A and d wait armAfter from.
 	selected int64
-	feed     []receipt.Receipt
-	lastSeq  int64
-	agents   []receipt.AgentSeen
-	status   string // the outcome of the last action
-	pollErr  string // why the last poll failed, until one succeeds
-	filter   string
-	editing  bool // typing a filter
-	help     bool
-	notes    *browser // the memory browser while it is open
-	lookups  int      // memory searches and reads sent; each result carries its number
+	since    time.Time
+	// confirm is the call a first A asked about, 0 for none, and confirmAt when; a second A on it
+	// within confirmFor approves it for the session.
+	confirm   int64
+	confirmAt time.Time
+	// detail is the call whose whole arguments are open, 0 for none, and scroll the first line shown.
+	detail  int64
+	scroll  int
+	feed    []receipt.Receipt
+	lastSeq int64
+	agents  []receipt.AgentSeen
+	status  string // the outcome of the last action
+	pollErr string // why the last poll failed, until one succeeds
+	filter  string
+	editing bool // typing a filter
+	help    bool
+	notes   *browser // the memory browser while it is open
+	lookups int      // memory searches and reads sent; each result carries its number
 }
 
 // New returns the UI over the shared database's approvals, receipts and memory.
@@ -146,9 +160,9 @@ func (m Model) apply(s snapshotMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.selected != 0 && m.index() < 0:
 		m.status = fmt.Sprintf("#%d is no longer waiting", m.selected)
-		m.selected = 0
+		m = m.highlight(0)
 	case m.selected == 0 && wasEmpty && len(m.pending) > 0:
-		m.selected = m.pending[0].ID
+		m = m.highlight(m.pending[0].ID)
 	}
 	m.feed = append(m.feed, s.feed...)
 	if over := len(m.feed) - feedSize; over > 0 {
@@ -169,8 +183,22 @@ func (m Model) index() int {
 	return slices.IndexFunc(m.pending, func(p approval.Pending) bool { return p.ID == m.selected })
 }
 
-// key handles a key on the main screen.
+// highlight makes id the highlighted call, 0 for none. A call newly highlighted starts its arming
+// time, and a first A asked about another call is forgotten.
+func (m Model) highlight(id int64) Model {
+	if id != m.selected {
+		m.selected, m.since, m.confirm = id, m.now(), 0
+	}
+	return m
+}
+
+// verdicts are the keys that decide the highlighted call.
+var verdicts = map[string]approval.Verdict{"a": approval.ApproveOnce, "A": approval.ApproveSession, "d": approval.Deny}
+
+// key handles a key. Any key but a second A forgets a first A.
 func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	asked := m.confirm
+	m.confirm = 0
 	switch {
 	case k.String() == "ctrl+c":
 		return m, tea.Quit
@@ -181,6 +209,11 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case m.help:
 		m.help = false
 		return m, nil
+	case m.detail != 0:
+		return m.detailKey(k, asked)
+	}
+	if v, ok := verdicts[k.String()]; ok {
+		return m.decide(v, asked)
 	}
 	switch k.String() {
 	case "q":
@@ -193,20 +226,18 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.notes = &browser{typing: true}
 	case "esc":
 		m.filter = ""
+	case "enter":
+		if m.index() >= 0 {
+			m.detail, m.scroll = m.selected, 0
+		}
 	case "up":
 		if len(m.pending) > 0 {
-			m.selected = m.pending[max(m.index()-1, 0)].ID
+			m = m.highlight(m.pending[max(m.index()-1, 0)].ID)
 		}
 	case "down":
 		if len(m.pending) > 0 {
-			m.selected = m.pending[min(m.index()+1, len(m.pending)-1)].ID
+			m = m.highlight(m.pending[min(m.index()+1, len(m.pending)-1)].ID)
 		}
-	case "a":
-		return m.decide(approval.ApproveOnce)
-	case "A":
-		return m.decide(approval.ApproveSession)
-	case "d":
-		return m.decide(approval.Deny)
 	case "v":
 		m.status = "verifying the receipt chain..."
 		return m, m.verify
@@ -231,8 +262,10 @@ func (m Model) editFilter(k tea.KeyPressMsg) Model {
 	return m
 }
 
-// decide sends the user's verdict on the highlighted call, and on no other.
-func (m Model) decide(v approval.Verdict) (tea.Model, tea.Cmd) {
+// decide sends the user's verdict on the highlighted call, and on no other. A call highlighted less
+// than armAfter ago takes no verdict yet, and a session approval needs a second A within confirmFor of
+// the first; asked is the call the first A asked about.
+func (m Model) decide(v approval.Verdict, asked int64) (tea.Model, tea.Cmd) {
 	i := m.index()
 	switch {
 	case len(m.pending) == 0:
@@ -241,9 +274,19 @@ func (m Model) decide(v approval.Verdict) (tea.Model, tea.Cmd) {
 	case i < 0:
 		m.status = "pick a waiting call with up or down first"
 		return m, nil
+	case m.now().Sub(m.since) < armAfter:
+		m.status = fmt.Sprintf("#%d just appeared; press again to decide", m.selected)
+		return m, nil
 	}
 	p := m.pending[i]
-	m.selected = 0 // the call is about to leave the list; that is no news to report
+	if v == approval.ApproveSession && (asked != p.ID || m.now().Sub(m.confirmAt) > confirmFor) {
+		m.confirm, m.confirmAt = p.ID, m.now()
+		m.status = fmt.Sprintf("press A again to approve %s for the rest of %s's session", p.Tool, p.Agent)
+		return m, nil
+	}
+	// The call is about to leave the list; that is no news to report.
+	m = m.highlight(0)
+	m.detail = 0
 	return m, func() tea.Msg {
 		if err := m.approvals.Decide(m.ctx, p.ID, v); err != nil {
 			return statusMsg(fmt.Sprintf("#%d: %v", p.ID, err))
@@ -279,12 +322,20 @@ func (m Model) verify() tea.Msg {
 
 // View draws the screen.
 func (m Model) View() tea.View {
-	content := m.main()
+	var content string
 	switch {
 	case m.help:
-		content = helpText
+		l := &lines{width: m.width}
+		for _, s := range strings.Split(helpText, "\n") {
+			l.add(plainStyle, s)
+		}
+		content = l.String()
 	case m.notes != nil:
 		content = m.notesView()
+	case m.detail != 0:
+		content = m.detailView()
+	default:
+		content = m.main()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
@@ -295,8 +346,9 @@ func (m Model) View() tea.View {
 const helpText = `derbent keys
 
   a          approve the selected call once
-  A          approve this tool for the rest of that agent's session
+  A, A       approve this tool for the rest of that agent's session
   d          deny the selected call
+  enter      read the selected call's whole arguments; esc goes back
   up, down   select a waiting call
   m          search and read memory
   v          verify the receipt chain
@@ -304,6 +356,8 @@ const helpText = `derbent keys
   ?          this help; any key closes it
   q          quit; calls still waiting are denied at their timeout
 
+A newly selected call takes a, A or d after it has been on screen for
+a moment, and A needs a second press within five seconds.
 Nothing here changes the config file.`
 
 // lines collects screen lines, each clipped to the window before it is styled. Every piece of text
@@ -364,7 +418,8 @@ func (m Model) main() string {
 			style = denyStyle
 		}
 		l.add(style, fmt.Sprintf("%s  %-10s %-34s %-5s %-14s %-8s %6dms", r.At.Local().Format("15:04:05"),
-			visible.Escape(r.Agent), visible.Escape(r.Tool), visible.Escape(r.Decision), visible.Escape(r.DecidedBy), visible.Escape(r.Outcome), r.Duration.Milliseconds()))
+			visible.Escape(r.Agent), visible.Escape(r.Tool), visible.Escape(r.Decision), visible.Escape(r.DecidedBy),
+			visible.Escape(r.Outcome), r.Duration.Milliseconds()))
 	}
 	l.blank()
 	for _, s := range status {
@@ -390,7 +445,7 @@ func (m Model) drawWaiting(l *lines) {
 	var args []string
 	i := m.index()
 	if i >= 0 {
-		l.add(pendingStyle, "WAITING FOR YOU   a approve   A approve for this session   d deny")
+		l.add(pendingStyle, "WAITING FOR YOU   a approve   A twice for this session   d deny   enter read all")
 		args = m.argLines(m.pending[i].Args)
 	} else {
 		l.add(pendingStyle, "WAITING FOR YOU   nothing highlighted   up, down pick a call")
@@ -406,7 +461,8 @@ func (m Model) drawWaiting(l *lines) {
 	for _, p := range rows {
 		left := max(p.Deadline.Sub(m.now()), 0).Round(time.Second)
 		if p.ID != m.selected {
-			l.add(plainStyle, fmt.Sprintf("#%d  %s  %s  %s left  %s", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left, visible.Escape(p.Args)))
+			text, _ := argText(p.Args, 4*m.width)
+			l.add(plainStyle, fmt.Sprintf("#%d  %s  %s  %s left  %s", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left, text))
 			continue
 		}
 		l.add(selectedStyle, fmt.Sprintf("#%d  %s  %s  %s left", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left))
@@ -419,14 +475,24 @@ func (m Model) drawWaiting(l *lines) {
 	}
 }
 
-// argLines wraps the highlighted call's arguments, which the agent controls, over up to a third of
-// the window and at least three lines, so the user sees what they approve rather than a prefix of it.
-// The text is escaped before it is wrapped; lines.add clips each line again.
+// argLines wraps the highlighted call's arguments, which the agent controls, over about a third of the
+// window and at least three lines, and says how to read the rest in the detail view. Escaping and
+// wrapping megabytes on every frame would stall the UI, so it wraps only what it can show and a line
+// more, allowing up to four bytes a cell. When that leaves some of the arguments unread, the count of
+// lines left is an estimate at one byte a cell. lines.add clips each line again.
 func (m Model) argLines(args string) []string {
 	const indent = "    "
-	out := strings.Split(ansi.Hardwrap(visible.Escape(args), max(m.width-len(indent), 1), true), "\n")
-	if most := max(m.height/3, 3); len(out) > most {
-		out = append(out[:most], fmt.Sprintf("+%d more lines", len(out)-most))
+	width, most := max(m.width-len(indent), 1), max(m.height/3, 3)
+	text, used := argText(args, (most+1)*width*4)
+	out := strings.Split(ansi.Hardwrap(text, width, true), "\n")
+	hidden := max(len(out)-most, 0)
+	out = out[:len(out)-hidden]
+	switch {
+	case used < len(args):
+		hidden += (len(args) - used + width - 1) / width
+		out = append(out, fmt.Sprintf("+about %d more lines, enter to read all", hidden))
+	case hidden > 0:
+		out = append(out, fmt.Sprintf("+%d more lines, enter to read all", hidden))
 	}
 	for i := range out {
 		out[i] = indent + out[i]

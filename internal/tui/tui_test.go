@@ -40,8 +40,16 @@ func newModel(t *testing.T) (Model, deps) {
 	d := deps{q: approval.NewQueue(db), log: receipt.NewLog(db), mem: memory.NewStore(db)}
 	m := New(t.Context(), d.q, d.log, d.mem)
 	m.poll = time.Millisecond // the next-poll command runs inside messages; keep it short
+	m = later(m, 0)           // the model's clock stands still until a test moves it
 	m, _ = update(m, tea.WindowSizeMsg{Width: 140, Height: 40})
 	return m, d
+}
+
+// later stops the model's clock at d after its current time.
+func later(m Model, d time.Duration) Model {
+	at := m.now().Add(d)
+	m.now = func() time.Time { return at }
+	return m
 }
 
 func update(m Model, msg tea.Msg) (Model, tea.Cmd) {
@@ -91,6 +99,14 @@ func keyMsg(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
 		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "pgup":
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
+	case "home":
+		return tea.KeyPressMsg{Code: tea.KeyHome}
+	case "end":
+		return tea.KeyPressMsg{Code: tea.KeyEnd}
 	case "ctrl+c":
 		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	}
@@ -211,15 +227,15 @@ func TestWaitingCallIsShownAndRingsTheBellOnce(t *testing.T) {
 
 func TestKeysDecideTheSelectedCall(t *testing.T) {
 	for _, tc := range []struct {
-		key               string
+		keys              []string
 		approved, granted bool
 		status            string
 	}{
-		{"a", true, false, "approved once"},
-		{"A", true, true, "approved for the rest of the session"},
-		{"d", false, false, "denied"},
+		{[]string{"a"}, true, false, "approved once"},
+		{[]string{"A", "A"}, true, true, "approved for the rest of the session"},
+		{[]string{"d"}, false, false, "denied"},
 	} {
-		t.Run(tc.key, func(t *testing.T) {
+		t.Run(tc.keys[0], func(t *testing.T) {
 			m, d := newModel(t)
 			first, second := askReq, askReq
 			second.Tool = "github__create_pull_request"
@@ -228,7 +244,8 @@ func TestKeysDecideTheSelectedCall(t *testing.T) {
 			done := waiting(t, d.q, second)
 			waitPending(t, d.q, 2)
 			m, _ = refresh(m)
-			m, cmd := press(m, "down", tc.key)
+			m, _ = press(m, "down")
+			m, cmd := press(later(m, armAfter), tc.keys...)
 			m = settle(m, cmd)
 			select {
 			case out := <-done:
@@ -332,7 +349,7 @@ func TestAKeyAfterTheSelectedCallLeftDecidesNothing(t *testing.T) {
 	if want := fmt.Sprintf("#%d is no longer waiting", p[1].ID); !strings.Contains(screen(m), want) {
 		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
 	}
-	m, cmd := press(m, "a")
+	m, cmd := press(later(m, armAfter), "a")
 	m = settle(m, cmd)
 	if left, err := d.q.Pending(t.Context()); err != nil || len(left) != 1 || left[0].ID != p[0].ID {
 		t.Fatalf("pending = %+v, %v; the first call must still wait", left, err)
@@ -360,7 +377,7 @@ func TestSelectionFollowsTheCallWhenAnOlderOneLeaves(t *testing.T) {
 		t.Fatal(err)
 	}
 	m, _ = refresh(m)
-	m, cmd := press(m, "a")
+	m, cmd := press(later(m, armAfter), "a")
 	m = settle(m, cmd)
 	select {
 	case out := <-done:
@@ -375,28 +392,299 @@ func TestSelectionFollowsTheCallWhenAnOlderOneLeaves(t *testing.T) {
 	}
 }
 
-// The approver has to see what is being approved, not a one-line prefix of it.
+// joined is the screen's lines trimmed and run together, so a word wrapped over two lines is found.
+func joined(s string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		b.WriteString(strings.TrimSpace(line))
+	}
+	return b.String()
+}
+
+// The approver has to see what is being approved, not a prefix of it: the preview says the arguments
+// go on and how to read them, and enter opens all of them.
 func TestTheSelectedCallShowsItsWholeArguments(t *testing.T) {
 	m, d := newModel(t)
 	m, _ = update(m, tea.WindowSizeMsg{Width: 60, Height: 30})
 	long := askReq
-	long.Args = `{"cmd":"` + strings.Repeat("a", 300) + "MARKER" + strings.Repeat("b", 3000) + `"}`
+	long.Args = `{"cmd":"` + strings.Repeat("a", 1000) + "MARKER" + strings.Repeat("b", 3000) + `"}`
 	waiting(t, d.q, long)
 	waitPending(t, d.q, 1)
 	m, _ = refresh(m)
 	s := screen(m)
-	var joined strings.Builder
-	for _, line := range strings.Split(s, "\n") {
-		if w := lipgloss.Width(line); w > 60 {
-			t.Fatalf("a line of %d cells in a 60-cell window: %q", w, line)
+	noRawText(t, s, 60)
+	if strings.Contains(joined(s), "MARKER") || !strings.Contains(s, "more lines, enter to read all") {
+		t.Fatalf("the preview should stop before the marker and say how to read the rest:\n%s", s)
+	}
+	m, _ = press(m, "enter")
+	s = screen(m)
+	noRawText(t, s, 60)
+	for _, want := range []string{"#1", "codex", "github__create_issue", "left"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the detail view lacks %q:\n%s", want, s)
 		}
-		joined.WriteString(strings.TrimSpace(line))
 	}
-	if !strings.Contains(joined.String(), "MARKER") {
-		t.Fatalf("the arguments past the first line are not shown:\n%s", s)
+	if !strings.Contains(joined(s), "MARKER") {
+		t.Fatalf("the detail view does not show the arguments past the preview:\n%s", s)
 	}
-	if !strings.Contains(s, "more lines") {
-		t.Fatalf("no sign that the arguments go on:\n%s", s)
+	if m, _ = press(m, "esc"); !strings.Contains(screen(m), "RECEIPTS") {
+		t.Fatalf("esc did not go back to the main screen:\n%s", screen(m))
+	}
+}
+
+// Padding cannot hide the end of the arguments: a long run of spaces is shown by its length, and the
+// detail view scrolls to the end whatever comes before it.
+func TestTheDetailViewReachesTheTailPastARunOfSpaces(t *testing.T) {
+	m, d := newModel(t)
+	m, _ = update(m, tea.WindowSizeMsg{Width: 60, Height: 20})
+	long := askReq
+	long.Args = `{"cmd":"rm -rf` + strings.Repeat(" ", 2000) + strings.Repeat("b", 2000) + ` TAIL"}`
+	waiting(t, d.q, long)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	if s := screen(m); !strings.Contains(s, "rm -rf␠×2000bbb") {
+		t.Fatalf("the preview does not show the run of spaces by its length:\n%s", s)
+	}
+	m, _ = press(m, "enter")
+	for _, step := range []struct{ key, want string }{
+		{"", "lines 1-14 of 34"},
+		{"down", "lines 2-15 of 34"},
+		{"pgdown", "lines 16-29 of 34"},
+		{"pgdown", "lines 21-34 of 34"},
+		{"pgup", "lines 7-20 of 34"},
+		{"up", "lines 6-19 of 34"},
+		{"home", "lines 1-14 of 34"},
+		{"up", "lines 1-14 of 34"},
+		{"end", "lines 21-34 of 34"},
+		{"down", "lines 21-34 of 34"},
+	} {
+		if step.key != "" {
+			m, _ = press(m, step.key)
+		}
+		s := screen(m)
+		noRawText(t, s, 60)
+		if !strings.Contains(s, step.want) {
+			t.Fatalf("after %q the screen lacks %q:\n%s", step.key, step.want, s)
+		}
+		if atEnd := strings.HasSuffix(step.want, "34 of 34"); strings.Contains(s, "TAIL") != atEnd {
+			t.Fatalf("after %q the tail should show only at the end:\n%s", step.key, s)
+		}
+	}
+}
+
+// The preview wraps only what it can show, so megabytes of arguments cost a frame no more than a few
+// bytes do.
+func TestAHugeArgumentKeepsTheScreenFast(t *testing.T) {
+	m, _ := newModel(t)
+	calls := pendingCalls(2)
+	calls[0].Args = strings.Repeat("x", 8<<20)
+	calls[1].Args = calls[0].Args
+	m, _ = update(m, snapshotMsg{pending: calls})
+	start := time.Now()
+	for range 20 {
+		screen(m)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("20 frames took %s", took)
+	}
+	if s := screen(m); !strings.Contains(s, "more lines, enter to read all") {
+		t.Fatalf("the preview does not say the arguments go on:\n%s", s)
+	}
+}
+
+// A approves a tool for the rest of an agent's session, so it takes a second press within five
+// seconds: with Caps Lock on, an a meant to approve once arrives as A.
+func TestSessionApprovalNeedsASecondA(t *testing.T) {
+	capsA := tea.KeyPressMsg{Code: 'a', Text: "A", Mod: tea.ModCapsLock}
+	for _, tc := range []struct {
+		name    string
+		steps   []any // a key name, a key message, or a time.Duration to move the clock by
+		granted bool
+	}{
+		{"once", []any{"A"}, false},
+		{"twice", []any{"A", "A"}, true},
+		{"another key between", []any{"A", "down", "A"}, false},
+		{"more than five seconds apart", []any{"A", confirmFor + time.Millisecond, "A"}, false},
+		{"Caps Lock a", []any{capsA}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, d := newModel(t)
+			done := waiting(t, d.q, askReq)
+			waitPending(t, d.q, 1)
+			m, _ = refresh(m)
+			m = later(m, armAfter)
+			var cmd tea.Cmd
+			for _, step := range tc.steps {
+				switch s := step.(type) {
+				case string:
+					m, cmd = press(m, s)
+				case tea.KeyPressMsg:
+					m, cmd = update(m, s)
+				case time.Duration:
+					m, cmd = later(m, s), nil
+				}
+				m = settle(m, cmd)
+			}
+			if _, granted, err := d.q.Granted(t.Context(), "codex", "s1", askReq.Tool); err != nil || granted != tc.granted {
+				t.Fatalf("granted = %v, err %v; want %v", granted, err, tc.granted)
+			}
+			if tc.granted {
+				<-done
+				return
+			}
+			if p, err := d.q.Pending(t.Context()); err != nil || len(p) != 1 {
+				t.Fatalf("pending = %+v, %v; the call should still wait", p, err)
+			}
+			want := "press A again to approve github__create_issue for the rest of codex's session"
+			if !strings.Contains(screen(m), want) {
+				t.Fatalf("screen lacks %q:\n%s", want, screen(m))
+			}
+		})
+	}
+}
+
+// A call that has just been highlighted, because the one before it left, takes no decision until it has
+// been on screen for a moment: a key meant for the call before must not land on it.
+func TestANewlyHighlightedCallIgnoresKeysAtFirst(t *testing.T) {
+	m, d := newModel(t)
+	first, second := askReq, askReq
+	second.Tool = "github__create_pull_request"
+	waiting(t, d.q, first)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	p, err := d.q.Pending(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.q.Decide(t.Context(), p[0].ID, approval.Deny); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = refresh(m) // an empty poll
+	done := waiting(t, d.q, second)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	p, err = d.q.Pending(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, cmd := press(m, "a")
+	m = settle(m, cmd)
+	if want := fmt.Sprintf("#%d just appeared; press again to decide", p[0].ID); !strings.Contains(screen(m), want) {
+		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
+	}
+	if left, err := d.q.Pending(t.Context()); err != nil || len(left) != 1 {
+		t.Fatalf("pending = %+v, %v; the new call should still wait", left, err)
+	}
+	m, cmd = press(later(m, armAfter), "a")
+	settle(m, cmd)
+	if out := <-done; !out.Approved {
+		t.Fatalf("outcome = %+v, want it approved once it had been on screen", out)
+	}
+}
+
+// An a pressed twice approves the call it meant to and not the one that arrives after it.
+func TestADoubleTapDoesNotDecideTheNextCall(t *testing.T) {
+	m, d := newModel(t)
+	done := waiting(t, d.q, askReq)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	m, cmd := press(later(m, armAfter), "a")
+	m = settle(m, cmd)
+	if out := <-done; !out.Approved {
+		t.Fatalf("outcome = %+v, want the first call approved", out)
+	}
+	m, _ = refresh(m)
+	second := askReq
+	second.Tool = "github__create_pull_request"
+	waiting(t, d.q, second)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	m, cmd = press(m, "a")
+	m = settle(m, cmd)
+	if p, err := d.q.Pending(t.Context()); err != nil || len(p) != 1 || p[0].Tool != second.Tool {
+		t.Fatalf("pending = %+v, %v; the second tap decided the next call", p, err)
+	}
+	if !strings.Contains(screen(m), "just appeared") {
+		t.Fatalf("the screen does not say why the key did nothing:\n%s", screen(m))
+	}
+}
+
+// In the detail view a, A and d act on the call it shows, under the same rules as the main screen.
+func TestTheDetailViewDecidesItsCall(t *testing.T) {
+	m, d := newModel(t)
+	first, second := askReq, askReq
+	second.Tool = "github__create_pull_request"
+	done := waiting(t, d.q, first)
+	waitPending(t, d.q, 1)
+	waiting(t, d.q, second)
+	waitPending(t, d.q, 2)
+	m, _ = refresh(m)
+	m, _ = press(m, "enter")
+	m, cmd := press(m, "a")
+	if m = settle(m, cmd); !strings.Contains(screen(m), "just appeared") {
+		t.Fatalf("a key at once should wait for the call to be seen:\n%s", screen(m))
+	}
+	m, cmd = press(later(m, armAfter), "A")
+	if m = settle(m, cmd); !strings.Contains(screen(m), "press A again") {
+		t.Fatalf("A should ask for a second press:\n%s", screen(m))
+	}
+	m, cmd = press(m, "a")
+	m = settle(m, cmd)
+	if out := <-done; !out.Approved {
+		t.Fatalf("outcome = %+v, want the call in the detail view approved", out)
+	}
+	if !strings.Contains(screen(m), "RECEIPTS") {
+		t.Fatalf("after a decision the main screen should come back:\n%s", screen(m))
+	}
+	if p, err := d.q.Pending(t.Context()); err != nil || len(p) != 1 || p[0].Tool != second.Tool {
+		t.Fatalf("pending = %+v, %v; the other call should still wait", p, err)
+	}
+}
+
+// A call can stop waiting while its detail view is open. The view says so, and a key meant for it
+// decides nothing.
+func TestTheDetailViewSaysWhenItsCallHasGone(t *testing.T) {
+	m, d := newModel(t)
+	first, second := askReq, askReq
+	second.Tool = "github__create_pull_request"
+	waiting(t, d.q, first)
+	waitPending(t, d.q, 1)
+	waiting(t, d.q, second)
+	waitPending(t, d.q, 2)
+	m, _ = refresh(m)
+	m, _ = press(later(m, armAfter), "enter")
+	p, err := d.q.Pending(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.q.Decide(t.Context(), p[0].ID, approval.Deny); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = refresh(m)
+	if want := fmt.Sprintf("#%d is no longer waiting", p[0].ID); !strings.Contains(screen(m), want) {
+		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
+	}
+	for _, k := range []string{"a", "A", "A", "d"} {
+		var cmd tea.Cmd
+		m, cmd = press(m, k)
+		m = settle(m, cmd)
+	}
+	if left, err := d.q.Pending(t.Context()); err != nil || len(left) != 1 || left[0].ID != p[1].ID {
+		t.Fatalf("pending = %+v, %v; a key in the detail view of a call that left decided another", left, err)
+	}
+	if m, _ = press(m, "esc"); !strings.Contains(screen(m), "RECEIPTS") {
+		t.Fatalf("esc did not go back to the main screen:\n%s", screen(m))
+	}
+}
+
+func TestHelpFitsTheWindow(t *testing.T) {
+	m, _ := newModel(t)
+	m, _ = update(m, tea.WindowSizeMsg{Width: 20, Height: 30})
+	m, _ = press(m, "?")
+	s := screen(m)
+	noRawText(t, s, 20)
+	if !strings.Contains(s, "derbent keys") {
+		t.Fatalf("help:\n%s", s)
 	}
 }
 
@@ -470,7 +758,7 @@ func TestTheScreenSaysToPickACallAfterADecision(t *testing.T) {
 	if strings.Contains(screen(m), "nothing highlighted") {
 		t.Fatalf("the first call is highlighted, yet the screen says nothing is:\n%s", screen(m))
 	}
-	m, cmd := press(m, "a")
+	m, cmd := press(later(m, armAfter), "a")
 	m = settle(m, cmd)
 	m, _ = refresh(m)
 	if s := screen(m); !strings.Contains(s, "nothing highlighted") || !strings.Contains(s, "up, down pick a call") {
@@ -512,7 +800,22 @@ func TestHostileTextCannotReachTheTerminal(t *testing.T) {
 			t.Errorf("screen lacks %q, the escaped form:\n%s", want, s)
 		}
 	}
-	// The decision's status line carries the agent and tool names too.
+	// The detail view shows the same text, escaped the same way.
+	m, _ = press(m, "enter")
+	s = screen(m)
+	noRawText(t, s, 60)
+	for _, want := range []string{`\u001b]52`, `co\u001b[2Jdex`, `gh\u009b2Jissue`, sneakyEscaped} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the detail view lacks %q, the escaped form:\n%s", want, s)
+		}
+	}
+	// A's question and the decision's status line carry the agent and tool names too.
+	m, _ = press(later(m, armAfter), "A")
+	if s = screen(m); !strings.Contains(s, `press A again to approve gh\u009b2Jissue`) {
+		t.Errorf("the status line does not ask for a second A, escaped:\n%s", s)
+	}
+	noRawText(t, s, 60)
+	m, _ = press(m, "esc")
 	m, cmd := press(m, "a")
 	m = settle(m, cmd)
 	if s = screen(m); !strings.Contains(s, `approved once: co\u001b[2Jdex`) {
