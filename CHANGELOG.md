@@ -52,8 +52,8 @@ The first release.
   `derbent pins show` list and explain the changes, `pins show` ends with the accept command to copy,
   `pin = false` opts a server out, and `derbent config check` shows each tool's pin state
   ([ADR 0013](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0013-tool-pins.md)).
-- Project rules: a `.derbent.toml` at a repository's root can make calls ask or deny, never allow what
-  your rules refuse ([ADR 0014](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0014-project-rules.md)).
+- Project rules: a `.derbent.toml` at the root of a checkout, a linked worktree's included, can make
+  calls ask or deny, never allow what your rules refuse ([ADR 0014](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0014-project-rules.md)).
 - `derbent gate`: a pre-tool hook for Claude Code, Codex, Copilot CLI and Antigravity CLI, so built-in
   tools such as the shell and file edits pass the same rules, approvals and receipts as MCP tools, named
   `native__<tool>`.

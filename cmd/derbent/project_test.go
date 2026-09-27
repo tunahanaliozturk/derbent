@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/tunahanaliozturk/derbent/internal/config"
 )
 
 func writeProjectFile(t *testing.T, dir, rules string) {
@@ -95,5 +98,78 @@ func TestAProjectRuleDecidesMCPCallsWithoutChangingTheList(t *testing.T) {
 	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "memory_write", Arguments: map[string]any{"title": "t", "body": "b"}})
 	if err != nil || !res.IsError || !strings.Contains(resultText(res), "not allowed in this project") {
 		t.Fatalf("memory_write: err %v, result %q", err, resultText(res))
+	}
+}
+
+// gitIn runs git in dir, skipping the test where git is not installed.
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	cmd := exec.CommandContext(t.Context(), git, append([]string{"-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("git %v: %v\n%s", args, runErr, out)
+	}
+}
+
+// newRepo creates a git repository with one commit at base/name and returns its path.
+func newRepo(t *testing.T, base, name string) string {
+	t.Helper()
+	repo := filepath.Join(base, name)
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "init", "-q")
+	gitIn(t, repo, "commit", "-q", "--allow-empty", "-m", "start")
+	return repo
+}
+
+// A linked worktree reads the .derbent.toml at its own root, so a branch that adds or tightens the file
+// is enforced there, while its calls stay filed under the main checkout's project.
+func TestALinkedWorktreeReadsItsOwnProjectFile(t *testing.T) {
+	base := t.TempDir()
+	repo := newRepo(t, base, "shop")
+	wt := filepath.Join(base, "shop-feature")
+	gitIn(t, repo, "worktree", "add", "-q", wt)
+	cfg := "[approvals]\ntimeout = \"1s\"\n\n[[rule]]\naction = \"allow\"\n"
+	if err := os.WriteFile(filepath.Join(base, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFile(t, wt, "[[rule]]\ntool = \"native__Bash\"\naction = \"ask\"\n")
+	out, errOut, _ := runHook(t, base, claudeHookInput(wt, "ls"), "--agent", "claude")
+	if !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "none came within 1s") {
+		t.Fatalf("stdout %q, stderr %q; want the call asked about and timed out", out, errOut)
+	}
+	key, err := config.ProjectKey(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := hookReceiptRows(t, base)
+	if len(rows) != 1 || !strings.HasPrefix(rows[0].decidedBy, "timeout:") || rows[0].project != key {
+		t.Fatalf("receipts %+v, want one timeout filed under %s", rows, key)
+	}
+}
+
+// A worktree of a bare repository has no main checkout with files in it, so its own file is the only one
+// there is.
+func TestAWorktreeOfABareRepositoryReadsItsProjectFile(t *testing.T) {
+	base := t.TempDir()
+	src := newRepo(t, base, "src")
+	gitIn(t, base, "clone", "-q", "--bare", src, "shop.git")
+	wt := filepath.Join(base, "wt")
+	gitIn(t, filepath.Join(base, "shop.git"), "worktree", "add", "-q", wt)
+	writeAllowConfig(t, base)
+	writeProjectFile(t, wt, "[[rule]]\ntool = \"native__Bash\"\naction = \"deny\"\n")
+	out, errOut, _ := runHook(t, base, claudeHookInput(wt, "ls"), "--agent", "claude")
+	if !strings.Contains(out, `"permissionDecision":"deny"`) {
+		t.Fatalf("stdout %q, stderr %q; want the project's deny", out, errOut)
+	}
+	if rows := hookReceiptRows(t, base); len(rows) != 1 || rows[0].decidedBy != "project:1" {
+		t.Fatalf("receipts %+v, want one decided by project:1", rows)
 	}
 }

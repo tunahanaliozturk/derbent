@@ -12,7 +12,8 @@ anyone who can open a pull request, or any agent that can write a file, turn off
 
 ## Decision
 
-- A `.derbent.toml` at the project root may hold `[[rule]]` tables and nothing else. Project rules use the
+- A `.derbent.toml` at the root of the checkout the agent works in may hold `[[rule]]` tables and nothing
+  else. Project rules use the
   rule syntax, first match wins, and they need no final catch-all: when none matches, the project adds
   nothing.
 - The call's action is the stricter of the user's decision and the project's: deny, then ask, then allow.
@@ -27,7 +28,8 @@ anyone who can open a pull request, or any agent that can write a file, turn off
   too. The `.git` file that marks a linked worktree, and the `commondir` file it leads to, are read under
   the same limits, and one that fails them is taken as not a linked worktree.
 - The file is read for each call and kept by path, size and modification time. It is looked up under the
-  project root in its own case.
+  checkout's root in its own case: the nearest directory holding `.git`, which for a linked worktree is
+  the worktree's own root, or the project directory itself outside git.
 - A grant for a call the project's rules asked about is keyed on both fingerprints, the user's rules up to
   the one that decided and the project's up to the one that asked (ADR 0011).
 - The approval records which list asked (migration 0006), so the UI and the commands can say
@@ -47,9 +49,11 @@ anyone who can open a pull request, or any agent that can write a file, turn off
   reading the project file when the gate starts and whenever it changes, for no gain in safety.
 - An agent that can edit the repository can edit or delete the file. That takes the project back to the
   user's rules, never below them.
-- The file sits at the project root, which is the git root, and for a linked worktree the main
-  checkout's root. A worktree therefore follows the main checkout's file, as it shares its project key
-  and memory, and a `.derbent.toml` at the worktree's own root is not read.
+- A linked worktree reads the file at its own root, not the main checkout's, though it shares the main
+  checkout's project key, memory and receipts. Reading the main checkout's file would read nothing in a
+  worktree of a bare repository, and would not enforce a branch that adds or tightens the file. Rules
+  only tighten, so the worktree's own file can never loosen anything, and a grant is keyed on what the
+  rules say, not on where the file is.
 - Failing closed on an invalid file means a typo in a repository stops every agent working in it until it
   is fixed. A file that half applied would be worse: the user could not tell which rules held.
 - The cache keyed on size and modification time misses an edit that keeps both, which only a file system

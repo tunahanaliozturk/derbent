@@ -101,7 +101,7 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if err != nil {
 		return deny(err)
 	}
-	root, err := config.ProjectRoot(dir)
+	root, err := config.CheckoutRoot(dir)
 	if err != nil {
 		return deny(err)
 	}

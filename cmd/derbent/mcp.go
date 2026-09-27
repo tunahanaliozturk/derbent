@@ -65,7 +65,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if err != nil {
 		return err
 	}
-	root, err := config.ProjectRoot(*projectDir)
+	root, err := config.CheckoutRoot(*projectDir)
 	if err != nil {
 		return err
 	}
