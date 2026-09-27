@@ -208,6 +208,27 @@ never an `allow`.
 The file is read strictly: an unknown key is an error that names the key, and a syntax error names its
 line. A `derbent mcp` gate reads the file when its CLI starts it; the hook reads it on every call.
 
+## Project rules
+
+A repository can make Derbent stricter for itself. A `.derbent.toml` at the project root (the git root)
+holds `[[rule]]` tables and nothing else:
+
+```toml
+[[rule]]
+tool   = "native__Bash"
+args   = { command = "terraform *" }
+action = "ask"
+```
+
+Project rules are tried in order and need no final rule; when none matches, the project adds nothing. A
+call gets the stricter of your decision and the project's, deny over ask over allow, so a project rule can
+make a call ask or deny but never lets through what your rules refuse
+([ADR 0014](docs/adr/0014-project-rules.md)). Receipts say `project:1` when a project rule decided, and the
+UI and `derbent pending` say `project rule 1`. An edit takes effect on the next call. A file with any other
+key, or a rule Derbent cannot read, denies every call in that project until it is fixed. Project rules
+decide calls only and never change which tools an agent sees. An agent that can edit the repository can
+edit or delete the file, which only takes the project back to your own rules.
+
 ## Approvals and the UI
 
 An `ask` rule holds the call until you decide. The tool stays listed to the agent:
@@ -238,8 +259,8 @@ another call. A newly highlighted call takes none of these keys for its first 75
 so a key meant for the call before it cannot land on it.
 
 Below the waiting calls are the agents seen in the last hour and a live feed of receipts. `/` filters the
-feed, `m` searches memory across projects, `v` verifies the receipt chain, `?` lists the keys and `q`
-quits. Quitting the UI changes nothing for running agents: their waiting calls are denied at the timeout.
+feed, `m` searches memory across projects, `g` lists session grants, `v` verifies the receipt chain, `?`
+lists the keys and `q` quits. Quitting the UI changes nothing for running agents: their waiting calls are denied at the timeout.
 
 Text from agents and tools is escaped before it is drawn: control characters, bidirectional overrides,
 zero-width and other format characters, line and paragraph separators, variation selectors, tag
@@ -262,6 +283,16 @@ from when you approved, the calls that rule asks about ask again, and undoing th
 apply again; a change below the granted rule keeps the grant. A `derbent mcp` gate reads the config only
 when it starts, so an edit does not affect its grants.
 
+Grants can be listed and taken back:
+
+```bash
+derbent grants                 # every session grant: id, agent, session, tool, the rule that asked, when; --json too
+derbent revoke 12              # the grant approval #12 made; the next such call asks again
+derbent revoke --all
+```
+
+In the UI, `g` lists the same grants, and `r` pressed twice within five seconds revokes the highlighted one.
+
 Approvals guard against mistakes and against prompt injection that stays inside MCP. They are not a
 boundary against an agent that can already run shell commands as you: it can run `derbent approve` itself
 or write the database, so an approval or an `args` rule on a shell tool does not hold it back.
@@ -269,6 +300,26 @@ or write the database, so an approval or an `args` rule on a shell tool does not
 The default timeout sits below Codex's default tool timeout of 60 seconds
 ([ADR 0005](docs/adr/0005-approval-timeout.md)). If you raise it, raise `tool_timeout_sec` for the
 `derbent` server in Codex's config too.
+
+## Budgets
+
+A budget stops an agent stuck in a loop. It limits how many calls one agent may have let through to some
+tools within a sliding window:
+
+```toml
+[[budget]]
+agent = "*"
+tool  = "native__Bash"
+calls = 200
+per   = "1h"
+```
+
+`agent` and `tool` are globs as in rules, `calls` is at least 1, and `per` is a duration from `1m` to `24h`.
+Every budget that matches a call applies. A call counts when its receipt says it was let through, by a
+rule, a grant or you, so the count is shared by every gate and hook on the machine. The rules decide first
+and a `deny` stays a deny; otherwise a call over a budget is refused without asking you, its receipt says
+`budget:1`, and the agent reads when its next call is possible ([ADR 0012](docs/adr/0012-budgets.md)).
+Calls made at the same moment can pass a budget by at most the number of calls in flight at once.
 
 ## Built-in tools
 
@@ -379,6 +430,27 @@ Codex starts MCP servers with only a few environment variables. If your config u
 `env_vars = ["NAME"]` to the `[mcp_servers.derbent]` entry in Codex's config; without it the gate does
 not start, and its error names the missing variable.
 
+## Tool pins
+
+A server can change a tool's description after you started trusting it, and a description is text the
+agent reads. The first time a gate sees a downstream tool, it pins it: it keeps the SHA-256 of the tool's
+name, title, description, schemas and annotations. When a later start of the server sends a different
+definition, the gate leaves the tool out of the agent's list, so the agent never reads the new text,
+refuses calls to it and writes a warning to stderr ([ADR 0013](docs/adr/0013-tool-pins.md)).
+
+```bash
+derbent pins                                       # every pin, pinned or changed; --json too
+derbent pins show github__create_issue             # the pinned and the new definition, and the lines that differ
+derbent pins accept github__create_issue <sha256>  # takes the whole hash that pins show prints
+```
+
+`pins show` ends with the `accept` command, ready to copy. An accept of a hash that is not the change on
+record is refused, as is a shortened hash, so what is accepted is what was read. After `accept`, running gates
+serve the tool again within two seconds. `derbent config check` shows each tool's pin state and pins
+nothing, and the UI says how many tools changed. A server whose descriptions change on every start can opt
+out with `pin = false` in its `[servers.<name>]` table. Pins trust what they see first, so look at a new
+server's tools with `derbent config check` before an agent uses them.
+
 ## Receipts and verify
 
 Each call through the gate appends one receipt: its sequence number, time, project, agent, gate session,
@@ -434,6 +506,8 @@ in the design. The ones to know first:
   adapters follow each CLI's documentation.
 - Argument globs match strings, not meaning: `git push*` does not match `cd repo && git push`.
 - Approvals depend on you watching. Unattended, `ask` means denied after the timeout.
+- Pins trust the first definition they see, and a budget can be passed by the calls in flight at the same
+  moment.
 - CI runs the tests on Windows and Linux and only builds on macOS.
 
 ## Decisions
@@ -454,6 +528,9 @@ each claim is tested. Every decision someone could reasonably have made differen
 | [0009](docs/adr/0009-supervised-downstream-servers.md) | Downstream servers are supervised from the moment the gate starts. |
 | [0010](docs/adr/0010-go.md) | Derbent is written in Go. |
 | [0011](docs/adr/0011-grants-follow-the-rule.md) | A session grant covers only the calls the same rule asks about under the same rules above it. |
+| [0012](docs/adr/0012-budgets.md) | Budgets count receipts, every matching budget applies, and a used-up budget refuses without asking. |
+| [0013](docs/adr/0013-tool-pins.md) | Downstream tools are pinned on first use, and a changed tool is withheld until you accept it. |
+| [0014](docs/adr/0014-project-rules.md) | Project rules can only tighten your rules and never change tool listings. |
 
 Changes are listed in the [changelog](CHANGELOG.md). To build, test or send a change, see
 [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
