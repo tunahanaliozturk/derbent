@@ -351,7 +351,9 @@ checkout's file and a `.derbent.toml` at the worktree's own root is not read.
   user's rules up to the rule that decided, and the project's rules up to the rule that asked. An edit to
   either list at or above those rules stops the grant from applying, as ADR 0011 says for the user's rules.
 - The approval queue records which list asked, so the UI, `derbent pending`, `derbent approve` and
-  `derbent grants` say `project rule <n>` for a project rule.
+  `derbent grants` say `project rule <n>` for a project rule. `derbent pending` and `derbent grants` read
+  the database without migrating it, so on a database from before migration 0006 they name every rule as
+  one of the user's.
 - An agent that can edit the repository can edit or delete `.derbent.toml`. That only takes the project
   back to the user's own rules, never below them.
 

@@ -213,7 +213,12 @@ func (q *Queue) Decide(ctx context.Context, id int64, v Verdict) error {
 // Pending lists the approvals waiting for the user, oldest first. One past its deadline is left out
 // even while it is still marked pending, which is what a gate that stopped while waiting leaves.
 func (q *Queue) Pending(ctx context.Context) ([]Pending, error) {
-	rows, err := q.db.QueryContext(ctx, `SELECT id, created_ms, deadline_ms, project, agent, session, tool, args, rule, project_rule, rule_key
+	projectRule, err := q.projectRuleColumn(ctx, "project_rule")
+	if err != nil {
+		return nil, err
+	}
+	//nolint:gosec // projectRule is a column name or 0, never input
+	rows, err := q.db.QueryContext(ctx, `SELECT id, created_ms, deadline_ms, project, agent, session, tool, args, rule, `+projectRule+`, rule_key
 		FROM approvals WHERE state = 'pending' AND deadline_ms > ? ORDER BY id`, q.now().UnixMilli())
 	if err != nil {
 		return nil, fmt.Errorf("read approvals: %w", err)
@@ -268,9 +273,26 @@ type Grant struct {
 	Granted     time.Time // when the user approved it
 }
 
-// grantColumns reads a grant together with the approval behind it, in the order scanGrant takes them.
-const grantColumns = `SELECT g.approval_id, g.agent, g.session, g.tool, a.rule, a.project_rule, coalesce(a.decided_ms, 0)
+// grantColumns reads a grant together with the approval behind it, in the order scanGrant takes them,
+// with projectRule as what projectRuleColumn gives for "a.project_rule".
+func grantColumns(projectRule string) string {
+	return `SELECT g.approval_id, g.agent, g.session, g.tool, a.rule, ` + projectRule + `, coalesce(a.decided_ms, 0)
 	FROM grants g JOIN approvals a ON a.id = g.approval_id`
+}
+
+// projectRuleColumn returns column, which names approvals.project_rule, or 0 on a database from before
+// migration 0006 added it: the commands that only read open a database without migrating it, and every
+// approval written before project rules was asked by one of the user's rules.
+func (q *Queue) projectRuleColumn(ctx context.Context, column string) (string, error) {
+	var n int
+	if err := q.db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('approvals') WHERE name = 'project_rule'`).Scan(&n); err != nil {
+		return "", fmt.Errorf("read approvals columns: %w", err)
+	}
+	if n == 0 {
+		return "0", nil
+	}
+	return column, nil
+}
 
 // RuleName names the rule that asked: "rule 3" for the user's rules, "project rule 2" for the project's.
 func RuleName(n int, project bool) string {
@@ -292,7 +314,11 @@ func scanGrant(row interface{ Scan(dest ...any) error }) (Grant, error) {
 
 // Grants lists every session grant, oldest approval first.
 func (q *Queue) Grants(ctx context.Context) ([]Grant, error) {
-	rows, err := q.db.QueryContext(ctx, grantColumns+` ORDER BY g.approval_id`)
+	projectRule, err := q.projectRuleColumn(ctx, "a.project_rule")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.QueryContext(ctx, grantColumns(projectRule)+` ORDER BY g.approval_id`)
 	if err != nil {
 		return nil, fmt.Errorf("read grants: %w", err)
 	}
@@ -316,7 +342,8 @@ func (q *Queue) Grants(ctx context.Context) ([]Grant, error) {
 func (q *Queue) Revoke(ctx context.Context, id int64) (Grant, error) {
 	var revoked Grant
 	err := store.Immediate(ctx, q.db, func(ctx context.Context, conn *sql.Conn) error {
-		g, err := scanGrant(conn.QueryRowContext(ctx, grantColumns+` WHERE g.approval_id = ?`, id))
+		// Revoke writes, so its database was opened with store.Open and is migrated.
+		g, err := scanGrant(conn.QueryRowContext(ctx, grantColumns("a.project_rule")+` WHERE g.approval_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("grant #%d: %w", id, ErrNoGrant)
 		}

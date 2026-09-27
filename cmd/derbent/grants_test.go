@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -200,5 +201,56 @@ func TestRevokingAGrantMakesTheNextHookCallAsk(t *testing.T) {
 	}
 	if len(by) != 3 || by[0] != fmt.Sprintf("user:%d", id) || by[1] != fmt.Sprintf("grant:%d", id) || !strings.HasPrefix(by[2], "timeout:") {
 		t.Fatalf("decided_by = %v", by)
+	}
+}
+
+// The commands that only read never migrate, so right after an upgrade, and on a copy kept as evidence,
+// they meet a database from before project rules, whose approvals have no project_rule column. Every
+// approval in it was asked by one of the user's rules.
+func TestApprovalCommandsReadADatabaseFromBeforeProjectRules(t *testing.T) {
+	for version := 3; version <= 5; version++ {
+		t.Run(fmt.Sprint("schema ", version), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "p.db")
+			databaseAtVersion(t, path, version)
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(time.Hour).UnixMilli()
+			for _, stmt := range []string{
+				fmt.Sprintf(`INSERT INTO approvals (id, created_ms, deadline_ms, project, agent, session, tool, args, rule, rule_key)
+					VALUES (3, 1, %d, '/work/shop', 'claude', 'sess-1', 'native__Bash', '{"command":"ls"}', 2, 'key-3')`, deadline),
+				fmt.Sprintf(`INSERT INTO approvals (id, created_ms, deadline_ms, project, agent, session, tool, args, rule, rule_key, state, decided_ms)
+					VALUES (7, 1, 2, '/work/shop', 'codex', 'g-2', 'memory_write', '{}', 1, 'key-7', 'approved', %d)`, grantedAt.UnixMilli()),
+				`INSERT INTO grants (agent, session, tool, rule_key, approval_id) VALUES ('codex', 'g-2', 'memory_write', 'key-7', 7)`,
+			} {
+				if _, err = db.ExecContext(t.Context(), stmt); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			out := runOK(t, "pending", "--db", path)
+			for _, want := range []string{"#3", "claude", "native__Bash", "rule 2", "/work/shop", `{"command":"ls"}`} {
+				if !strings.Contains(out, want) {
+					t.Errorf("pending output lacks %q:\n%s", want, out)
+				}
+			}
+			var p pendingLine
+			if err = json.Unmarshal([]byte(runOK(t, "pending", "--json", "--db", path)), &p); err != nil || p.ID != 3 || p.Rule != 2 || p.ProjectRule {
+				t.Errorf("pending --json = %+v, err %v", p, err)
+			}
+			out = runOK(t, "grants", "--db", path)
+			for _, want := range []string{"#7", "codex", "g-2", "memory_write", "rule 1"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("grants output lacks %q:\n%s", want, out)
+				}
+			}
+			var g grantLine
+			if err = json.Unmarshal([]byte(runOK(t, "grants", "--json", "--db", path)), &g); err != nil || g.ID != 7 || g.Rule != 1 || g.ProjectRule {
+				t.Errorf("grants --json = %+v, err %v", g, err)
+			}
+		})
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -253,14 +254,15 @@ func TestConfigCheckShowsPinStatesAndPinsNothing(t *testing.T) {
 	}
 }
 
-// databaseBeforePins creates a database at path as a Derbent from before tool pins left it: migrations
-// 0001 to 0004 applied and schema version 4.
-func databaseBeforePins(t *testing.T, path string) {
+// databaseAtVersion creates a database at path as an older Derbent left it: the real migrations 0001 to
+// the n-th applied and schema version n.
+func databaseAtVersion(t *testing.T, path string, n int) {
 	t.Helper()
-	names, err := filepath.Glob(filepath.Join("..", "..", "internal", "store", "migrations", "000[1-4]_*.sql"))
-	if err != nil || len(names) != 4 {
-		t.Fatalf("migrations before pins = %v, %v", names, err)
+	names, err := filepath.Glob(filepath.Join("..", "..", "internal", "store", "migrations", "*.sql"))
+	if err != nil || len(names) < n {
+		t.Fatalf("migrations = %v, %v; want at least %d", names, err, n)
 	}
+	names = names[:n]
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +277,7 @@ func databaseBeforePins(t *testing.T, path string) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	if _, err = db.ExecContext(t.Context(), `PRAGMA user_version = 4`); err != nil {
+	if _, err = db.ExecContext(t.Context(), fmt.Sprintf("PRAGMA user_version = %d", n)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -286,7 +288,7 @@ func databaseBeforePins(t *testing.T, path string) {
 func TestPinCommandsReadADatabaseFromBeforePins(t *testing.T) {
 	dir := t.TempDir()
 	db := filepath.Join(dir, "p.db")
-	databaseBeforePins(t, db)
+	databaseAtVersion(t, db, 4) // before 0005, which added the pins table
 	cfg := writePinConfig(t, dir, "v1", "")
 	if out := runOK(t, "config", "check", "--config", cfg, "--db", db); !strings.Contains(out, "echo__echo  (pin: new)") {
 		t.Fatalf("config check:\n%s", out)
