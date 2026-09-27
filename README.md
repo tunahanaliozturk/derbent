@@ -243,7 +243,8 @@ quits. Quitting the UI changes nothing for running agents: their waiting calls a
 Text from agents and tools is escaped before it is drawn: control characters, bidirectional overrides,
 zero-width and other format characters, line and paragraph separators, variation selectors, tag
 characters, the Hangul fillers, the combining grapheme joiner and the braille blank are written as `\u`
-or `\U` codes, and in arguments a run of more than eight spaces of any kind is shown as `␠×N`.
+or `\U` codes, and in arguments a run of more than eight spaces, the ASCII space or any other Unicode
+space separator, is shown as `␠×N`.
 
 The same decisions work from any shell, by the id the UI shows, written `12` or `#12`:
 

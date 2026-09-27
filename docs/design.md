@@ -366,8 +366,9 @@ migrates it inside `BEGIN IMMEDIATE`.
 ## Evidence
 
 - **Chain.** Tests edit, delete, reorder and insert rows, and `verify` names the first bad sequence
-  number each time. Four real gate processes append 10,000 receipts at once, and the chain verifies with
-  no gaps.
+  number each time. Four helper processes, each calling `receipt.Log.Append` 2,500 times on one
+  database, append 10,000 receipts at once, and the chain verifies with no gaps. They are test processes
+  that append directly, not `derbent mcp` gates.
 - **Rules.** Table tests over agent, tool and argument matching, and a test that a hidden tool is absent
   from the tool list and refused if called by name anyway.
 - **Proof the checks can fail.** Redaction, rule evaluation and tool hiding each have a test that
@@ -389,12 +390,22 @@ migrates it inside `BEGIN IMMEDIATE`.
   of rule lists, built so that without the length written before each rule's form they would hash the
   same bytes, gets two different fingerprints. A store test migrates a database from before grants were
   keyed on the rule and finds its grants dropped. UI and command tests check that an approval with no
-  rule key is approved once by `A` and refused by `derbent approve --session`.
+  rule key is approved once by `A` and refused by `derbent approve --session`. On both paths, after `A`
+  on a string `git push` (a deploy note on the MCP path), a call whose argument is an array still asks
+  every time, and `A` on it writes no grant.
+- **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
+  `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
+  file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
+  while a writer holds them, runs `verify`, `receipts` and `pending` on the copy, and finds both files
+  unchanged. `approve`, `deny` and the UI refuse another program's SQLite file and leave it unchanged.
 - **Escaping.** A test feeds the UI escape sequences, a clipboard write, a bell, a bidirectional
   override and invisible characters in the agent, tool and argument fields, and asserts that none reaches
-  the main screen, the detail view or the memory browser raw and no line is wider than the window. Tests
-  of `derbent receipts` and `derbent pending` check that stored control characters come out escaped in
-  the table and in JSON lines, and that a JSON line still decodes to the stored text.
+  the main screen, the detail view or the memory browser raw and no line is wider than the window.
+  Another does the same for the project on the waiting rows. Tests of `derbent receipts` and
+  `derbent pending` check that stored control characters, the project's included, come out escaped in
+  the table and in JSON lines, and that a JSON line still decodes to the stored text. `derbent approve`,
+  `derbent deny` and `derbent config check` escape the names they print, a downstream server's tool
+  names included.
 - **MCP behaviour.** The SDK's client drives the gate end to end: initialize, tool listing, calls,
   forwarded `list_changed`, and a downstream server killed in the middle of a session.
 - **Hook.** Golden standard input for each of the four CLIs, written from each CLI's documented format

@@ -56,12 +56,13 @@ type Gate struct {
 	owners  map[string]string // gate tool name to the downstream server it belongs to
 }
 
-// knobs switch safety checks off. Only tests set them, through export_test.go, to prove that the
-// tests of those checks can fail.
+// knobs switch safety checks off, so that tests can prove the tests of those checks can fail, and let
+// a test see when a request starts waiting. Only tests set them, through export_test.go.
 var knobs struct {
 	skipRules     bool
 	skipHiding    bool
 	skipRedaction bool
+	waiting       func() // called as a tool listing or call starts waiting for the downstream servers
 }
 
 const instructions = "Derbent gates this session's tools. memory_write, memory_search and memory_read " +
@@ -85,9 +86,14 @@ func (g *Gate) gateCalls(next mcp.MethodHandler) mcp.MethodHandler {
 		if method == "tools/list" || method == "tools/call" {
 			g.waitForTools(ctx)
 		}
-		call, ok := req.(*mcp.CallToolRequest)
-		if method != "tools/call" || !ok {
+		if method != "tools/call" {
 			return next(ctx, method, req)
+		}
+		call, ok := req.(*mcp.CallToolRequest)
+		if !ok {
+			// The SDK builds a *mcp.CallToolRequest for every tools/call. Should that change, a call the
+			// gate cannot read is refused rather than passed on with no rule applied.
+			return nil, fmt.Errorf("derbent: refused a tools/call request of type %T, which this gate cannot read", req)
 		}
 		return g.call(ctx, method, call, next)
 	}
@@ -101,6 +107,9 @@ func (g *Gate) waitForTools(ctx context.Context) {
 	}
 	wait := time.NewTimer(g.ToolsWait - time.Since(g.started))
 	defer wait.Stop()
+	if knobs.waiting != nil {
+		knobs.waiting()
+	}
 	select {
 	case <-g.ToolsReady:
 	case <-wait.C:
@@ -265,7 +274,8 @@ func (g *Gate) redact(args string) string {
 }
 
 // decodeArgs returns the arguments as a map for the rules and as compact JSON for the receipt, and
-// reports whether they are an object. Missing or null arguments are no arguments, recorded as {}.
+// reports whether they are an object. Missing and null arguments are both no arguments to the rules;
+// missing ones are recorded as {} and null ones as null.
 func decodeArgs(raw json.RawMessage) (map[string]any, string, bool) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, "{}", true

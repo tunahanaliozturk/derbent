@@ -67,7 +67,9 @@ The first release.
   reach another host.
 - Secrets come from `${env:...}` only through a server's `env` or `headers`, never in `command` or `url`,
   where they could show up in process listings and error messages.
-- The UI, `derbent receipts` and `derbent pending` escape control characters, bidirectional overrides and
-  invisible characters in text from agents and tools before it reaches your terminal.
+- The UI, `derbent receipts`, `derbent pending`, `derbent approve`, `derbent deny` and
+  `derbent config check` escape control characters, bidirectional overrides and invisible characters in
+  text from agents and tools before it reaches your terminal.
+- The MCP gate refuses a `tools/call` request it cannot read instead of passing it on unchecked.
 
 [1.0.0]: https://github.com/tunahanaliozturk/derbent/releases/tag/v1.0.0

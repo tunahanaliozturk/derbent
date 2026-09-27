@@ -15,6 +15,7 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/downstream"
 	"github.com/tunahanaliozturk/derbent/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
 var errCheckFailed = errors.New("config check failed")
@@ -76,7 +77,7 @@ func runConfigCheck(ctx context.Context, args []string, stdout, stderr io.Writer
 			if why := gate.LeftOut(name, t); why != "" {
 				mark = "  (left out: " + why + ")"
 			}
-			if _, err = fmt.Fprintf(stdout, "  %s%s\n", name, mark); err != nil {
+			if _, err = fmt.Fprintf(stdout, "  %s%s\n", visible.Escape(name), mark); err != nil {
 				return err
 			}
 		}

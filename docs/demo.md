@@ -301,7 +301,7 @@ action = "ask"
 action = "allow"
 ```
 
-The `issues` toolset writes under several names, not only `create_*`. In the build of
+The `issues` toolset writes under several names, for example `issue_write`. In the build of
 github-mcp-server checked here, `derbent config check` listed ten tools for it, and four of them write:
 `issue_write`, which creates and updates issues, `add_issue_comment`, `sub_issue_write` and
 `update_issue_comment`. That is why the config asks about every GitHub tool except the named reads.

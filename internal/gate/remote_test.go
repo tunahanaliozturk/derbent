@@ -258,20 +258,68 @@ func TestArgumentsThatAreNotAnObjectAreRefused(t *testing.T) {
 	}
 }
 
+// The server comes up only once the listing is known to be waiting for it, so the listing can include
+// it only by having waited.
 func TestToolListWaitsForServersStartingUp(t *testing.T) {
 	e := newEnv(t)
+	waiting := make(chan struct{}, 1)
+	gate.WhenWaitingForTools(t, func() {
+		select {
+		case waiting <- struct{}{}:
+		default:
+		}
+	})
 	g := e.gate(t, "claude")
 	g.Forward = (&fakeRemote{}).forward
 	ready := make(chan struct{})
 	g.ToolsReady, g.ToolsWait = ready, 10*time.Second
 	cs := connect(t, g) // initialize is answered at once
+	type listing struct {
+		res *mcp.ListToolsResult
+		err error
+	}
+	listed := make(chan listing, 1)
 	go func() {
-		time.Sleep(200 * time.Millisecond)
-		g.SyncTools("x", []*mcp.Tool{objectTool("late")})
-		close(ready)
+		res, err := cs.ListTools(t.Context(), nil)
+		listed <- listing{res, err}
 	}()
-	if got := toolNames(t, cs); !slices.Equal(got, []string{"x__late"}) {
+	select {
+	case <-waiting:
+	case l := <-listed:
+		t.Fatalf("the listing came back without waiting for the servers: %+v, %v", l.res, l.err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the listing never started waiting for the servers")
+	}
+	g.SyncTools("x", []*mcp.Tool{objectTool("late")})
+	close(ready)
+	l := <-listed
+	if l.err != nil {
+		t.Fatal(l.err)
+	}
+	var got []string
+	for _, tool := range l.res.Tools {
+		if !strings.HasPrefix(tool.Name, "memory_") {
+			got = append(got, tool.Name)
+		}
+	}
+	if !slices.Equal(got, []string{"x__late"}) {
 		t.Fatalf("tools = %v, want the server that came up during the wait", got)
+	}
+}
+
+// The SDK builds a *mcp.CallToolRequest for every tools/call. Should that change, the gate refuses a
+// call it cannot read instead of passing it on with no rule applied.
+func TestACallTheGateCannotReadIsRefused(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "claude")
+	passed := false
+	next := func(context.Context, string, mcp.Request) (mcp.Result, error) {
+		passed = true
+		return &mcp.CallToolResult{}, nil
+	}
+	res, err := g.GateCalls(next)(t.Context(), "tools/call", &mcp.ListToolsRequest{})
+	if passed || err == nil || res != nil {
+		t.Fatalf("result %v, err %v, passed on %v; want it refused before the handler", res, err, passed)
 	}
 }
 
