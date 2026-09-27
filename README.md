@@ -431,7 +431,8 @@ forwards tools only, not a server's resources or prompts.
 derbent config check
 ```
 
-validates the config, starts every server once and prints the tools each would give the agents.
+validates the config, says how many rules and budgets it holds, starts every server once and prints the
+tools each would give the agents.
 
 Codex starts MCP servers with only a few environment variables. If your config uses `${env:NAME}`, add
 `env_vars = ["NAME"]` to the `[mcp_servers.derbent]` entry in Codex's config; without it the gate does

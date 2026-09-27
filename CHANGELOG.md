@@ -4,7 +4,7 @@ Notable changes to Derbent, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-09-27
+## [Unreleased]
 
 The first release.
 
@@ -22,7 +22,8 @@ The first release.
   wins. A tool that no call can get through is not listed to that agent.
 - Your other MCP servers behind the gate, over stdio or HTTP, with their tools named `<server>__<tool>`.
   A server that stops is started again with a backoff of up to a minute. `derbent config check` validates
-  the config, starts each server once and prints the tools it would give the agents.
+  the config, says how many rules and budgets it holds, starts each server once and prints the tools it
+  would give the agents.
 - Redaction: secrets that reach a server through `${env:...}`, and anything the `[receipts] redact`
   patterns match, are masked in stored arguments.
 - Approvals: an `ask` rule holds the call until you decide, or denies it when `[approvals] timeout` (50
