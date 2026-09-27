@@ -165,9 +165,11 @@ func showPin(ctx context.Context, path, dbFlag, server, tool string, stdout io.W
 		fmt.Fprintf(&b, "new, seen %s, sha256 %s\n", p.ChangedAt.Local().Format("2006-01-02 15:04:05"), visible.Escape(p.NewSHA256))
 		writeLines(&b, "  ", changed)
 		b.WriteString("lines that differ:\n")
-		removed, added := differ(pinned, changed)
-		writeLines(&b, "- ", removed)
-		writeLines(&b, "+ ", added)
+		if lines, ok := differ(pinned, changed); ok {
+			writeLines(&b, "", lines)
+		} else {
+			b.WriteString("  too long to line up; compare the two definitions above in full\n")
+		}
 		db := ""
 		if dbFlag != "" {
 			db = "--db " + shellArg(visible.Escape(dbFlag)) + " "
@@ -219,25 +221,51 @@ func writeLines(b *strings.Builder, prefix string, lines []string) {
 	}
 }
 
-// differ returns the lines only in a and the lines only in b, each in its own order, counting repeated
-// lines.
-// ponytail: a multiset difference, not a minimal diff, so a line that only moved is not shown; an LCS
-// diff if reviews need one.
-func differ(a, b []string) (onlyA, onlyB []string) {
-	only := func(from, other []string) []string {
-		count := map[string]int{}
-		for _, l := range other {
-			count[l]++
-		}
-		var out []string
-		for _, l := range from {
-			if count[l] > 0 {
-				count[l]--
-				continue
-			}
-			out = append(out, l)
-		}
-		return out
+// maxDiffCells caps the table differ builds, len(a)+1 by len(b)+1 int32s: 16 MiB at most.
+const maxDiffCells = 1 << 22
+
+// differ returns the lines that turn a into b, in order, "- " for a line of a that goes and "+ " for a
+// line of b that comes, lined up on a longest common subsequence. A line that only moved, such as a
+// description swapped from one property to another, shows where it went from and where it arrived, even
+// beside other changes. For definitions too long to line up within maxDiffCells it returns false, and
+// the reader compares the two in full.
+func differ(a, b []string) ([]string, bool) {
+	if (len(a)+1)*(len(b)+1) > maxDiffCells {
+		return nil, false
 	}
-	return only(a, b), only(b, a)
+	// common[i][j] is the length of the longest common subsequence of a[i:] and b[j:].
+	common := make([][]int32, len(a)+1)
+	for i := range common {
+		common[i] = make([]int32, len(b)+1)
+	}
+	for i := len(a) - 1; i >= 0; i-- {
+		for j := len(b) - 1; j >= 0; j-- {
+			if a[i] == b[j] {
+				common[i][j] = common[i+1][j+1] + 1
+			} else {
+				common[i][j] = max(common[i+1][j], common[i][j+1])
+			}
+		}
+	}
+	var out []string
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] == b[j]:
+			i, j = i+1, j+1
+		case common[i+1][j] >= common[i][j+1]:
+			out = append(out, "- "+a[i])
+			i++
+		default:
+			out = append(out, "+ "+b[j])
+			j++
+		}
+	}
+	for ; i < len(a); i++ {
+		out = append(out, "- "+a[i])
+	}
+	for ; j < len(b); j++ {
+		out = append(out, "+ "+b[j])
+	}
+	return out, true
 }

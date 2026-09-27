@@ -304,3 +304,39 @@ func TestPinCommandsReadADatabaseFromBeforePins(t *testing.T) {
 		t.Fatalf("pins show: err = %v", err)
 	}
 }
+
+// differ lines up the two definitions, so a line that only moved, such as a description swapped from one
+// property to another, shows where it left and where it arrived, even next to another change.
+func TestDifferShowsWhatMoved(t *testing.T) {
+	pinned := []string{`{`, `"path": {`, `"description": "where to write"`, `},`, `"content": {`, `"description": "what to write"`, `}`, `}`}
+	swapped := []string{`{`, `"path": {`, `"description": "what to write"`, `},`, `"content": {`, `"description": "where to write"`, `}`, `}`}
+	tests := map[string]struct {
+		a, b []string
+		want []string
+	}{
+		"only moved": {pinned, swapped, []string{
+			`- "description": "where to write"`, `+ "description": "what to write"`,
+			`- "description": "what to write"`, `+ "description": "where to write"`,
+		}},
+		"moved next to a change": {pinned, append(slices.Clone(swapped[:len(swapped)-1]), `"extra": 1`, `}`), []string{
+			`- "description": "where to write"`, `+ "description": "what to write"`,
+			`- "description": "what to write"`, `+ "description": "where to write"`, `+ "extra": 1`,
+		}},
+		"a property removed among repeated lines": {
+			[]string{`"a": {`, `"type": "string"`, `},`, `"b": {`, `"type": "string"`, `}`},
+			[]string{`"b": {`, `"type": "string"`, `}`},
+			[]string{`- "a": {`, `- "type": "string"`, `- },`},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, ok := differ(tc.a, tc.b)
+			if !ok || !slices.Equal(got, tc.want) {
+				t.Fatalf("differ = %q, %v; want %q", got, ok, tc.want)
+			}
+		})
+	}
+	if _, ok := differ(make([]string, 3000), make([]string, 3000)); ok {
+		t.Fatal("differ compared 3000 by 3000 lines; it should give up above its limit")
+	}
+}
