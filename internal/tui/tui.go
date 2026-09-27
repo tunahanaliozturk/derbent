@@ -330,6 +330,15 @@ func sessionScope(p approval.Pending) string {
 	return fmt.Sprintf("%s calls that rule %d asks about, for the rest of %s's session", p.Tool, p.Rule, p.Agent)
 }
 
+// decideKeys is the key legend for p. A call with no rule key cannot be approved for the session, and A
+// on it approves it once (see sessionScope), so its legend leaves A out.
+func decideKeys(p approval.Pending) string {
+	if p.RuleKey == "" {
+		return "a approve   d deny"
+	}
+	return "a approve   A twice for this session   d deny"
+}
+
 // verify walks the receipt chain off the UI goroutine.
 func (m Model) verify() tea.Msg {
 	res, err := m.receipts.Verify(m.ctx)
@@ -482,7 +491,7 @@ func (m Model) drawWaiting(l *lines) {
 	var args []string
 	i := m.index()
 	if i >= 0 {
-		l.add(pendingStyle, "WAITING FOR YOU   a approve   A twice for this session   d deny   enter read all")
+		l.add(pendingStyle, "WAITING FOR YOU   "+decideKeys(m.pending[i])+"   enter read all")
 		args = m.argLines(m.pending[i].Args)
 	} else {
 		l.add(pendingStyle, "WAITING FOR YOU   nothing highlighted   up, down pick a call")

@@ -313,10 +313,11 @@ func TestReadingCommandsLeaveADatabaseAndItsLogUntouched(t *testing.T) {
 	}
 }
 
-// A --db that names some other program's SQLite file is a mistake: approve, deny and the UI refuse it
-// instead of adding Derbent's tables to it, and leave it as it was.
+// A --db that names some other program's SQLite file is a mistake: every command refuses it instead of
+// adding Derbent's tables to it, derbent mcp and derbent gate included, and leaves it as it was.
 func TestCommandsRefuseADatabaseThatIsNotDerbents(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "other.db")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "other.db")
 	other, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -330,14 +331,26 @@ func TestCommandsRefuseADatabaseThatIsNotDerbents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"approve", "--db", path, "1"}, {"deny", "--db", path, "1"}, {"--db", path}} {
-		err := run(t.Context(), args, strings.NewReader("q"), io.Discard, io.Discard)
-		if err == nil || !strings.Contains(err.Error(), "not a Derbent database") {
-			t.Errorf("%v: err = %v, want it to say the file is not a Derbent database", args, err)
+	cfg := writeAllowConfig(t, dir)
+	for _, args := range [][]string{
+		{"approve", "--db", path, "1"},
+		{"deny", "--db", path, "1"},
+		{"--db", path},
+		{"mcp", "--agent", "claude", "--db", path, "--config", cfg, "--project", dir},
+	} {
+		runErr := run(t.Context(), args, strings.NewReader("q"), io.Discard, io.Discard)
+		if runErr == nil || !strings.Contains(runErr.Error(), "not a Derbent database") {
+			t.Errorf("%v: err = %v, want it to say the file is not a Derbent database", args, runErr)
 		}
 	}
-	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
-		t.Fatalf("the other program's database changed: err %v", err)
+	var answer bytes.Buffer
+	gateArgs := []string{"gate", "--agent", "claude", "--db", path, "--config", cfg}
+	if runErr := run(t.Context(), gateArgs, strings.NewReader(claudeHookInput(dir, "ls")), &answer, io.Discard); runErr != nil ||
+		!strings.Contains(answer.String(), `"permissionDecision":"deny"`) || !strings.Contains(answer.String(), "not a Derbent database") {
+		t.Errorf("gate: err %v, answer %q; want a deny that says the file is not a Derbent database", runErr, answer.String())
+	}
+	if after, readErr := os.ReadFile(path); readErr != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the other program's database changed: err %v", readErr)
 	}
 }
 

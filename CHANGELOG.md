@@ -61,8 +61,10 @@ The first release.
 - A `--config` that names a file that does not exist is an error, never a config that allows every call:
   the hook denies the call, and `derbent mcp` and `derbent config check` stop, naming the path.
 - `derbent verify`, `derbent receipts` and `derbent pending` open the database file read-only, so a copy
-  kept as evidence stays byte for byte as it was, its `-wal` file included. Commands given another
-  program's SQLite file with `--db` refuse it instead of adding Derbent's tables to it.
+  kept as evidence stays byte for byte as it was, its `-wal` file included (SQLite may add an `-shm`
+  file, and an empty `-wal` beside a copy that has none). Every command given another program's SQLite
+  file with `--db`, `derbent mcp` and `derbent gate` included, refuses it and leaves it as it was,
+  instead of adding Derbent's tables to it.
 - A `url` server must use HTTPS, except on localhost, and redirects are refused, so its headers never
   reach another host.
 - Secrets come from `${env:...}` only through a server's `env` or `headers`, never in `command` or `url`,

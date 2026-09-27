@@ -649,6 +649,35 @@ func TestSessionApprovalWithNoRuleKeySaysItApprovesOnce(t *testing.T) {
 	}
 }
 
+// A call with no rule key cannot be approved for the session: A on it approves it once. Its key
+// legend, on the main screen and in the detail view, leaves the session key out.
+func TestAKeylessCallsLegendLeavesOutTheSessionKey(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ruleKey string
+		session bool
+	}{{"with a rule key", "key-of-rule-2", true}, {"without one", "", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, d := newModel(t)
+			r := askReq
+			r.RuleKey = tc.ruleKey
+			waiting(t, d.q, r)
+			waitPending(t, d.q, 1)
+			m, _ = refresh(m)
+			mainScreen := screen(m)
+			m, _ = press(m, "enter")
+			for name, s := range map[string]string{"main screen": mainScreen, "detail view": screen(m)} {
+				if got := strings.Contains(s, "A twice for this session"); got != tc.session {
+					t.Errorf("%s shows the session key: %v, want %v:\n%s", name, got, tc.session, s)
+				}
+				if !strings.Contains(s, "a approve") || !strings.Contains(s, "d deny") {
+					t.Errorf("%s lacks the a and d keys:\n%s", name, s)
+				}
+			}
+		})
+	}
+}
+
 // A terminal that reports modifiers sends an a typed with Caps Lock on as the a key with Caps Lock and
 // the text A. That is an a: it approves the call once and grants nothing.
 func TestCapsLockAApprovesOnce(t *testing.T) {

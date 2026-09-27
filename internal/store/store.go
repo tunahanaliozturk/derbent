@@ -20,8 +20,20 @@ import (
 var migrations embed.FS
 
 // Open opens the database at path, creating it and its directory if needed, and applies any
-// migrations it has not seen. Pragmas are set in the DSN so that every pooled connection gets them.
+// migrations it has not seen. Pragmas are set in the DSN so that every pooled connection gets them. An
+// existing file is first opened read-only, as OpenExisting opens it, so another program's SQLite file,
+// or a schema newer than this binary knows, is refused before the WAL pragma or a migration writes to
+// it. Opening a current database still takes no write lock.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
+	if _, statErr := os.Stat(path); statErr == nil {
+		probe, err := OpenExisting(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		if err = probe.Close(); err != nil {
+			return nil, fmt.Errorf("open database %s: %w", path, err)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
@@ -40,14 +52,9 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 
 // OpenExistingWritable opens the database at path as Open does, migrating it if needed, but never
 // creates it: a path that does not exist is an error naming it, so a mistyped path fails instead of
-// showing an empty database where nothing ever waits. It first opens the file as OpenExisting does, so
-// another program's SQLite file is refused before anything is written to it.
+// showing an empty database where nothing ever waits.
 func OpenExistingWritable(ctx context.Context, path string) (*sql.DB, error) {
-	db, err := OpenExisting(ctx, path)
-	if err != nil {
-		return nil, err
-	}
-	if err = db.Close(); err != nil {
+	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
 	return Open(ctx, path)
@@ -56,7 +63,8 @@ func OpenExistingWritable(ctx context.Context, path string) (*sql.DB, error) {
 // OpenExisting opens the database at path read-only. It never creates the file and never migrates it.
 // SQLite opens the file itself read-only, so no statement can write it and closing never folds the
 // write-ahead log into it: a copy kept as evidence stays byte for byte as it was, and so does its -wal
-// file. SQLite may add its -shm index file beside them. A schema newer than this binary knows is
+// file. SQLite may add its -shm index file beside them, and beside a copy that has no -wal an empty
+// -wal file as well; both stay after the connection closes. A schema newer than this binary knows is
 // refused, and so is a file with tables but no Derbent schema version, which is another program's.
 func OpenExisting(ctx context.Context, path string) (*sql.DB, error) {
 	if _, err := os.Stat(path); err != nil {

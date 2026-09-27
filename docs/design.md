@@ -185,9 +185,10 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   result that can be rebuilt from what the agent received (ADR 0004).
 - `derbent verify`, `derbent receipts` and `derbent pending` open the database file read-only, so the
   file and its `-wal` stay byte for byte as they were, even when the `-wal` still holds receipts that
-  are not in the file yet; SQLite may add its `-shm` index beside them. A file with tables but no
-  Derbent schema version is another program's: these commands, `derbent approve`, `derbent deny` and
-  the UI given `--db` refuse it and leave it as it was.
+  are not in the file yet. SQLite may add its `-shm` index beside them, and beside a copy that has no
+  `-wal` an empty `-wal` as well; both stay after the command exits. A file with tables but no Derbent
+  schema version is another program's: every command given it refuses it and leaves it as it was,
+  `derbent mcp` and `derbent gate` included, which check it read-only before they write anything.
 - `derbent verify` opens the database read-only, never creates or migrates it, walks the chain and
   names the first sequence number whose hash, predecessor or position is wrong. It prints the head
   hash. Someone able to write the database could rewrite the whole chain consistently, or delete the
@@ -320,7 +321,8 @@ the user picks a call with up or down, and when calls arrive while nothing was w
 highlighted at once. A call newly highlighted either way takes those keys only after 750 ms on screen,
 measured with the UI's clock, so a key pressed for the call before it, or twice, cannot land on a call
 the user has not seen. A call can be highlighted while the help, the detail view or the memory browser
-hides the main screen, so the 750 ms start again whenever the main screen comes back.
+hides the main screen, so the 750 ms start again whenever the main screen comes back. A call whose rule
+could not read one of its arguments cannot be approved for the session, so its key legend leaves `A` out.
 
 Below the waiting calls are the agents seen in the last hour and a live feed of receipts (time, agent,
 tool, decision, what decided it, outcome, duration). `m` opens a memory browser that searches every
@@ -397,7 +399,8 @@ migrates it inside `BEGIN IMMEDIATE`.
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
   while a writer holds them, runs `verify`, `receipts` and `pending` on the copy, and finds both files
-  unchanged. `approve`, `deny` and the UI refuse another program's SQLite file and leave it unchanged.
+  unchanged. `approve`, `deny`, the UI, `derbent mcp` and `derbent gate` refuse another program's SQLite
+  file and leave it unchanged, and a store test opens one with `store.Open` and finds it refused.
 - **Escaping.** A test feeds the UI escape sequences, a clipboard write, a bell, a bidirectional
   override and invisible characters in the agent, tool and argument fields, and asserts that none reaches
   the main screen, the detail view or the memory browser raw and no line is wider than the window.

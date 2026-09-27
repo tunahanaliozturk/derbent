@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -119,6 +120,36 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	db.Close()
 	if _, err := store.Open(t.Context(), path); err == nil || !strings.Contains(err.Error(), "newer") {
 		t.Fatalf("err = %v, want a newer-schema error", err)
+	}
+}
+
+// A --db that names another program's SQLite file is a mistake. Open refuses it with the error
+// OpenExisting gives, before the WAL pragma or a migration writes a byte of it.
+func TestOpenRefusesAnotherProgramsDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "other.db")
+	other, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = other.ExecContext(t.Context(), `CREATE TABLE notes (body TEXT)`)
+	other.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(t.Context(), path)
+	if err == nil || !strings.Contains(err.Error(), "not a Derbent database") {
+		if db != nil {
+			db.Close()
+		}
+		t.Fatalf("err = %v, want the file refused as not a Derbent database", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the other program's database changed: err %v", err)
 	}
 }
 

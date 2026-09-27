@@ -71,7 +71,7 @@ func (m Model) detailView() string {
 		l.add(pendingStyle, fmt.Sprintf("#%d is no longer waiting   esc back", m.detail))
 	} else {
 		l.add(selectedStyle, m.callLine(p))
-		l.add(pendingStyle, "a approve   A twice for this session   d deny   esc back")
+		l.add(pendingStyle, decideKeys(p)+"   esc back")
 		args := m.detailLines(p)
 		room := m.detailRoom()
 		start := min(m.scroll, max(len(args)-room, 0))
