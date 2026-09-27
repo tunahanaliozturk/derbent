@@ -1,0 +1,34 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build twice and compare
+        run: scripts/release.sh "$GITHUB_REF_NAME"
+      # A tag without a CHANGELOG.md section still publishes, with a note pointing at the changelog.
+      - name: Release notes from the changelog
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          if [ -f CHANGELOG.md ]; then
+            awk -v v="$v" '/^## /{h=$2; sub(/^\[/, "", h); sub(/\]$/, "", h); f=(h==v); next} f' CHANGELOG.md > notes.md
+          fi
+          if ! grep -q '[^[:space:]]' notes.md 2>/dev/null; then
+            echo "::warning::CHANGELOG.md has no section for $v"
+            echo "See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/CHANGELOG.md) for the changes." > notes.md
+          fi
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Derbent $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
