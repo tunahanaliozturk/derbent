@@ -19,13 +19,13 @@ differently gets an ADR under `docs/adr/`, listed under Decisions.
   (the newest receipts only against a copy of the head hash, see Receipts).
 - Rules that allow, deny or ask by agent, tool and argument, with the user approving from one terminal.
 - Tools an agent may not use are not listed to that agent at all.
-- Claude Code's built-in tools (shell, file edits) pass the same rules and get the same receipts, through
-  its hooks.
+- Each CLI's built-in tools (shell, file edits) pass the same rules and get the same receipts, through
+  its pre-tool hook.
 
 ## Non-goals
 
-- Seeing calls that do not pass through it. Built-in tools of a CLI without a pre-tool hook are outside
-  the gate, and the README states per CLI what is covered.
+- Seeing calls that do not pass through it. Tools a CLI never shows its pre-tool hook, such as Codex's
+  hosted web search, are outside the gate, and the README states per CLI what is covered.
 - Model traffic. Derbent sits between agents and tools, not between agents and model providers.
 - Several users or machines. One person, one machine, no network listener.
 - Semantic search. Memory uses full-text search.
@@ -191,7 +191,8 @@ When a rule says `ask`, the gate writes a pending approval and polls for a decis
 the UI the pending call shows at the top with the agent, the tool, the time left and the redacted
 arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's tool list.
 
-- `a` approves once, `d` denies, and `A` approves this tool for the rest of that agent's gate session.
+- `a` approves once, `d` denies, and `A` approves this tool for the rest of that agent's gate session:
+  one `derbent mcp` process for an MCP call, the CLI's own session for a hook call (see Built-in tools).
   `A` takes a second press within five seconds, so one press can never grant the session. An `a` typed
   with Caps Lock on arrives as `a` with Caps Lock from a terminal that reports modifiers, and the UI
   takes it as `a`; a terminal that reports none sends `A`, which still needs the second press.
@@ -228,13 +229,45 @@ session.
   The gate already decides and records them, and would otherwise ask for and record each one twice.
 - A call allowed by a rule gets no decision from the hook, so Claude Code's own permission settings
   still apply on top.
-- A call the user approved gets `allow`.
-- A denied or timed-out call gets `deny` with the reason, which Claude Code shows to the model.
-- The receipt's outcome is `gated`, since the hook runs before the tool does.
+- A call the user approved, now or through an earlier `A`, gets `allow`.
+- A refused, denied or timed-out call gets `deny` with the reason, which Claude Code shows to the model.
+- The receipt's outcome is `gated` for a call that may run and `refused` for one that may not, since the
+  hook runs before the tool does.
 
-Codex, Copilot CLI and Antigravity CLI are checked for an equivalent hook in milestone 4. Each one that
-has it gets an adapter in `internal/hook/`, and the README's coverage table says what is and is not gated
-for each CLI.
+Codex, GitHub Copilot CLI and Antigravity CLI have the same kind of hook, and `derbent gate` speaks
+each one's protocol (`--cli codex|copilot|antigravity`, which defaults to the `--agent` value). The
+README's coverage table says, per CLI, which tools the hook sees, which name each CLI gives Derbent's
+own tools, and how the hook is installed with a timeout above `approvals.timeout` (ADR 0006). One
+process runs per tool call, and for every CLI:
+
+- A call is the gate's own only when three things hold. Its name starts with the CLI's prefix for the
+  MCP entry named by `--server` (default `derbent`): `mcp__derbent__` in Claude Code and Codex,
+  `derbent-` in Copilot CLI, and `mcp_derbent_` for Antigravity CLI, which is assumed until a real
+  session shows it. The rest of the name is a tool the gate serves: a memory tool, or `<server>__<tool>`
+  for a server in the config, since the hook starts no servers and cannot know their exact tools. And
+  when the hook input names the MCP server, as Claude Code 2.1.274 and later do in `mcp_server.name`,
+  that server is the `--server` entry. Any other call, including one to an MCP server configured in the
+  CLI directly, is decided as `native__` plus the CLI's name for it, such as
+  `native__mcp__github__get_me`.
+- The gate session is the CLI's session id (Claude Code, Codex, Copilot CLI) or conversation id
+  (Antigravity CLI). `A` on a hook tool covers later calls of that `native__` tool in the same CLI
+  session. It cannot cover an MCP tool: the MCP gate's session is one `derbent mcp` process with a random
+  id, and its tools have other names.
+- The project is `--project`, else the git root of the directory the CLI reports, else that of the
+  hook's working directory (Antigravity CLI can report no workspace).
+- The hook loads the config with every check `derbent mcp` makes, except that a `${env:NAME}` in a
+  server's `env` or `headers` whose variable is not set in the hook's environment stays as written
+  instead of failing: the hook starts no servers, and a CLI can hand a secret only to its MCP entry. Such
+  a value is no secret to mask, so hook receipts mask only the secrets set in the hook's own environment
+  and whatever the `redact` patterns match.
+- It fails closed. Once the protocol is known, any failure answers `deny` with the reason: an invalid
+  agent name, input it cannot use or larger than 16 MiB, a config that does not load (which denies
+  Derbent's own tools too, since the config says which they are), a project or database it cannot open,
+  or a receipt it cannot write. An unknown `--cli`, bad flags, or an answer that cannot be written exit
+  with status 2, which Claude Code and Codex take as a block.
+- The first hook call on a machine creates the database. Opening a current database reads the schema
+  version and takes no write lock, so a hook call does not queue behind other gates' appends before it
+  decides.
 
 ## Terminal UI
 
@@ -287,8 +320,10 @@ database migrates it inside `BEGIN IMMEDIATE`.
 - An agent that can run shell commands as the user can also run `derbent approve` or write the database.
   Approvals, and `args` rules on shell tools, guard against mistakes and against prompt injection that
   stays inside MCP; they are not a boundary against an agent that already has a shell.
-- Secrets reach downstream servers through `${env:...}` references and never appear in receipts. The
-  redaction patterns are applied to arguments before they are stored.
+- Secrets reach downstream servers through `${env:...}` references, and their values are masked in
+  stored arguments (see Config), as is whatever the redaction patterns match. Hook receipts mask only
+  the secrets set in the hook's own environment (see Built-in tools), so a secret held only by a CLI's
+  MCP entry needs a `redact` pattern to be masked in them.
 - Memory is text written by one agent and read by another, which makes it a path for instructions planted
   by one agent to reach the next. Search and read results mark each entry with its author and as notes,
   not instructions, and a rule can put `memory_write` behind `ask`.
@@ -314,8 +349,15 @@ database migrates it inside `BEGIN IMMEDIATE`.
   the table and in JSON lines, and that a JSON line still decodes to the stored text.
 - **MCP behaviour.** The SDK's client drives the gate end to end: initialize, tool listing, calls,
   forwarded `list_changed`, and a downstream server killed in the middle of a session.
-- **Hook.** Golden standard input and output for the Claude Code hook, including a call to the gate's
-  own tools that passes with no decision and no receipt.
+- **Hook.** Golden standard input from each of the four CLIs and golden answers in each answer format
+  (Codex shares Claude Code's), and tests of which names count as the gate's own for each CLI, including
+  a foreign entry whose name starts with `derbent` and a Claude Code call whose `mcp_server` is another
+  entry. Tests run `derbent gate` as its own process: a call a rule allows gets no output, a denied call
+  gets `deny`, the gate's own tools pass with no decision and no receipt, an `ask` is approved from
+  another process, a hook stopped while waiting withdraws its approval, unusable input, a bad agent name,
+  a broken config and input over 16 MiB are denied, an unknown `--cli` exits with status 2, and a config
+  whose server secrets are unset still loads. A store test holds the write lock and opens a current
+  database without waiting for it. The README's coverage table records what a real session showed.
 - **Overhead.** A benchmark calls an echo MCP server directly and through the gate with an allow rule,
   and reports p50, p99 and calls per second, compared with `benchstat` over ten runs, on Windows and
   Linux. Results live under `docs/benchmark-results/`, and the README states only numbers in those files.
@@ -334,7 +376,7 @@ derbent/
 ├── internal/memory/              memory tools over FTS5
 ├── internal/receipt/             appending, redaction, verify
 ├── internal/approval/            pending approvals and polling
-├── internal/hook/                Claude Code hook, and others where they exist
+├── internal/hook/                pre-tool hook protocols of the four CLIs
 ├── internal/store/               SQLite, migrations
 ├── internal/tui/                 Bubble Tea UI
 ├── testdata/                     golden files, fuzz corpus, echo server
@@ -414,8 +456,17 @@ Not in v1, in rough order of value:
 
 ## Known limits and risks
 
-- Only calls that pass through the gate are seen. An agent can still use built-in tools of a CLI without
-  a hook, and other MCP servers configured in that CLI directly.
+- Only calls that pass through the gate are seen: tools a CLI never shows its hook (Codex's hosted web
+  search), and MCP servers configured in a CLI whose hook does not report MCP calls, are outside it.
+- A CLI that times out on its hook lets the call through its own permission flow (documented by Claude
+  Code, assumed for the others). The hook timeout in each CLI's configuration must stay above
+  `approvals.timeout`.
+- For CLIs whose hook input does not name the MCP server (Codex, Copilot CLI, Antigravity CLI, and Claude
+  Code before 2.1.274), a foreign MCP entry named so that its tool names start with Derbent's prefix and
+  `<configured server>__`, such as `derbent__github` in Codex, looks like Derbent's own: the hook skips
+  its calls, so they get no decision and no receipt.
+- Only Claude Code's hook has been checked in a real session. The Codex, Copilot CLI and Antigravity CLI
+  adapters follow each CLI's documentation, and Antigravity CLI's name for Derbent's tools is assumed.
 - Every agent session starts its own downstream servers. A server that keeps state in memory does not
   share it between agents.
 - The chain shows edits made without rewriting everything after them. A full rewrite, or deleting the

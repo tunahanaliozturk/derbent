@@ -20,13 +20,16 @@ only shared state.
 
 ## Status
 
-Milestone 3 of 5 is done. The gate serves shared memory tools and the tools of your own MCP servers,
+Milestone 4 of 5 is done. The gate serves shared memory tools and the tools of your own MCP servers,
 applies allow, deny and ask rules, masks secrets in stored arguments, and writes a hash-chained receipt
-for every call. It can hold a call until you approve it in a terminal UI or from another shell. The
-milestone's exit check ran with a real Claude Code session whose held call was approved from another
-process, not with Codex approved from the UI as first planned. Gating Claude Code's built-in tools
-through its hooks comes next. The [design](docs/design.md) covers the whole plan, what Derbent
-does not do, and how each claim is tested. Decisions are recorded in [docs/adr](docs/adr).
+for every call. It can hold a call until you approve it in a terminal UI or from another shell.
+Milestone 3's exit check ran with a real Claude Code session whose held call was approved from another
+process, not with Codex approved from the UI as first planned. Built-in tools such as the shell and
+file edits now pass the same rules through each CLI's pre-tool hook: `derbent gate` speaks the hook
+protocols of Claude Code, Codex, Copilot CLI and Antigravity CLI, and only Claude Code's has been
+checked in a real session (see [Built-in tools](#built-in-tools)). The overhead benchmark, a demo
+recording and the v1.0.0 release come next. The [design](docs/design.md) covers the whole plan, what
+Derbent does not do, and how each claim is tested. Decisions are recorded in [docs/adr](docs/adr).
 
 ## Try it
 
@@ -89,6 +92,10 @@ derbent config check
 
 starts every server once and prints the tools each would give the agents.
 
+Codex starts MCP servers with only a few environment variables. If your config uses `${env:NAME}`, add
+`env_vars = ["NAME"]` to the `[mcp_servers.derbent]` entry in Codex's config; without it the gate does
+not start, and its error names the missing variable.
+
 ## Approvals
 
 A rule can hold a call until you decide. It goes above the rule that allows everything else, and the
@@ -141,6 +148,113 @@ itself or write the database, so an approval or an `args` rule on a shell tool d
 
 The timeout sits below Codex's default tool timeout of 60 seconds ([ADR 0005](docs/adr/0005-approval-timeout.md)).
 If you raise it, raise `tool_timeout_sec` for the `derbent` server in Codex's config too.
+
+## Built-in tools
+
+An agent's shell commands and file edits do not go through MCP, but each of the four CLIs can run a
+command of your choice before a tool call. Set that command to `derbent gate`, and it decides the
+call as tool `native__<the CLI's tool name>` under the same rules and approvals, writes a receipt with
+outcome `gated` or `refused`, and answers in the CLI's format: nothing for a call a rule allows, so the
+CLI's own permission settings still apply, `allow` for a call you approved, and `deny` with the reason
+for anything refused ([ADR 0006](docs/adr/0006-pre-tool-hooks.md)).
+
+Claude Code, in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "derbent gate --agent claude" } ] }
+    ]
+  }
+}
+```
+
+Codex, in `~/.codex/config.toml`. Codex asks you once to trust a new hook before it runs it:
+
+```toml
+[[hooks.PreToolUse]]
+matcher = ".*"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "derbent gate --agent codex"
+```
+
+Copilot CLI, in `~/.copilot/hooks/derbent.json`:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      { "type": "command", "bash": "derbent gate --agent copilot", "powershell": "derbent gate --agent copilot", "timeoutSec": 120 }
+    ]
+  }
+}
+```
+
+Antigravity CLI, in `~/.gemini/config/hooks.json`:
+
+```json
+{
+  "derbent": {
+    "PreToolUse": [ { "matcher": ".*", "hooks": [ { "command": "derbent gate --agent antigravity", "timeout": 120 } ] } ]
+  }
+}
+```
+
+A CLI that times out on its hook lets the call through its own permission flow, so the hook's timeout
+must stay above `[approvals] timeout`. Claude Code and Codex give a hook 600 seconds by default;
+Copilot CLI and Antigravity CLI give it 30, which is why their examples set 120.
+
+`--agent` is the name your rules match, so give it the same value as the CLI's `derbent mcp` entry. The
+hook protocol follows the agent name; for any other name add `--cli claude`, `codex`, `copilot` or
+`antigravity`. If Derbent's MCP entry in the CLI has another name than `derbent`, pass it with
+`--server`, or each call to Derbent's own tools is decided and recorded twice. The hook fails closed:
+when it cannot read the call, load the config, open the database or write the receipt, it denies the
+call and says why, so a mistake in the config stops every built-in tool until it is fixed.
+
+Rules name a built-in tool by the CLI's own name for it, so they differ per CLI: `native__Bash` (Claude
+Code, Codex), `native__apply_patch` (Codex's file edits), `native__bash` and `native__powershell`
+(Copilot CLI) and `native__run_command` (Antigravity CLI). The arguments differ too, and these rules go
+above the one that allows everything else:
+
+```toml
+[[rule]]
+agent  = "claude"
+tool   = "native__Bash"
+args   = { command = "git push*" }
+action = "ask"
+
+[[rule]]
+agent  = "antigravity"
+tool   = "native__run_command"
+args   = { CommandLine = "git push*" }
+action = "ask"
+```
+
+Derbent cannot hide a CLI's built-in tools from the model, so a `deny` on one refuses each call instead.
+In Claude Code and Codex, which send MCP calls to the hook too, a tool of an MCP server configured in the
+CLI directly is decided the same way, as `native__mcp__<server>__<tool>`.
+
+`A` on a built-in tool approves it for the rest of the CLI's session: its session id in Claude Code,
+Codex and Copilot CLI, its conversation id in Antigravity CLI. For MCP tools the session is one
+`derbent mcp` process. A grant on one path never covers the other, since the tools have different names.
+
+The hook reads the same config file but starts no servers, so a `${env:NAME}` that is not set where the
+hook runs is left alone, and server secrets can stay in the CLI's MCP entry for Derbent. Receipts from
+the hook then mask only the secrets set in the hook's own environment; add a `[receipts] redact`
+pattern for the others.
+
+What each CLI's hook covers, from its documentation and, where marked, a real session:
+
+| CLI | Built-in tools gated | Derbent's own tools appear as | Not seen by the gate | Checked in a real session |
+|---|---|---|---|---|
+| Claude Code | every tool, through PreToolUse | `mcp__derbent__*` | nothing known | Claude Code 2.1.283, on 2026-09-27, with `claude -p --settings`: `echo derbent-allow` ran with a receipt `native__Bash allow rule:2 gated`; `echo derbent-deny` was blocked with Derbent's reason and a receipt `deny rule:1 refused`; `memory_write` through the derbent MCP server, which Claude Code names `mcp__derbent__memory_write`, got one receipt, from the MCP gate, because the hook skipped it; other built-in tools such as ToolSearch reach the hook too, as `native__ToolSearch`. |
+| Codex | shell commands (`Bash`), `apply_patch` for every file edit, and other local function tools such as `update_plan` | `mcp__derbent__*` | hosted tools such as web search | Not checked: Codex was not installed, and was left out by choice. |
+| Copilot CLI | shell (`bash`, `powershell`), file tools (`view`, `create`, `edit`, `apply_patch`), `grep`, `glob`, `web_fetch`, `web_search` and its other documented tools | `derbent-*`, with names capped at 64 characters | possibly MCP calls: the documentation does not say whether the hook sees them | Not checked: Copilot CLI 1.0.88 stopped at "monthly quota exceeded" before any tool call. |
+| Antigravity CLI | built-in tools such as `run_command`, `view_file`, `write_to_file` and `replace_file_content` | `mcp_derbent_*`, an assumption until checked | not documented | Not checked: not installed. |
 
 ## Licence
 
