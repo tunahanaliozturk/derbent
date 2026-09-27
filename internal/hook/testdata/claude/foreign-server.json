@@ -1,0 +1,1 @@
+{"session_id":"abc123","cwd":"/work/shop","hook_event_name":"PreToolUse","tool_name":"mcp__derbent__memory_write","tool_input":{"title":"t","body":"b"},"tool_use_id":"toolu_04","mcp_server":{"name":"derbent-evil","source":"project"}}

@@ -56,6 +56,7 @@ func TestParse(t *testing.T) {
 		{"copilot", "copilot/bash-camel.json", "cp-1", "/work/shop", "bash", `{"command":"git push"}`},
 		{"copilot", "copilot/bash-object.json", "cp-1", "/work/shop", "bash", `{"command":"git push"}`},
 		{"copilot", "copilot/bash-pascal.json", "cp-1", "/work/shop", "bash", `{"command":"git push"}`},
+		{"copilot", "copilot/null-args.json", "cp-1", "/work/shop", "list_files", `{}`},
 		{"antigravity", "antigravity/run.json", "conv-7", "/work/shop", "run_command", `{"CommandLine":"git push","Cwd":"/work/shop"}`},
 	}
 	for _, tc := range tests {
@@ -113,6 +114,16 @@ func TestAnswers(t *testing.T) {
 	}
 }
 
+// served accepts what Derbent serves when its config has one downstream server, github.
+func served(tool string) bool {
+	switch tool {
+	case "memory_write", "memory_search", "memory_read":
+		return true
+	}
+	name, _, ok := strings.Cut(tool, "__")
+	return ok && name == "github"
+}
+
 func TestOwnToolsAreRecognisedPerCLI(t *testing.T) {
 	for _, tc := range []struct {
 		cli, tool string
@@ -122,19 +133,40 @@ func TestOwnToolsAreRecognisedPerCLI(t *testing.T) {
 		{"claude", "mcp__derbent__github__get_me", true},
 		{"claude", "mcp__github__get_me", false},
 		{"claude", "Bash", false},
+		{"claude", "mcp__derbent__evil__x", false}, // a foreign server entry called derbent__evil
 		{"codex", "mcp__derbent__memory_search", true},
+		{"codex", "mcp__derbent__evil__x", false},
 		{"copilot", "derbent-memory_write", true},
 		{"copilot", "derbentx-memory_write", false},
+		{"copilot", "derbent-evil-x", false}, // a foreign server entry called derbent-evil
 		{"antigravity", "mcp_derbent_memory_write", true},
 		{"antigravity", "run_command", false},
+		{"antigravity", "mcp_derbent_evil_x", false}, // a foreign server entry called derbent_evil
 	} {
-		if got := protocol(t, tc.cli).Own("derbent", tc.tool); got != tc.own {
+		if got := protocol(t, tc.cli).Own("derbent", hook.Call{Tool: tc.tool}, served); got != tc.own {
 			t.Errorf("%s Own(%q) = %v, want %v", tc.cli, tc.tool, got, tc.own)
 		}
 	}
-	c, err := protocol(t, "claude").Parse(golden(t, "claude/own.json"))
-	if err != nil || !protocol(t, "claude").Own("derbent", c.Tool) {
-		t.Fatalf("own.json: %+v, %v", c, err)
+}
+
+func TestOwnChecksTheServerTheCLINames(t *testing.T) {
+	for _, tc := range []struct {
+		cli, file string
+		own       bool
+	}{
+		{"claude", "claude/own.json", true},             // no mcp_server: older Claude Code
+		{"claude", "claude/own-server.json", true},      // mcp_server.name is derbent
+		{"claude", "claude/foreign-server.json", false}, // mcp_server.name is derbent-evil
+		{"codex", "claude/foreign-server.json", false},
+	} {
+		p := protocol(t, tc.cli)
+		c, err := p.Parse(golden(t, tc.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := p.Own("derbent", c, served); got != tc.own {
+			t.Errorf("%s %s: Own = %v, want %v (call %+v)", tc.cli, tc.file, got, tc.own, c)
+		}
 	}
 }
 

@@ -21,6 +21,7 @@ type Call struct {
 	Session string          // the CLI's session, which scopes "approve for this session"
 	Dir     string          // the working directory, which picks the project
 	Tool    string          // the tool's name as the CLI reports it
+	Server  string          // the MCP server entry of the tool, for CLIs that name it (Claude Code)
 	Args    json.RawMessage // the tool's input
 }
 
@@ -82,10 +83,17 @@ func (p Protocol) Answer(a gate.HookAnswer) []byte {
 	return p.answer(a)
 }
 
-// Own reports whether tool is one of Derbent's own MCP tools, which the MCP gate already decides and
-// records, as this CLI names the tools of the MCP server entry called server.
-func (p Protocol) Own(server, tool string) bool {
-	return strings.HasPrefix(tool, p.prefix(server))
+// Own reports whether c calls one of Derbent's own MCP tools, which the MCP gate already decides and
+// records: c.Tool starts with this CLI's prefix for the MCP server entry called server, served accepts
+// the rest of the name, and the server the CLI named, if it names one, is server. For CLIs that name no
+// server one gap remains: a foreign entry called <server><delimiter><a server in Derbent's config> with a
+// tool of the same rest of the name still looks like Derbent's own.
+func (p Protocol) Own(server string, c Call, served func(tool string) bool) bool {
+	if c.Server != "" && c.Server != server {
+		return false
+	}
+	rest, ok := strings.CutPrefix(c.Tool, p.prefix(server))
+	return ok && served(rest)
 }
 
 func decision(a gate.HookAnswer) string {
@@ -112,13 +120,17 @@ func marshal(v any) []byte {
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 }
 
-// Claude Code, and Codex, which mirrors it.
+// Claude Code, and Codex, which mirrors it. Claude Code 2.1.274 and later name the server of an MCP
+// tool in mcp_server.
 
 type claudeInput struct {
 	SessionID string          `json:"session_id"`
 	Cwd       string          `json:"cwd"`
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
+	MCPServer struct {
+		Name string `json:"name"`
+	} `json:"mcp_server"`
 }
 
 func parseClaude(in []byte) (Call, error) {
@@ -126,7 +138,7 @@ func parseClaude(in []byte) (Call, error) {
 	if err := json.Unmarshal(in, &v); err != nil {
 		return Call{}, err
 	}
-	return Call{Session: v.SessionID, Dir: v.Cwd, Tool: v.ToolName, Args: v.ToolInput}, nil
+	return Call{Session: v.SessionID, Dir: v.Cwd, Tool: v.ToolName, Server: v.MCPServer.Name, Args: v.ToolInput}, nil
 }
 
 type claudeOutput struct {
@@ -162,6 +174,9 @@ func parseCopilot(in []byte) (Call, error) {
 		return parseClaude(in)
 	}
 	args := v.ToolArgs
+	if bytes.Equal(bytes.TrimSpace(args), []byte("null")) {
+		args = nil // no arguments, which Parse turns into {}
+	}
 	var s string
 	if json.Unmarshal(args, &s) == nil {
 		if !json.Valid([]byte(s)) {
