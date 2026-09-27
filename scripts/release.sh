@@ -5,11 +5,13 @@
 # The second build of each pair compiles from its own empty cache, so a match shows the compiler
 # output is stable too, not only the link. Both builds stamp the same VCS information (revision,
 # commit time, whether the tree is modified), since they run from the same checkout and dist/ is
-# ignored by git. A tag rebuilt from a clean checkout of that tag therefore gives the published
-# checksums.
+# ignored by git. A tag rebuilt from a clean checkout of that tag, with go1.27.1
+# (GOTOOLCHAIN=go1.27.1) and no GOFLAGS, GOAMD64 or GOARM64 overrides, therefore gives the
+# published checksums.
 set -euo pipefail
 version="${1:?usage: scripts/release.sh <version>}"
-cd "$(dirname "$0")/.."
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+[ -f go.mod ] && [ -d cmd/derbent ] || { echo "release.sh: run it from the derbent repository" >&2; exit 1; }
 targets="windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"
 rm -rf dist && mkdir -p dist/a dist/b
 for t in $targets; do

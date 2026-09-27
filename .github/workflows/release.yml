@@ -12,9 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
       - name: Build twice and compare
         run: scripts/release.sh "$GITHUB_REF_NAME"
       # A tag without a CHANGELOG.md section still publishes, with a note pointing at the changelog.
@@ -22,7 +25,7 @@ jobs:
         run: |
           v="${GITHUB_REF_NAME#v}"
           if [ -f CHANGELOG.md ]; then
-            awk -v v="$v" '/^## /{h=$2; sub(/^\[/, "", h); sub(/\]$/, "", h); f=(h==v); next} f' CHANGELOG.md > notes.md
+            awk -v v="$v" '/^## /{h=$2; sub(/^\[/, "", h); sub(/\]$/, "", h); f=(h""==v""); next} f' CHANGELOG.md > notes.md
           fi
           if ! grep -q '[^[:space:]]' notes.md 2>/dev/null; then
             echo "::warning::CHANGELOG.md has no section for $v"
