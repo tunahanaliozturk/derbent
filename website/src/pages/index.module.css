@@ -1,0 +1,158 @@
+.hero {
+  padding: 4rem 0 3rem;
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.mark {
+  height: 3.2rem;
+}
+
+.tagline {
+  max-width: 40rem;
+  font-size: 1.25rem;
+  line-height: 1.6;
+  margin-bottom: 2rem;
+}
+
+.window {
+  max-width: 52rem;
+  overflow: hidden;
+  margin-bottom: 2rem;
+  background: var(--derbent-window);
+  border: 2px solid var(--derbent-ink);
+  box-shadow: 6px 6px 0 var(--derbent-ink);
+}
+
+[data-theme='dark'] .window {
+  border-color: #30363d;
+}
+
+.windowBar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 0.15rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--derbent-dim);
+  border-bottom: 1px solid var(--ifm-color-emphasis-300);
+}
+
+.screen {
+  overflow-x: auto;
+  margin: 0;
+  padding: 1rem 1.25rem;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  background: transparent;
+  border-radius: 0;
+}
+
+.dim {
+  color: var(--derbent-dim);
+}
+
+.accent {
+  color: var(--ifm-color-primary);
+  font-weight: 600;
+}
+
+.install {
+  max-width: 52rem;
+  min-width: 0;
+}
+
+.command {
+  overflow: hidden;
+  border: 2px solid var(--derbent-ink);
+  box-shadow: 4px 4px 0 var(--derbent-ink);
+}
+
+[data-theme='dark'] .command {
+  border-color: #30363d;
+}
+
+.command :global(.theme-code-block) {
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.note {
+  margin: 1rem 0 0;
+  font-size: 0.85rem;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.buttons :global(.button) {
+  border-radius: 0;
+}
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  padding: 3rem 0 2rem;
+}
+
+.card {
+  padding: 1.25rem;
+  background: var(--ifm-color-emphasis-100);
+  border: 1px solid var(--ifm-color-emphasis-300);
+}
+
+.card h3 {
+  font-size: 1rem;
+}
+
+.card p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.worksWith,
+.name {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--derbent-dim);
+}
+
+.name {
+  max-width: 40rem;
+  margin: 0 auto 4rem;
+  font-style: italic;
+}
+
+@media (max-width: 996px) {
+  .features {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .features {
+    grid-template-columns: 1fr;
+  }
+
+  .title {
+    font-size: 2.25rem;
+  }
+
+  .screen {
+    font-size: 0.75rem;
+  }
+}
