@@ -308,15 +308,14 @@ func (m Model) decide(v approval.Verdict, asked int64) (tea.Model, tea.Cmd) {
 		if err := m.approvals.Decide(m.ctx, p.ID, v); err != nil {
 			return statusMsg(fmt.Sprintf("#%d: %v", p.ID, err))
 		}
-		switch v {
-		case approval.ApproveSession:
+		if v == approval.ApproveSession {
 			return statusMsg(fmt.Sprintf("#%d approved %s", p.ID, sessionScope(p)))
-		case approval.ApproveOnce:
-			return statusMsg(fmt.Sprintf("#%d approved once: %s %s", p.ID, p.Agent, p.Tool))
-		case approval.Deny:
-			return statusMsg(fmt.Sprintf("#%d denied: %s %s", p.ID, p.Agent, p.Tool))
 		}
-		return statusMsg(fmt.Sprintf("#%d %s: %s %s", p.ID, v, p.Agent, p.Tool))
+		if v == approval.ApproveOnce {
+			return statusMsg(fmt.Sprintf("#%d approved once: %s %s", p.ID, p.Agent, p.Tool))
+		}
+		// approval.Deny, the only other verdict a key gives
+		return statusMsg(fmt.Sprintf("#%d denied: %s %s", p.ID, p.Agent, p.Tool))
 	}
 }
 
@@ -369,8 +368,8 @@ func (m Model) View() tea.View {
 const helpText = `derbent keys
 
   a          approve the selected call once
-  A, A       approve this tool's calls that the same rule asks about, for the
-             rest of that agent's session
+  A, A       approve this tool's calls that the same rule asks about, under
+             the same rules above it, for the rest of that agent's session
   d          deny the selected call
   enter      read the selected call's whole arguments; esc goes back
   up, down   select a waiting call

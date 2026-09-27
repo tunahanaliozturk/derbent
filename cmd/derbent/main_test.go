@@ -591,6 +591,18 @@ func TestApproveNeedsANumber(t *testing.T) {
 	}
 }
 
+// --session grants what A does: the tool's calls that the same rule asks about under the same rules
+// above it, since a grant is keyed on the rule and every rule above it (ADR 0011).
+func TestApproveHelpNamesWhatASessionApprovalCovers(t *testing.T) {
+	var stderr bytes.Buffer
+	if err := run(t.Context(), []string{"approve", "-h"}, strings.NewReader(""), io.Discard, &stderr); err == nil {
+		t.Fatal("approve -h succeeded")
+	}
+	if want := "calls that the same rule asks about under the same rules above it, for the rest"; !strings.Contains(stderr.String(), want) {
+		t.Fatalf("help lacks %q:\n%s", want, stderr.String())
+	}
+}
+
 func TestDecidingNeedsAnExistingDatabase(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "typo")
 	path := filepath.Join(dir, "p.db")

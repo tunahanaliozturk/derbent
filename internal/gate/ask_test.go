@@ -191,8 +191,9 @@ func TestApprovalForTheSessionCoversLaterCallsOfThatSessionOnly(t *testing.T) {
 	}
 }
 
-// A session grant covers the calls the same rule asks about, not every call of the tool: approving a
-// deploy note for the session does not let a release note through that another ask rule holds.
+// A session grant covers the calls the same rule asks about under the same rules above it, not every
+// call of the tool: approving a deploy note for the session does not let a release note through that
+// another ask rule holds.
 func TestApprovalForTheSessionCoversOnlyTheRuleThatAsked(t *testing.T) {
 	e := newEnv(t)
 	deploys := rule.Spec{Tool: "memory_write", Args: map[string]string{"title": "deploy*"}, Action: rule.Ask}

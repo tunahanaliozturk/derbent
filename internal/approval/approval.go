@@ -169,9 +169,10 @@ func (q *Queue) closeForCtx(ctx context.Context, id int64) (Outcome, error) {
 }
 
 // Decide records the user's verdict on a pending approval. ApproveSession also lets through, without
-// asking, every later call to the same tool from the same agent session that the same rule asks about;
-// an approval with no rule key is approved once and grants nothing. An approval that is not waiting,
-// including one past its deadline that its gate has not closed yet, gives ErrNotPending.
+// asking, every later call to the same tool from the same agent session that the same rule asks about
+// under the same rules above it; an approval with no rule key is approved once and grants nothing. An
+// approval that is not waiting, including one past its deadline that its gate has not closed yet, gives
+// ErrNotPending.
 func (q *Queue) Decide(ctx context.Context, id int64, v Verdict) error {
 	state := "approved"
 	switch v {

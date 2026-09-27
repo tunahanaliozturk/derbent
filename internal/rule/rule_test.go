@@ -204,13 +204,26 @@ func TestKeyCoversTheRuleAndTheRulesAboveIt(t *testing.T) {
 		}
 	}
 
-	argsReordered := rule.Spec{Agent: "codex", Tool: "native__Bash", Args: map[string]string{"cwd": "/work/*", "command": "git push*"}, Action: rule.Ask}
+	// Go reads a map's keys in another order on each pass, and with eight args a pass can start at any
+	// of them, so compiling the same rule many times reads its args in many orders. The key must not
+	// follow that order.
+	many := push
+	many.Args = map[string]string{
+		"branch": "main", "command": "git push*", "cwd": "/work/*", "env": "*",
+		"host": "h?", "remote": "origin", "shell": "bash", "user": "*",
+	}
+	manyKey := key(2, force, many, rm, last)
+	for i := range 64 {
+		if key(2, force, many, rm, last) != manyKey {
+			t.Fatalf("compile %d read rule 2's args in another order and gave it another key", i+2)
+		}
+	}
+
 	for name, got := range map[string]string{
-		"args written in another order": key(2, force, argsReordered, rm, last),
-		"a rule below edited":           key(2, force, push, memory, last),
-		"a rule below removed":          key(2, force, push, last),
-		"a rule below added":            key(2, force, push, rm, memory, last),
-		"rules below reordered":         key(2, force, push, memory, rm, last),
+		"a rule below edited":   key(2, force, push, memory, last),
+		"a rule below removed":  key(2, force, push, last),
+		"a rule below added":    key(2, force, push, rm, memory, last),
+		"rules below reordered": key(2, force, push, memory, rm, last),
 	} {
 		if got != want {
 			t.Errorf("%s changed rule 2's key", name)

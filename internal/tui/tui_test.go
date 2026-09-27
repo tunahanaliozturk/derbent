@@ -237,9 +237,9 @@ func TestKeysDecideTheSelectedCall(t *testing.T) {
 		approved, granted bool
 		status            string
 	}{
-		{[]string{"a"}, true, false, "approved once"},
-		{[]string{"A", "A"}, true, true, "approved github__create_pull_request calls that rule 2 asks about, for the rest of codex's session"},
-		{[]string{"d"}, false, false, "denied"},
+		{[]string{"a"}, true, false, "#2 approved once: codex github__create_pull_request"},
+		{[]string{"A", "A"}, true, true, "#2 approved github__create_pull_request calls that rule 2 asks about, for the rest of codex's session"},
+		{[]string{"d"}, false, false, "#2 denied: codex github__create_pull_request"},
 	} {
 		t.Run(tc.keys[0], func(t *testing.T) {
 			m, d := newModel(t)
@@ -312,8 +312,13 @@ func TestVerifyKey(t *testing.T) {
 func TestHelpAndQuit(t *testing.T) {
 	m, _ := newModel(t)
 	m, _ = press(m, "?")
-	if !strings.Contains(screen(m), "approve this tool's calls that the same rule asks about, for the") {
-		t.Fatalf("help:\n%s", screen(m))
+	for _, want := range []string{
+		"approve this tool's calls that the same rule asks about, under",
+		"the same rules above it, for the rest of that agent's session",
+	} {
+		if !strings.Contains(screen(m), want) {
+			t.Fatalf("help lacks %q:\n%s", want, screen(m))
+		}
 	}
 	m, _ = press(m, "x")
 	if !strings.Contains(screen(m), "RECEIPTS") {

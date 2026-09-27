@@ -185,10 +185,11 @@ func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isO
 }
 
 // ask settles a call a rule sends to the user. A grant from an earlier "approve for this session" lets
-// it through at once, when the same rule asked for that grant: grants are keyed on the rule's
-// fingerprint, so one rule's grant never covers a call that another rule holds (ADR 0011). Otherwise
-// the call waits in the approval queue until the user decides, the timeout passes, the agent gives
-// up, or the gate is told to stop.
+// it through at once, when the same rule, under the same rules above it, asked for that grant: grants
+// are keyed on a fingerprint of the rule and every rule above it, so one rule's grant never covers a
+// call that another rule holds, nor one the same rule catches after a rule above it changed (ADR 0011).
+// Otherwise the call waits in the approval queue until the user decides, the timeout passes, the agent
+// gives up, or the gate is told to stop.
 func (g *Gate) ask(ctx context.Context, name, redacted string, ruleIndex int, byRule string) settled {
 	if g.Approvals == nil {
 		return settled{by: byRule, text: name + " needs the user's approval, and this gate cannot ask for it"}

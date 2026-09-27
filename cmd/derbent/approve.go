@@ -22,7 +22,7 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	dbFlag := flags.String("db", "", "database file (default: derbent.db in the user state directory)")
 	session := false
 	if command == "approve" {
-		flags.BoolVar(&session, "session", false, "approve this tool's calls that the same rule asks about, for the rest of the agent's session")
+		flags.BoolVar(&session, "session", false, "approve this tool's calls that the same rule asks about under the same rules above it, for the rest of the agent's session")
 	}
 	if err := flags.Parse(args); err != nil {
 		return err
