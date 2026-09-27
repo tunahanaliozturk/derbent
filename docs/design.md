@@ -343,6 +343,11 @@ checkout's file and a `.derbent.toml` at the worktree's own root is not read.
 - A file with any other key, or a rule the rule syntax refuses, is invalid, and every call in that project
   is denied on both paths, with a reason that names the file and the error and `decided_by` = `gate`. A
   missing file changes nothing.
+- Only a regular file of at most 64 KiB is read, through a reader that stops one byte past the limit. A
+  symbolic link, a directory, a FIFO, a device or a larger file is refused as invalid, with a reason that
+  says which, since reading it could block the hook or fill its memory. The `.git` file of a linked
+  worktree, and the `commondir` file it leads to, are read under the same limits, and one that fails them
+  is taken as not a linked worktree.
 - The file is read for each call's project and kept by path, size and modification time, so an edit takes
   effect on the next call on both paths.
 - Project rules decide calls and never change tool lists: a tool the project denies stays listed, and its

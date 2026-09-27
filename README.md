@@ -229,7 +229,8 @@ call gets the stricter of your decision and the project's, deny over ask over al
 make a call ask or deny but never lets through what your rules refuse
 ([ADR 0014](docs/adr/0014-project-rules.md)). Receipts say `project:1` when a project rule decided, and the
 UI and `derbent pending` say `project rule 1`. An edit takes effect on the next call. A file with any other
-key, or a rule Derbent cannot read, denies every call in that project until it is fixed. Project rules
+key, or a rule Derbent cannot read, denies every call in that project until it is fixed, and so does a
+`.derbent.toml` that is a symbolic link, is not a regular file, or is larger than 64 KiB. Project rules
 decide calls only and never change which tools an agent sees. An agent that can edit the repository can
 edit or delete the file, which only takes the project back to your own rules.
 

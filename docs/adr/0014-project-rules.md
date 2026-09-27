@@ -21,6 +21,11 @@ anyone who can open a pull request, or any agent that can write a file, turn off
   and its calls are refused.
 - An invalid file denies every call in the project, on the hook and on the MCP gate, with a reason that
   names the file and the error. A missing file changes nothing.
+- Only a regular file of at most 64 KiB is read. A symbolic link, anything else that is not a regular
+  file, such as a directory, a FIFO or a device, and a larger file are refused as invalid, with a reason
+  that says which. The file is read with the same limit, so one that grows after it was checked is refused
+  too. The `.git` file that marks a linked worktree, and the `commondir` file it leads to, are read under
+  the same limits, and one that fails them is taken as not a linked worktree.
 - The file is read for each call and kept by path, size and modification time. It is looked up under the
   project root in its own case.
 - A grant for a call the project's rules asked about is keyed on both fingerprints, the user's rules up to
@@ -32,7 +37,9 @@ anyone who can open a pull request, or any agent that can write a file, turn off
 ## Consequences
 
 - A repository can make agents stricter, never looser: the worst a hostile `.derbent.toml` can do is deny
-  calls or ask about them, and the user sees both.
+  calls or ask about them, and the user sees both. The limits on what is read keep that true: a FIFO or a
+  link to a terminal would hold the hook until the CLI gave up on it and ran the call under its own
+  permissions, and a link to `/dev/zero` would fill the hook's memory until it was killed.
 - Taking the stricter action, instead of merging the two lists into one first-match list, keeps each list
   readable on its own and makes "only tighten" hold by construction: no order of rules can let through
   what the user's rules refuse.
