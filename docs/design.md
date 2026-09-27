@@ -115,6 +115,12 @@ timeout = "50s"
 
 [receipts]
 redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
+
+[[budget]]
+agent = "*"
+tool  = "native__Bash"
+calls = 200
+per   = "1h"
 ```
 
 - Rules are tried in order and the first match wins. A rule matches on `agent` and `tool` as globs, and
@@ -134,6 +140,8 @@ redact = ['(?i)bearer\s+\S+', 'ghp_[A-Za-z0-9]{36}']
 - An `args` condition that meets a value it cannot read (not a string) matches a `deny` or an `ask` and
   never an `allow` (ADR 0003).
 - `[approvals] timeout` is a Go duration of at least one second, 50 seconds when it is not set (ADR 0005).
+- `[[budget]]` tables are optional (see Budgets), and a server's table can say `pin = false` (see Tool
+  pins).
 
 ## Tools
 
@@ -172,8 +180,9 @@ bm25 (ADR 0007).
 ## Receipts
 
 Each call through the gate appends one row: sequence number, time, project, agent, gate session, tool,
-arguments after redaction, SHA-256 of the arguments before redaction, the decision and what made it (a
-rule index, the gate itself, or an approval, see Approvals), the outcome, the size and SHA-256 of the
+arguments after redaction, SHA-256 of the arguments before redaction, the decision and what made it
+(`rule:<n>` for the user's rules, `project:<n>` for a project's, `budget:<n>`, `pin`, `gate` for the gate
+itself, or an approval, see Approvals), the outcome, the size and SHA-256 of the
 result, the duration, the previous receipt's hash, and this receipt's hash.
 
 - The hash is SHA-256 over the previous hash and the stored bytes of the row's fields, each field
@@ -245,6 +254,91 @@ rule that asked, the project and the redacted arguments, and the terminal bell r
   gate already told to stop writes no approval and is refused with `gate`, since it never waited. A
   gate that cannot ask at all refuses the call and keeps the rule's `rule:<n>`.
 - The approval queue and the UI hold arguments only after redaction.
+- `derbent grants` lists every session grant: the approval id (as `#12`), the agent, the gate or CLI
+  session, the tool, the rule that asked (from the approval) and when it was granted, as rows or JSON
+  lines, escaped like `derbent receipts`. `derbent revoke <id>`, written `12` or `#12`, deletes that grant
+  and says what it revoked; `derbent revoke --all` deletes every grant and says how many. An id with no
+  grant is an error that names it. Both paths read the grants table on every call, so a revoked grant
+  stops covering calls at once.
+
+## Budgets
+
+A budget limits how many calls one agent label may have let through to the tools its `tool` glob
+matches, within a sliding window `per`, a Go duration from one minute to 24 hours (ADR 0012). `agent` and
+`tool` are globs with the rule syntax, and `calls` is at least 1.
+
+- Every budget whose `agent` and `tool` match the call applies; unlike rules, there is no first match. A
+  call counts against a budget when its receipt says it was let through (`decision` = `allow`, whether a
+  rule, a grant or the user let it through) and its time is inside the window. Counting reads the
+  receipts, so every gate process and hook on the machine shares it.
+- The rules decide first, and a `deny` stays a deny. Otherwise, when a matching budget is used up, the
+  call is refused without asking the user: `decided_by` is `budget:<n>`, the budget's 1-based position in
+  the config, the outcome is `refused`, and the agent reads "derbent: budget <n> reached: <calls> calls
+  to <tool glob> per <per> for <agent>; the next call is possible in about <d>". An agent stuck in a loop
+  therefore never floods the approval queue.
+- Counting and appending are not one transaction across processes, so calls made at the same moment can
+  pass a budget by at most the number of calls in flight at once.
+- Receipts are indexed on agent and time, so the count reads only that agent's window. A budget that
+  cannot be counted refuses the call, with `decided_by` = `gate`.
+
+## Tool pins
+
+A downstream server can change a tool's description between two starts, and a description is text the
+agent reads and follows. The gate pins each downstream tool (ADR 0013).
+
+- A pin is the SHA-256 of the tool's definition as the gate receives it: name, title, description, input
+  schema, output schema and annotations, encoded as JSON with sorted object keys and no insignificant
+  whitespace. Pins live in the database, keyed on server and tool name, and every gate process shares
+  them.
+- The first time a gate sees a tool, it pins it and serves it (trust on first use). Pins are taken for
+  every tool the gate could serve, including tools the rules hide from one agent, since another agent may
+  see them.
+- When a tool's definition differs from its pin, the gate leaves the tool out of the agent's tool list, so
+  the agent never reads the changed text, keeps the new definition next to the pin, and writes one warning
+  line to stderr. A call to it from an agent holding an older list is refused before any rule is read:
+  `decided_by` is `pin`, the outcome is `refused`, and the agent reads "derbent: <tool> changed since it
+  was pinned; the user can review it with derbent pins". A server that sends the pinned definition again
+  gets the tool served again, and the recorded change is dropped. A pin check that fails withholds the
+  server's tools until a later check succeeds.
+- `derbent pins` lists the pins with their state, `pinned` or `changed`, when each was pinned and when the
+  change was seen, as rows or JSON lines. `derbent pins show <server>__<tool>` prints the pinned and the
+  new definition as indented JSON and the lines that differ, all escaped. `derbent pins accept
+  <server>__<tool>` makes the new definition the pin and prints its hash. A running gate looks at its
+  withheld tools every two seconds and serves an accepted one again, which the agent learns through
+  `list_changed`.
+- `pin = false` in a server's table turns pinning off for a server whose descriptions change on every
+  start: its tools are served as they come and never pinned.
+- A tool that disappears keeps its pin, so it cannot come back changed without notice.
+- Only downstream tools are pinned. The memory tools are Derbent's own, and the CLIs' built-in tools have
+  no definition the gate receives.
+- The UI shows one line above the waiting calls while any tool is changed. `derbent config check` shows
+  each tool's pin state (`new`, `pinned`, `changed`) and pins nothing.
+
+## Project rules
+
+A repository can make Derbent stricter for itself, never looser (ADR 0014). A `.derbent.toml` file at the
+project root, the directory Derbent uses for the project key, may hold `[[rule]]` tables and nothing
+else. It is looked up under the root in the path's own case, not under the lower-cased key.
+
+- Project rules use the rule syntax and are tried in order, first match wins, with no final catch-all:
+  when none matches, the project adds nothing.
+- The call's action is the stricter of the user's decision and the project's, in the order deny, ask,
+  allow. `decided_by` names the rule that set it: `rule:<n>` for the user's rules, `project:<n>` for the
+  project file; on a tie it names the user's rule.
+- A file with any other key, or a rule the rule syntax refuses, is invalid, and every call in that project
+  is denied on both paths, with a reason that names the file and the error and `decided_by` = `gate`. A
+  missing file changes nothing.
+- The file is read for each call's project and kept by path, size and modification time, so an edit takes
+  effect on the next call on both paths.
+- Project rules decide calls and never change tool lists: a tool the project denies stays listed, and its
+  calls are refused.
+- A session grant for a call that a project rule sent to the user is keyed on both fingerprints: the
+  user's rules up to the rule that decided, and the project's rules up to the rule that asked. An edit to
+  either list at or above those rules stops the grant from applying, as ADR 0011 says for the user's rules.
+- The approval queue records which list asked, so the UI, `derbent pending`, `derbent approve` and
+  `derbent grants` say `project rule <n>` for a project rule.
+- An agent that can edit the repository can edit or delete `.derbent.toml`. That only takes the project
+  back to the user's own rules, never below them.
 
 ## Built-in tools
 
@@ -326,9 +420,12 @@ could not read one of its arguments cannot be approved for the session, so its k
 
 Below the waiting calls are the agents seen in the last hour and a live feed of receipts (time, agent,
 tool, decision, what decided it, outcome, duration). `m` opens a memory browser that searches every
-project and still shows how many calls are waiting and why a poll failed, `v` runs verify, `/` filters
+project and still shows how many calls are waiting and why a poll failed, `g` lists the session grants,
+where `r` pressed twice within five seconds on the same grant revokes it, `v` runs verify, `/` filters
 the feed by agent or tool name, `?` shows the keys, `q` quits. Quitting the UI changes nothing for
 running agents: their calls that need an approval wait for the timeout and are denied.
+While any downstream tool has changed since it was pinned, a line under the header says how many and to
+run `derbent pins`.
 
 Text from agents, tools and the database is drawn with control characters, bidirectional overrides and
 invisible characters (zero-width characters, tag characters, line separators, variation selectors)
@@ -363,7 +460,10 @@ migrates it inside `BEGIN IMMEDIATE`.
 - Memory is text written by one agent and read by another, which makes it a path for instructions planted
   by one agent to reach the next. Search and read results mark each entry with its author and as notes,
   not instructions, and a rule can put `memory_write` behind `ask`.
-- Only the user's config sets rules. Nothing inside a repository can change them in v1.
+- The user's config sets the rules. A repository's `.derbent.toml` can only make them stricter (see
+  Project rules), so an agent that edits or deletes it only takes the project back to the user's rules.
+- Tool pins guard against a downstream server that changes a tool's definition after the gate first saw
+  it. They cannot tell whether that first definition was honest.
 
 ## Evidence
 
@@ -395,6 +495,28 @@ migrates it inside `BEGIN IMMEDIATE`.
   rule key is approved once by `A` and refused by `derbent approve --session`. On both paths, after `A`
   on a string `git push` (a deploy note on the MCP path), a call whose argument is an array still asks
   every time, and `A` on it writes no grant.
+- **Grants listed and revoked.** Tests list and revoke grants with `derbent grants`, `derbent revoke` and
+  the UI's `g` and `r`, escape stored text in rows and JSON lines, and show on the MCP gate and on the
+  hook, the latter through the real binary, that the call after a revoke asks again.
+- **Budgets.** Rule tests check which budgets apply and when each is used up, with calls inside and
+  outside the window, other tools and other agents, and the wait until the next call. A receipt test
+  counts the calls in a window that starts in the middle of a second. Gate tests show a budget refusing
+  the call after its limit on both paths, counting calls from other gates of the same agent, refusing an
+  asked call without writing an approval, and leaving a deny to its rule.
+- **Pins.** A golden test fixes the canonical form of a definition, and another shows it does not depend
+  on key order or spacing. Store tests pin on first use, record a change, drop it when the server goes
+  back, accept it, and pin each tool once when checks race. Gate tests withhold a changed tool and refuse
+  its calls with `pin`, serve it again after an accept while the gate runs, serve a server with
+  `pin = false` unpinned, keep the pin of a tool that disappears and pin a tool the rules hide.
+  End-to-end tests start two gates on one database with the echo test server's description changed
+  between them, and check `derbent pins`, `pins show`, `pins accept` and `derbent config check`.
+- **Project rules.** Rule and config tests compile project rules without a catch-all, refuse any other
+  key, parse a file with a byte order mark and CRLF line endings, and read the file again only when its
+  size or modification time changes. Gate tests show a project rule making a call ask or deny, never
+  loosening one, the user's rule named on a tie, an invalid file denying every call, an edit taking effect
+  on the next call, a grant keyed on both lists asking again after an edit to either, and a denied tool
+  still listed. End-to-end tests run `derbent gate` under a `.derbent.toml` and approve its call from
+  another process.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
@@ -446,6 +568,7 @@ derbent/
 ├── internal/gate/                the MCP server facing agents, tool listing, forwarding, hook decisions
 ├── internal/downstream/          MCP clients for stdio and HTTP servers, restarts
 ├── internal/memory/              memory over FTS5
+├── internal/pin/                 tool pins: canonical definitions and the pins table
 ├── internal/receipt/             appending, verify, listing
 ├── internal/redact/              masking secrets in stored arguments
 ├── internal/approval/            pending approvals, polling, session grants
@@ -511,7 +634,13 @@ Each milestone gets its own implementation plan and ends with a green CI run.
 4. **Built-in tools.** The Claude Code hook, and the other three CLIs checked for hooks, with adapters
    where they exist. Exit: the coverage table is filled from real sessions.
 5. **Proof and release.** The overhead benchmark, the demo transcript, README, ADRs finished,
-   reproducible binaries, `v1.0.0`.
+   reproducible binaries. The owner moved `v1.0.0` after milestones 6 and 7.
+6. **Control.** Session grants listed and revoked, budgets, tool pins and project rules. Exit: a real
+   Claude Code session shows a budget refusing the next Bash call after its limit, a `.derbent.toml` in a
+   scratch repository making a call ask that the user's rules allow, approved with `derbent approve`, and
+   a downstream test server whose tool description changed between two gate starts withheld and served
+   again after `derbent pins accept`.
+7. **Workflow.** Verifiable receipt export, `derbent explain`, handoffs and rule suggestions.
 
 How the exit checks went: milestone 1 as planned, its tests running in CI on Windows and Linux, and
 milestone 2 as planned, with the GitHub MCP server answering a real Claude Code session through the
@@ -533,19 +662,16 @@ Not in v1, in rough order of value:
    hold them.
 2. **Rule suggestions.** After the user has approved the same agent and tool five times, the UI offers
    to turn it into an allow rule. Repeated denials offer a deny rule.
-3. **Grants.** List the active session grants and revoke one.
-4. **Budgets.** Call limits per agent and tool per hour, which stop an agent stuck in a loop.
-5. **Handoffs.** `handoff_create` and `handoff_list` tools, so one agent can leave a task addressed to
+3. **Handoffs.** `handoff_create` and `handoff_list` tools, so one agent can leave a task addressed to
    another.
-6. **Approvals away from the desk.** A push notification with approve and deny actions. It needs a relay
+4. **Approvals away from the desk.** A push notification with approve and deny actions. It needs a relay
    or a listener, so it comes with its own security design.
-7. **Timeline.** Receipts grouped into sessions per agent, and export to OpenTelemetry.
-8. **Better memory.** Local embeddings, expiry, and flagging notes from two agents that contradict
+5. **Timeline.** Receipts grouped into sessions per agent, and export to OpenTelemetry.
+6. **Better memory.** Local embeddings, expiry, and flagging notes from two agents that contradict
    each other.
-9. **Skill suggestions.** A tool sequence that repeats across sessions offered as a draft skill.
-10. **More of MCP.** Resources and prompts from downstream servers, and approvals shown inside the
-    agent's own UI through elicitation.
-11. **Project rules.** A rules file inside a repository that can only tighten the user's rules.
+7. **Skill suggestions.** A tool sequence that repeats across sessions offered as a draft skill.
+8. **More of MCP.** Resources and prompts from downstream servers, and approvals shown inside the
+   agent's own UI through elicitation.
 
 ## Known limits and risks
 
@@ -578,11 +704,17 @@ Not in v1, in rough order of value:
   itself. Approvals and `args` rules on shell tools guard against mistakes and prompt injection that stay
   inside MCP, not against an agent that already has a shell.
 - Approvals depend on the user watching. Unattended, `ask` means denied after the timeout.
-- A session grant cannot be listed or revoked, and it lasts for the session. On the hook path, which reads
-  the config on every call, it stops applying while the granted rule or a rule above it differs, and
-  applies again if the edit is undone, since grants are kept and looked up by the rule's fingerprint. A
-  `derbent mcp` gate reads the config only when it starts, so an edit does not affect its grants
-  (ADR 0011).
+- A session grant lasts for the session unless it is revoked with `derbent revoke` or `r` in the UI. On
+  the hook path, which reads the config on every call, it stops applying while the granted rule or a
+  rule above it differs, and applies again if the edit is undone, since grants are kept and looked up by
+  the rule's fingerprint. A `derbent mcp` gate reads the config only when it starts, so an edit does not
+  affect its grants (ADR 0011).
+- A budget is approximate under concurrency: calls in flight at the same moment can pass it by at most
+  their number.
+- Pins trust the first definition a gate sees. A tool that is hostile from its first listing is pinned as
+  it is; `derbent config check` shows a new server's tools before an agent uses them.
+- The project rules file is kept by size and modification time. An edit that keeps both, which only a
+  file system with a coarse clock allows within one tick, is not seen until the file changes again.
 - Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call
   took 68.96 ms at p50, 46.87 ms of it for starting the binary; on Linux, 6.374 ms
   (`docs/benchmark-results/`).
