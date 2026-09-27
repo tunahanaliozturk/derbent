@@ -112,13 +112,19 @@ func loadConfig(path string) (config.Config, error) {
 	return config.Load(path)
 }
 
+// databasePath is the --db a command was given, or the default database when it was given none.
+func databasePath(flag string) (string, error) {
+	if flag != "" {
+		return flag, nil
+	}
+	return config.DefaultDBPath()
+}
+
+// openDB opens the database at path, or the default one, creating it if needed.
 func openDB(ctx context.Context, path string) (*sql.DB, error) {
-	if path == "" {
-		p, err := config.DefaultDBPath()
-		if err != nil {
-			return nil, err
-		}
-		path = p
+	path, err := databasePath(path)
+	if err != nil {
+		return nil, err
 	}
 	return store.Open(ctx, path)
 }

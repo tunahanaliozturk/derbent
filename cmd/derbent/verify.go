@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 )
@@ -27,11 +26,9 @@ func runVerify(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if flags.NArg() > 0 {
 		return fmt.Errorf("verify: unexpected argument %q", flags.Arg(0))
 	}
-	path := *dbPath
-	if path == "" {
-		if path, err = config.DefaultDBPath(); err != nil {
-			return err
-		}
+	path, err := databasePath(*dbPath)
+	if err != nil {
+		return err
 	}
 	db, err := store.OpenExisting(ctx, path)
 	if err != nil {

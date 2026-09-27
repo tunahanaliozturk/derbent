@@ -6,12 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
-	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
@@ -19,7 +17,7 @@ import (
 func runDecide(ctx context.Context, command string, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	dbPath := flags.String("db", "", "database file (default: derbent.db in the user state directory)")
+	dbFlag := flags.String("db", "", "database file (default: derbent.db in the user state directory)")
 	session := false
 	if command == "approve" {
 		flags.BoolVar(&session, "session", false, "approve this tool for the rest of the agent's session")
@@ -33,7 +31,8 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%s: give one approval id, as the UI shows it", command)
 	}
-	id, err := strconv.ParseInt(flags.Arg(0), 10, 64)
+	// The UI shows an id as #12, and either form is accepted.
+	id, err := strconv.ParseInt(strings.TrimPrefix(flags.Arg(0), "#"), 10, 64)
 	if err != nil {
 		return fmt.Errorf("%s: %q is not an approval id", command, flags.Arg(0))
 	}
@@ -44,18 +43,13 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	case command == "approve":
 		verdict, done = approval.ApproveOnce, "approved"
 	}
-	path := *dbPath
-	if path == "" {
-		if path, err = config.DefaultDBPath(); err != nil {
-			return err
-		}
+	path, err := databasePath(*dbFlag)
+	if err != nil {
+		return err
 	}
 	// Deciding writes, but it must never create a database: a mistyped path would only ever say "not
 	// pending".
-	if _, err = os.Stat(path); errors.Is(err, os.ErrNotExist) { //nolint:gosec // the path is the user's own --db or default database
-		return fmt.Errorf("%s: there is no database at %s", command, path)
-	}
-	db, err := store.Open(ctx, path)
+	db, err := store.OpenExistingWritable(ctx, path)
 	if err != nil {
 		return err
 	}

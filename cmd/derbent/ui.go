@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 	"github.com/tunahanaliozturk/derbent/internal/tui"
 )
 
@@ -26,7 +28,15 @@ func runUI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 	if flags.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q: %w", flags.Arg(0), errUsage)
 	}
-	db, err := openDB(ctx, *dbPath)
+	// The default database is created on first use, but a --db that names no file is a mistake: the UI
+	// would show an empty database where no call ever waits.
+	var db *sql.DB
+	var err error
+	if *dbPath == "" {
+		db, err = openDB(ctx, "")
+	} else {
+		db, err = store.OpenExistingWritable(ctx, *dbPath)
+	}
 	if err != nil {
 		return err
 	}

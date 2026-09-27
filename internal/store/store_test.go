@@ -81,6 +81,38 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	}
 }
 
+// Deciding an approval writes, but a mistyped path must fail and name itself rather than create an
+// empty database where nothing is ever pending.
+func TestOpenExistingWritableNeedsTheFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "typo")
+	path := filepath.Join(dir, "p.db")
+	if db, err := store.OpenExistingWritable(t.Context(), path); err == nil || !strings.Contains(err.Error(), path) {
+		if db != nil {
+			db.Close()
+		}
+		t.Fatalf("err = %v, want an error naming %s", err, path)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("OpenExistingWritable created %s", dir)
+	}
+}
+
+func TestOpenExistingWritableMigratesAndWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	if err := os.WriteFile(path, nil, 0o600); err != nil { // an empty file is an empty SQLite database
+		t.Fatal(err)
+	}
+	db, err := store.OpenExistingWritable(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.ExecContext(t.Context(), `INSERT INTO approvals
+		(created_ms, deadline_ms, project, agent, session, tool, args, rule) VALUES (1, 2, 'p', 'a', 's', 't', '{}', 1)`); err != nil {
+		t.Fatalf("write after opening: %v", err)
+	}
+}
+
 func TestImmediateRollsBackOnError(t *testing.T) {
 	db := open(t, filepath.Join(t.TempDir(), "p.db"))
 	boom := errors.New("boom")

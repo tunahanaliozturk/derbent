@@ -11,7 +11,6 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 	"github.com/tunahanaliozturk/derbent/internal/visible"
@@ -57,11 +56,9 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if f.Since, err = parseSince(*since, time.Now()); err != nil {
 		return err
 	}
-	path := *dbPath
-	if path == "" {
-		if path, err = config.DefaultDBPath(); err != nil {
-			return err
-		}
+	path, err := databasePath(*dbPath)
+	if err != nil {
+		return err
 	}
 	db, err := store.OpenExisting(ctx, path)
 	if err != nil {

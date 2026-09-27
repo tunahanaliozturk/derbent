@@ -38,6 +38,16 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// OpenExistingWritable opens the database at path as Open does, migrating it if needed, but never
+// creates it: a path that does not exist is an error naming it, so a mistyped path fails instead of
+// showing an empty database where nothing ever waits.
+func OpenExistingWritable(ctx context.Context, path string) (*sql.DB, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("open database %s: %w", path, err)
+	}
+	return Open(ctx, path)
+}
+
 // OpenExisting opens the database at path for reading only. It never creates the file, never migrates
 // it, and refuses to run a statement that writes, so a copy kept as evidence stays byte for byte as it
 // was. A schema newer than this binary knows is refused.

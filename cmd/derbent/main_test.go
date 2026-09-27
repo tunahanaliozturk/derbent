@@ -400,16 +400,16 @@ type called struct {
 	err error
 }
 
-// askedEcho starts a gate whose rules ask before echo__echo, calls the tool in the background and waits
-// until the call is pending. It returns the database path, the pending approval and the call's result.
-func askedEcho(t *testing.T) (string, approval.Pending, <-chan called) {
+// askedEcho starts a gate whose rules ask before echo__echo, calls the tool with text in the background
+// and waits until the call is pending. It returns the database path, the pending approval and the call's result.
+func askedEcho(t *testing.T, text string) (string, approval.Pending, <-chan called) {
 	t.Helper()
 	dir := t.TempDir()
 	codex := connectProcess(t, dir, "codex", writeAskConfig(t, dir, "30s"))
 	t.Cleanup(func() { codex.Close() })
 	done := make(chan called, 1)
 	go func() {
-		res, err := codex.CallTool(t.Context(), &mcp.CallToolParams{Name: "echo__echo", Arguments: map[string]any{"text": "hi"}})
+		res, err := codex.CallTool(t.Context(), &mcp.CallToolParams{Name: "echo__echo", Arguments: map[string]any{"text": text}})
 		done <- called{res, err}
 	}()
 
@@ -451,7 +451,7 @@ func callResult(t *testing.T, done <-chan called) *mcp.CallToolResult {
 // The design's evidence for approvals: a gate process waits on ask, a second process approves, and the
 // call goes through.
 func TestApprovalFromAnotherProcess(t *testing.T) {
-	path, p, done := askedEcho(t)
+	path, p, done := askedEcho(t, "hi")
 	var out bytes.Buffer
 	if err := run(t.Context(), []string{"approve", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatal(err)
@@ -469,7 +469,7 @@ func TestApprovalFromAnotherProcess(t *testing.T) {
 }
 
 func TestApproveForTheSessionLeavesAGrant(t *testing.T) {
-	path, p, done := askedEcho(t)
+	path, p, done := askedEcho(t, "hi")
 	var out bytes.Buffer
 	if err := run(t.Context(), []string{"approve", "--session", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatal(err)
@@ -491,10 +491,11 @@ func TestApproveForTheSessionLeavesAGrant(t *testing.T) {
 	}
 }
 
+// The id can be written as the UI shows it, #12.
 func TestDenyRefusesTheWaitingCall(t *testing.T) {
-	path, p, done := askedEcho(t)
+	path, p, done := askedEcho(t, "hi")
 	var out bytes.Buffer
-	if err := run(t.Context(), []string{"deny", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
+	if err := run(t.Context(), []string{"deny", "--db", path, fmt.Sprintf("#%d", p.ID)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), fmt.Sprintf("denied %d", p.ID)) {
@@ -516,7 +517,7 @@ func TestApprovalTimeoutDeniesTheCall(t *testing.T) {
 }
 
 func TestApproveNeedsANumber(t *testing.T) {
-	for _, args := range [][]string{{"approve"}, {"deny", "twelve"}} {
+	for _, args := range [][]string{{"approve"}, {"deny", "twelve"}, {"deny", "#"}, {"deny", "##5"}} {
 		if err := run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err == nil {
 			t.Errorf("run %v succeeded", args)
 		}
@@ -538,6 +539,87 @@ func TestDecidingNeedsAnExistingDatabase(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("deciding created %s", dir)
+	}
+}
+
+// pending shows each waiting call with its whole arguments, read from what a real gate process wrote.
+func TestPendingListsWaitingCallsWithTheirWholeArguments(t *testing.T) {
+	text := strings.Repeat("x", 3000) + "END"
+	path, p, done := askedEcho(t, text)
+	var table bytes.Buffer
+	if err := run(t.Context(), []string{"pending", "--db", path}, strings.NewReader(""), &table, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], fmt.Sprintf("#%d  codex  echo__echo  ", p.ID)) ||
+		!strings.HasSuffix(lines[0], " left") || lines[1] != `    {"text":"`+text+`"}` {
+		t.Fatalf("pending table:\n%s", table.String())
+	}
+	var js bytes.Buffer
+	if err := run(t.Context(), []string{"pending", "--db", path, "--json"}, strings.NewReader(""), &js, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var got pendingLine
+	if err := json.Unmarshal(js.Bytes(), &got); err != nil {
+		t.Fatalf("not one JSON line: %v: %q", err, js.String())
+	}
+	if got.ID != p.ID || got.Agent != "codex" || got.Session != p.Session || got.Tool != "echo__echo" || got.Args != `{"text":"`+text+`"}` {
+		t.Fatalf("pending line = %+v", got)
+	}
+	for _, at := range []string{got.Created, got.Deadline} {
+		if _, err := time.Parse(time.RFC3339, at); err != nil {
+			t.Errorf("%q is not RFC 3339: %v", at, err)
+		}
+	}
+	if err := run(t.Context(), []string{"deny", "--db", path, fmt.Sprint(p.ID)}, strings.NewReader(""), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	callResult(t, done)
+}
+
+// A waiting call's agent, tool and arguments come from an agent, so pending escapes them as receipts
+// does, in rows and in JSON lines.
+func TestPendingEscapesAgentText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, tool, args := "co\x1b[2Jdex", "gh\u009b2Jissue\U0000202e"+sneaky, "{\"x\":\"\x1b]52;c;ZXZpbA==\x07\nnext"+sneaky+"\"}"
+	_, err = db.ExecContext(t.Context(), `INSERT INTO approvals
+		(created_ms, deadline_ms, project, agent, session, tool, args, rule) VALUES (?, ?, 'p', ?, 's', ?, ?, 1)`,
+		time.Now().UnixMilli(), time.Now().Add(time.Minute).UnixMilli(), agent, tool, args)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var table bytes.Buffer
+	if err = run(t.Context(), []string{"pending", "--db", path}, strings.NewReader(""), &table, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	out := table.String()
+	if strings.ContainsAny(out, "\x1b\a\u009b\U0000202e"+sneaky) || strings.Count(out, "\n") != 2 {
+		t.Fatalf("raw control characters reached the table:\n%q", out)
+	}
+	for _, want := range []string{`co\u001b[2Jdex`, `gh\u009b2Jissue` + "\\u202e" + sneakyEscaped, `\u001b]52;c;ZXZpbA==\u0007\nnext` + sneakyEscaped} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table lacks %q:\n%q", want, out)
+		}
+	}
+	var js bytes.Buffer
+	if err = run(t.Context(), []string{"pending", "--db", path, "--json"}, strings.NewReader(""), &js, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	line := js.String()
+	if strings.ContainsAny(line, "\u009b\U0000202e"+sneaky) || strings.Count(line, "\n") != 1 {
+		t.Fatalf("raw control characters reached the JSON line: %q", line)
+	}
+	var got pendingLine
+	if err = json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatalf("the line is not JSON: %v: %q", err, line)
+	}
+	if got.Agent != agent || got.Tool != tool || got.Args != args {
+		t.Fatalf("decoded %+v; want agent %q, tool %q, args %q", got, agent, tool, args)
 	}
 }
 
@@ -656,7 +738,9 @@ func TestReceiptsCommand(t *testing.T) {
 
 	// The flag package stops at the first word that is not a flag, so a stray word would silently drop
 	// every flag after it.
-	for _, args := range [][]string{{"receipts", "--db", path, "codex", "--json"}, {"verify", "--db", path, "extra"}} {
+	for _, args := range [][]string{
+		{"receipts", "--db", path, "codex", "--json"}, {"verify", "--db", path, "extra"}, {"pending", "--db", path, "extra"},
+	} {
 		err = run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), `"`+args[3]+`"`) {
 			t.Errorf("run %v: err = %v, want one naming %q", args, err, args[3])
@@ -672,8 +756,26 @@ func TestUINamesAStrayArgument(t *testing.T) {
 	}
 }
 
+// A mistyped --db must fail and name the path, not open an empty database that never shows a call.
+func TestUINeedsAnExistingDatabase(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "typo")
+	path := filepath.Join(dir, "p.db")
+	err := run(t.Context(), []string{"--db", path}, strings.NewReader("q"), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("err = %v, want an error naming %s", err, path)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the UI created %s", dir)
+	}
+}
+
 func TestUIOpensAndQuits(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
 	var out bytes.Buffer
 	if err := run(t.Context(), []string{"--db", path}, strings.NewReader("q"), &out, io.Discard); err != nil {
 		t.Fatal(err)
