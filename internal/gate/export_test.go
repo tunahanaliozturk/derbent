@@ -2,6 +2,7 @@ package gate
 
 import (
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -29,6 +30,13 @@ func SwitchOffRedaction(t testing.TB) {
 func WhenWaitingForTools(t testing.TB, f func()) {
 	knobs.waiting = f
 	t.Cleanup(func() { knobs.waiting = nil })
+}
+
+// SetPinRecheck makes WatchPins look at the withheld tools every d, for the rest of the test. Call it
+// before WatchPins starts.
+func SetPinRecheck(t testing.TB, d time.Duration) {
+	knobs.pinRecheck = d
+	t.Cleanup(func() { knobs.pinRecheck = 0 })
 }
 
 // GateCalls is the middleware Server installs, so a test can hand it a request the SDK does not build.

@@ -13,10 +13,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/goleak"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 	"github.com/tunahanaliozturk/derbent/internal/visible"
@@ -27,9 +29,10 @@ func TestMain(m *testing.M) {
 }
 
 type deps struct {
-	q   *approval.Queue
-	log *receipt.Log
-	mem *memory.Store
+	q    *approval.Queue
+	log  *receipt.Log
+	mem  *memory.Store
+	pins *pin.Store
 }
 
 func newModel(t *testing.T) (Model, deps) {
@@ -39,8 +42,8 @@ func newModel(t *testing.T) (Model, deps) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	d := deps{q: approval.NewQueue(db), log: receipt.NewLog(db), mem: memory.NewStore(db)}
-	m := New(t.Context(), d.q, d.log, d.mem)
+	d := deps{q: approval.NewQueue(db), log: receipt.NewLog(db), mem: memory.NewStore(db), pins: pin.NewStore(db)}
+	m := New(t.Context(), d.q, d.log, d.mem, d.pins)
 	m.poll = time.Millisecond // the next-poll command runs inside messages; keep it short
 	m = later(m, 0)           // the model's clock stands still until a test moves it
 	m, _ = update(m, tea.WindowSizeMsg{Width: 140, Height: 40})
@@ -1075,4 +1078,33 @@ func TestHostileTextCannotReachTheTerminal(t *testing.T) {
 		t.Errorf("the status line does not show the decision, escaped:\n%s", s)
 	}
 	noRawText(t, s, 60)
+}
+
+func TestChangedToolsShowALineUnderTheHeader(t *testing.T) {
+	m, d := newModel(t)
+	m, _ = refresh(m)
+	if strings.Contains(screen(m), "since it was pinned") {
+		t.Fatalf("a pins line with no pins:\n%s", screen(m))
+	}
+	tool := func(name, desc string) *mcp.Tool {
+		return &mcp.Tool{Name: name, Description: desc, InputSchema: map[string]any{"type": "object"}}
+	}
+	change := func(name string) {
+		t.Helper()
+		for _, desc := range []string{"v1", "v2"} {
+			if _, err := d.pins.Check(t.Context(), "github", []*mcp.Tool{tool(name, desc)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	change("get_me")
+	m, _ = refresh(m)
+	if !strings.Contains(screen(m), "1 tool changed since it was pinned: run derbent pins") {
+		t.Fatalf("screen:\n%s", screen(m))
+	}
+	change("create_issue")
+	m, _ = refresh(m)
+	if !strings.Contains(screen(m), "2 tools changed since they were pinned: run derbent pins") {
+		t.Fatalf("screen:\n%s", screen(m))
+	}
 }

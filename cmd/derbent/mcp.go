@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,6 +22,7 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/downstream"
 	"github.com/tunahanaliozturk/derbent/internal/gate"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 )
@@ -76,6 +78,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		Agent: *agent, Project: project, Session: session, Version: version,
 		Rules: cfg.Rules, Budgets: cfg.Budgets, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
 		Redact: cfg.Redact.JSON, Approvals: approval.NewQueue(db), ApprovalTimeout: cfg.ApprovalTimeout,
+		Pins: pin.NewStore(db), Unpinned: unpinned(cfg.Servers),
 		Stop: ctx, // SIGINT or SIGTERM withdraws the calls still waiting for the user
 	}
 	srv := g.Server()
@@ -83,6 +86,14 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		mgr := downstream.New(specsOf(cfg.Servers), g.SyncTools, downstream.Options{Version: version, Stderr: stderr})
 		g.Forward = mgr.Call
 		g.ToolsReady, g.ToolsWait = mgr.Started(), firstListWait
+		// The watcher serves a tool the user accepted with derbent pins accept; it stops with the gate.
+		watch, stopWatch := context.WithCancel(ctx)
+		var watching sync.WaitGroup
+		watching.Go(func() { g.WatchPins(watch) })
+		defer func() {
+			stopWatch()
+			watching.Wait()
+		}()
 		mgr.Start(ctx)
 		defer mgr.Close()
 	}
@@ -99,6 +110,17 @@ func specsOf(servers []config.Server) []downstream.Spec {
 		specs = append(specs, downstream.Spec{Name: s.Name, Command: s.Command, Env: s.Env, URL: s.URL, Headers: s.Headers})
 	}
 	return specs
+}
+
+// unpinned names the servers whose config says pin = false.
+func unpinned(servers []config.Server) map[string]bool {
+	out := map[string]bool{}
+	for _, s := range servers {
+		if !s.Pin {
+			out[s.Name] = true
+		}
+	}
+	return out
 }
 
 type nopWriteCloser struct{ io.Writer }

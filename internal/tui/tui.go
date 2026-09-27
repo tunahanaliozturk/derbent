@@ -17,6 +17,7 @@ import (
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
@@ -47,6 +48,7 @@ type Model struct {
 	approvals *approval.Queue
 	receipts  *receipt.Log
 	memory    *memory.Store
+	pins      *pin.Store
 	now       func() time.Time
 	poll      time.Duration
 
@@ -62,24 +64,25 @@ type Model struct {
 	confirm   int64
 	confirmAt time.Time
 	// detail is the call whose whole arguments are open, 0 for none, and scroll the first line shown.
-	detail  int64
-	scroll  int
-	feed    []receipt.Receipt
-	lastSeq int64
-	agents  []receipt.AgentSeen
-	status  string // the outcome of the last action
-	pollErr string // why the last poll failed, until one succeeds
-	filter  string
-	editing bool // typing a filter
-	help    bool
-	notes   *browser   // the memory browser while it is open
-	grants  *grantList // the grants screen while it is open
-	lookups int        // memory searches and reads sent; each result carries its number
+	detail      int64
+	scroll      int
+	feed        []receipt.Receipt
+	lastSeq     int64
+	agents      []receipt.AgentSeen
+	changedPins int    // tools with a recorded change, from the last poll
+	status      string // the outcome of the last action
+	pollErr     string // why the last poll failed, until one succeeds
+	filter      string
+	editing     bool // typing a filter
+	help        bool
+	notes       *browser   // the memory browser while it is open
+	grants      *grantList // the grants screen while it is open
+	lookups     int        // memory searches and reads sent; each result carries its number
 }
 
-// New returns the UI over the shared database's approvals, receipts and memory.
-func New(ctx context.Context, q *approval.Queue, l *receipt.Log, m *memory.Store) Model {
-	return Model{ctx: ctx, approvals: q, receipts: l, memory: m, now: time.Now, poll: pollEvery, width: 100, height: 30}
+// New returns the UI over the shared database's approvals, receipts, memory and tool pins.
+func New(ctx context.Context, q *approval.Queue, l *receipt.Log, m *memory.Store, p *pin.Store) Model {
+	return Model{ctx: ctx, approvals: q, receipts: l, memory: m, pins: p, now: time.Now, poll: pollEvery, width: 100, height: 30}
 }
 
 type (
@@ -89,6 +92,7 @@ type (
 		pending []approval.Pending
 		feed    []receipt.Receipt
 		agents  []receipt.AgentSeen
+		changed int // tools with a recorded change
 		err     error
 	}
 )
@@ -98,8 +102,8 @@ func (m Model) Init() tea.Cmd {
 	return m.load
 }
 
-// load reads the waiting calls, the receipts after the last one shown, and the agents seen in the last
-// hour. The program runs it off the UI goroutine.
+// load reads the waiting calls, the receipts after the last one shown, the agents seen in the last hour
+// and how many tools changed since they were pinned. The program runs it off the UI goroutine.
 func (m Model) load() tea.Msg {
 	pending, err := m.approvals.Pending(m.ctx)
 	if err != nil {
@@ -113,7 +117,13 @@ func (m Model) load() tea.Msg {
 	if err != nil {
 		return snapshotMsg{err: err}
 	}
-	return snapshotMsg{pending: pending, feed: feed, agents: agents}
+	changed := 0
+	if m.pins != nil {
+		if changed, err = m.pins.CountChanged(m.ctx); err != nil {
+			return snapshotMsg{err: err}
+		}
+	}
+	return snapshotMsg{pending: pending, feed: feed, agents: agents, changed: changed}
 }
 
 // Update handles one message.
@@ -178,6 +188,7 @@ func (m Model) apply(s snapshotMsg) (tea.Model, tea.Cmd) {
 		m.lastSeq = s.feed[n-1].Seq
 	}
 	m.agents = s.agents
+	m.changedPins = s.changed
 	if ring {
 		return m, tea.Batch(next, tea.Raw(bell))
 	}
@@ -444,6 +455,14 @@ func (m Model) main() string {
 	l := &lines{width: m.width}
 	l.add(titleStyle, fmt.Sprintf("derbent   %d waiting   ? keys", len(m.pending)))
 	l.blank()
+	if n := m.changedPins; n > 0 {
+		text := fmt.Sprintf("%d tools changed since they were pinned: run derbent pins", n)
+		if n == 1 {
+			text = "1 tool changed since it was pinned: run derbent pins"
+		}
+		l.add(pendingStyle, text)
+		l.blank()
+	}
 	if len(m.pending) > 0 {
 		m.drawWaiting(l)
 		l.blank()

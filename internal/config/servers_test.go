@@ -131,3 +131,13 @@ env = { A = "${env:DERBENT_TEST_TOKEN}", B = "${env:DERBENT_TEST_UNSET}" }
 		t.Fatalf("err = %v, want an error without the resolved value", err)
 	}
 }
+
+func TestServersArePinnedUnlessTheySayNot(t *testing.T) {
+	cfg, err := config.Parse("test.toml", "[servers.a]\ncommand = ['a']\n\n[servers.b]\ncommand = ['b']\npin = false\n\n[[rule]]\naction = \"allow\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Servers) != 2 || !cfg.Servers[0].Pin || cfg.Servers[1].Pin {
+		t.Fatalf("servers = %+v, want a pinned and b not", cfg.Servers)
+	}
+}

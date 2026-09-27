@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"slices"
 	"strings"
 	"sync"
@@ -15,17 +16,21 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/downstream"
 	"github.com/tunahanaliozturk/derbent/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/pin"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
 var errCheckFailed = errors.New("config check failed")
 
 // runConfigCheck loads the config, starts every downstream server once, and prints the tools each one
-// would give the agents, so a mistake shows up here rather than in the middle of an agent session.
+// would give the agents with their pin states, so a mistake shows up here rather than in the middle of
+// an agent session.
 func runConfigCheck(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("config check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", "", "config file (default: config.toml in the user config directory)")
+	dbFlag := flags.String("db", "", "database to read tool pins from, read-only (default: derbent.db in the user state directory)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -40,10 +45,30 @@ func runConfigCheck(ctx context.Context, args []string, stdout, stderr io.Writer
 	if _, err = fmt.Fprintf(stdout, "config: %s%s\nrules: %d\n", path, note, cfg.Rules.Len()); err != nil {
 		return err
 	}
+	dbPath, err := databasePath(*dbFlag)
+	if err != nil {
+		return err
+	}
+	// Pins are read, never written: config check shows each tool's state and pins nothing.
+	var pins *pin.Store
+	pinNote := ""
+	db, err := store.OpenExisting(ctx, dbPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		pinNote = " (not found: every tool is new)"
+	case err != nil:
+		return err
+	default:
+		defer db.Close()
+		pins = pin.NewStore(db)
+	}
+	if _, err = fmt.Fprintf(stdout, "pins: %s%s\n", dbPath, pinNote); err != nil {
+		return err
+	}
 
 	var mu sync.Mutex
 	listed := map[string][]*mcp.Tool{}
-	collect := func(server string, tools []*mcp.Tool) {
+	collect := func(_ context.Context, server string, tools []*mcp.Tool) {
 		mu.Lock()
 		listed[server] = tools
 		mu.Unlock()
@@ -74,8 +99,19 @@ func runConfigCheck(ctx context.Context, args []string, stdout, stderr io.Writer
 		slices.SortFunc(tools, func(a, b *mcp.Tool) int { return strings.Compare(a.Name, b.Name) })
 		for _, t := range tools {
 			name, mark := s.Name+"__"+t.Name, ""
-			if why := gate.LeftOut(name, t); why != "" {
+			switch why := gate.LeftOut(name, t); {
+			case why != "":
 				mark = "  (left out: " + why + ")"
+			case !s.Pin:
+				mark = "  (not pinned: pin = false)"
+			default:
+				state := pin.New
+				if pins != nil {
+					if state, err = pins.State(ctx, s.Name, t); err != nil {
+						return err
+					}
+				}
+				mark = "  (pin: " + string(state) + ")"
 			}
 			if _, err = fmt.Fprintf(stdout, "  %s%s\n", visible.Escape(name), mark); err != nil {
 				return err

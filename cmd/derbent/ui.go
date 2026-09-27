@@ -12,6 +12,7 @@ import (
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 	"github.com/tunahanaliozturk/derbent/internal/tui"
@@ -41,7 +42,7 @@ func runUI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 		return err
 	}
 	defer db.Close()
-	m := tui.New(ctx, approval.NewQueue(db), receipt.NewLog(db), memory.NewStore(db))
+	m := tui.New(ctx, approval.NewQueue(db), receipt.NewLog(db), memory.NewStore(db), pin.NewStore(db))
 	// Bubble Tea sizes the screen from the terminal and starts at 0x0, drawing nothing, when stdout is
 	// not one. A terminal's own size replaces this one.
 	size := tea.WithWindowSize(100, 30)

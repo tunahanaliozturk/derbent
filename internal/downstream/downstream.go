@@ -37,8 +37,9 @@ type Spec struct {
 }
 
 // ToolsFunc receives a server's whole tool list every time it is loaded: after each connection and
-// after each list_changed notification from the server. It may be called from several goroutines.
-type ToolsFunc func(server string, tools []*mcp.Tool)
+// after each list_changed notification from the server. It may be called from several goroutines. ctx
+// ends when the Manager closes.
+type ToolsFunc func(ctx context.Context, server string, tools []*mcp.Tool)
 
 // Options tune a Manager. Zero values get the defaults noted on each field.
 type Options struct {
@@ -286,7 +287,7 @@ func (m *Manager) loadTools(ctx context.Context, server string, cs *mcp.ClientSe
 	lock.Lock()
 	defer lock.Unlock()
 	if res := cs.InitializeResult(); res != nil && res.Capabilities != nil && res.Capabilities.Tools == nil {
-		m.onTools(server, nil)
+		m.onTools(ctx, server, nil)
 		return nil
 	}
 	var tools []*mcp.Tool
@@ -296,7 +297,7 @@ func (m *Manager) loadTools(ctx context.Context, server string, cs *mcp.ClientSe
 		}
 		tools = append(tools, t)
 	}
-	m.onTools(server, tools)
+	m.onTools(ctx, server, tools)
 	return nil
 }
 

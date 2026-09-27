@@ -50,7 +50,7 @@ type echoIn struct {
 
 func serveEcho() {
 	s := mcp.NewServer(&mcp.Implementation{Name: "echo", Version: "0"}, nil)
-	mcp.AddTool(s, &mcp.Tool{Name: "echo"}, func(_ context.Context, _ *mcp.CallToolRequest, in echoIn) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(s, &mcp.Tool{Name: "echo", Description: os.Getenv("DERBENT_TEST_ECHO_DESC")}, func(_ context.Context, _ *mcp.CallToolRequest, in echoIn) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "echo:" + in.Text}}}, nil, nil
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "secret_tool"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
@@ -419,7 +419,7 @@ func TestDownstreamServerThroughARealGate(t *testing.T) {
 func TestConfigCheckListsServerTools(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	if err := run(t.Context(), []string{"config", "check", "--config", writeConfig(t, dir)}, strings.NewReader(""), &out, io.Discard); err != nil {
+	if err := run(t.Context(), []string{"config", "check", "--db", filepath.Join(dir, "p.db"), "--config", writeConfig(t, dir)}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatalf("config check: %v\n%s", err, out.String())
 	}
 	for _, want := range []string{"rules: 2", "server echo: 3 tools", "echo__crash", "echo__echo", "echo__secret_tool"} {
@@ -438,7 +438,7 @@ func TestConfigCheckEscapesToolNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := run(t.Context(), []string{"config", "check", "--config", path}, strings.NewReader(""), &out, io.Discard); err != nil {
+	if err := run(t.Context(), []string{"config", "check", "--db", filepath.Join(filepath.Dir(path), "p.db"), "--config", path}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatalf("config check: %v\n%s", err, out.String())
 	}
 	s := out.String()
@@ -455,7 +455,7 @@ func TestConfigCheckFailsForAServerThatDoesNotStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := run(t.Context(), []string{"config", "check", "--config", path}, strings.NewReader(""), &out, io.Discard)
+	err := run(t.Context(), []string{"config", "check", "--db", filepath.Join(dir, "p.db"), "--config", path}, strings.NewReader(""), &out, io.Discard)
 	if !errors.Is(err, errCheckFailed) || !strings.Contains(out.String(), "server ghost: not running") {
 		t.Fatalf("err = %v, output:\n%s", err, out.String())
 	}
@@ -1347,7 +1347,7 @@ func TestWithoutAConfigFileEveryCallIsAllowed(t *testing.T) {
 	}
 
 	out.Reset()
-	if err = run(t.Context(), []string{"config", "check"}, strings.NewReader(""), &out, io.Discard); err != nil {
+	if err = run(t.Context(), []string{"config", "check", "--db", db}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatalf("config check: %v", err)
 	}
 	if want := "config: " + path + " (not found: every call is allowed)"; !strings.Contains(out.String(), want) {

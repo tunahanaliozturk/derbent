@@ -18,6 +18,7 @@ import (
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
+	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/rule"
 )
@@ -36,6 +37,11 @@ type Gate struct {
 	Receipts *receipt.Log
 	// Forward sends a call to a downstream server. It may be nil when no servers are configured.
 	Forward func(ctx context.Context, server, tool string, args json.RawMessage) (*mcp.CallToolResult, error)
+	// Pins, when set, pins each downstream tool on first sight and withholds one whose definition has
+	// changed since (ADR 0013). Nil serves tools unpinned.
+	Pins *pin.Store
+	// Unpinned names the servers whose tools are served without pinning (pin = false).
+	Unpinned map[string]bool
 	// Redact masks secrets in arguments before they are stored in a receipt or in the approvals table.
 	// Nil stores them as they are.
 	Redact func(string) string
@@ -52,11 +58,12 @@ type Gate struct {
 	ToolsReady <-chan struct{}
 	ToolsWait  time.Duration
 
-	server  *mcp.Server
-	started time.Time
-	local   map[string]bool // the memory tools this gate registered, written only by Server
-	mu      sync.Mutex
-	owners  map[string]string // gate tool name to the downstream server it belongs to
+	server   *mcp.Server
+	started  time.Time
+	local    map[string]bool // the memory tools this gate registered, written only by Server
+	mu       sync.Mutex
+	owners   map[string]string       // gate tool name to the downstream server it belongs to
+	withheld map[string]withheldTool // gate tool name to a tool kept from the agent, under mu
 }
 
 // knobs switch safety checks off, so that tests can prove the tests of those checks can fail, and let
@@ -65,7 +72,8 @@ var knobs struct {
 	skipRules     bool
 	skipHiding    bool
 	skipRedaction bool
-	waiting       func() // called as a tool listing or call starts waiting for the downstream servers
+	waiting       func()        // called as a tool listing or call starts waiting for the downstream servers
+	pinRecheck    time.Duration // how often WatchPins looks, when set
 }
 
 const instructions = "Derbent gates this session's tools. memory_write, memory_search and memory_read " +
@@ -121,7 +129,7 @@ func (g *Gate) waitForTools(ctx context.Context) {
 }
 
 // call decides one tools/call request and records its receipt. The gate itself refuses, before any rule
-// is read, a name it does not serve; settle decides the rest.
+// is read, a name it does not serve and a tool its pin withholds; settle decides the rest.
 func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest, next mcp.MethodHandler) (mcp.Result, error) {
 	start := time.Now()
 	name := req.Params.Name
@@ -135,7 +143,15 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 	// fails anyway. Hook calls name the CLI's own tools, which the gate never serves, so this check is
 	// here and not in settle.
 	s := settled{by: "gate", text: name + " is not a tool this gate serves"}
-	if g.serves(name) {
+	w, held := g.held(name)
+	switch {
+	case held && w.unchecked:
+		s = settled{by: "pin", text: name + " is withheld because its pin could not be checked; the gate's stderr says why"}
+	case held:
+		// The agent holds a list from before the tool changed; the changed tool is refused before any
+		// rule, like a name the gate does not serve (ADR 0013).
+		s = settled{by: "pin", text: name + " changed since it was pinned; the user can review it with derbent pins"}
+	case g.serves(name):
 		s = g.settle(ctx, name, args, isObject, rec.Args)
 	}
 	rec.DecidedBy = s.by
@@ -166,7 +182,7 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 type settled struct {
 	allow bool
 	user  bool   // the call is allowed because the user approved it, now or earlier in the session
-	by    string // what decided: rule:<n>, gate, user:<id>, grant:<id>, timeout:<id> or withdrawn:<id>
+	by    string // what decided: rule:<n>, budget:<n>, pin, gate, user:<id>, grant:<id>, timeout:<id> or withdrawn:<id>
 	text  string // what the agent is told when the call is refused
 	err   error  // set when the agent gave up while the call waited
 }

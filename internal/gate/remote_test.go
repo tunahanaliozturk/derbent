@@ -67,7 +67,7 @@ func TestDownstreamToolsAreNamespacedAndForwarded(t *testing.T) {
 	e := newEnv(t)
 	remote := &fakeRemote{}
 	g, cs := remoteGate(t, e, "claude", remote)
-	g.SyncTools("github", []*mcp.Tool{objectTool("get_me"), objectTool("create_issue")})
+	g.SyncTools(t.Context(), "github", []*mcp.Tool{objectTool("get_me"), objectTool("create_issue")})
 	if got := toolNames(t, cs); !slices.Equal(got, []string{"github__create_issue", "github__get_me"}) {
 		t.Fatalf("tools = %v", got)
 	}
@@ -103,8 +103,8 @@ func TestSyncRemovesToolsThatAreGoneAndTellsTheAgent(t *testing.T) {
 		cs.Close()
 		_ = ss.Wait()
 	})
-	g.SyncTools("github", []*mcp.Tool{objectTool("get_me"), objectTool("create_issue")})
-	g.SyncTools("github", []*mcp.Tool{objectTool("get_me")})
+	g.SyncTools(t.Context(), "github", []*mcp.Tool{objectTool("get_me"), objectTool("create_issue")})
+	g.SyncTools(t.Context(), "github", []*mcp.Tool{objectTool("get_me")})
 	if got := toolNames(t, cs); !slices.Equal(got, []string{"github__get_me"}) {
 		t.Fatalf("tools = %v", got)
 	}
@@ -118,7 +118,7 @@ func TestSyncRemovesToolsThatAreGoneAndTellsTheAgent(t *testing.T) {
 func TestUnservableToolsAreLeftOut(t *testing.T) {
 	e := newEnv(t)
 	g, cs := remoteGate(t, e, "claude", &fakeRemote{})
-	g.SyncTools("x", []*mcp.Tool{
+	g.SyncTools(t.Context(), "x", []*mcp.Tool{
 		objectTool("fine"),
 		objectTool("has space"),
 		objectTool(strings.Repeat("a", 62)),
@@ -137,7 +137,7 @@ func TestHiddenDownstreamToolIsRefusedByName(t *testing.T) {
 		rule.Spec{Agent: "copilot", Tool: "github__create_*", Action: rule.Deny},
 		rule.Spec{Action: rule.Allow},
 	)
-	g.SyncTools("github", []*mcp.Tool{objectTool("get_me"), objectTool("create_issue")})
+	g.SyncTools(t.Context(), "github", []*mcp.Tool{objectTool("get_me"), objectTool("create_issue")})
 	if got := toolNames(t, cs); !slices.Equal(got, []string{"github__get_me"}) {
 		t.Fatalf("tools = %v", got)
 	}
@@ -153,7 +153,7 @@ func TestForwardErrorBecomesAToolError(t *testing.T) {
 	e := newEnv(t)
 	remote := &fakeRemote{err: errors.New("github: server is not running")}
 	g, cs := remoteGate(t, e, "claude", remote)
-	g.SyncTools("github", []*mcp.Tool{objectTool("get_me")})
+	g.SyncTools(t.Context(), "github", []*mcp.Tool{objectTool("get_me")})
 	res := call(t, cs, "github__get_me", nil)
 	if !res.IsError || !strings.Contains(text(res), "not running") {
 		t.Fatalf("result = %q, want a tool error", text(res))
@@ -242,7 +242,7 @@ func TestArgumentsThatAreNotAnObjectAreRefused(t *testing.T) {
 		rule.Spec{Tool: "x__run", Args: map[string]string{"command": "git push*"}, Action: rule.Deny},
 		rule.Spec{Action: rule.Allow},
 	)
-	g.SyncTools("x", []*mcp.Tool{objectTool("run")})
+	g.SyncTools(t.Context(), "x", []*mcp.Tool{objectTool("run")})
 	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "x__run", Arguments: []any{"git push --force"}})
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +290,7 @@ func TestToolListWaitsForServersStartingUp(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the listing never started waiting for the servers")
 	}
-	g.SyncTools("x", []*mcp.Tool{objectTool("late")})
+	g.SyncTools(t.Context(), "x", []*mcp.Tool{objectTool("late")})
 	close(ready)
 	l := <-listed
 	if l.err != nil {

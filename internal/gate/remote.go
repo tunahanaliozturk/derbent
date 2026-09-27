@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"regexp"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -28,32 +29,60 @@ func LeftOut(name string, t *mcp.Tool) string {
 	return ""
 }
 
+// withheldTool is a downstream tool kept from the agent because its definition changed since it was
+// pinned, or because its pin could not be checked (unchecked).
+type withheldTool struct {
+	server    string
+	tool      *mcp.Tool
+	unchecked bool
+}
+
 // SyncTools makes one downstream server's tools available to the agent as <server>__<tool>. It leaves
-// out tools the rules hide from this agent, tools whose name cannot be served, and tools whose input
-// schema is not an object (the SDK refuses those), and it removes the server's tools that are gone.
-// The SDK tells connected agents that the list changed. Call it after Server.
-func (g *Gate) SyncTools(server string, tools []*mcp.Tool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.owners == nil {
-		g.owners = map[string]string{}
-	}
-	keep := map[string]bool{}
+// out tools whose name cannot be served and tools whose input schema is not an object (the SDK refuses
+// those), withholds tools whose definition changed since they were pinned (ADR 0013), leaves out tools
+// the rules hide from this agent, and removes the server's tools that are gone. The SDK tells connected
+// agents that the list changed. Call it after Server.
+func (g *Gate) SyncTools(ctx context.Context, server string, tools []*mcp.Tool) {
+	servable := make([]*mcp.Tool, 0, len(tools))
 	for _, t := range tools {
 		name := server + "__" + t.Name
 		if why := LeftOut(name, t); why != "" {
 			slog.Warn("derbent: tool left out: "+why, "tool", name)
 			continue
 		}
-		if !knobs.skipHiding && g.Rules.Hidden(g.Agent, name) {
-			continue
+		servable = append(servable, t)
+	}
+	// Pins are checked before the lock is taken: the check writes to the database, and a call that only
+	// needs to know which tools are served should not wait for it.
+	changed, checkErr := g.checkPins(ctx, server, servable)
+	if checkErr != nil {
+		slog.Warn("derbent: tools withheld because their pins could not be checked", "server", server, "err", checkErr)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.owners == nil {
+		g.owners = map[string]string{}
+	}
+	if g.withheld == nil {
+		g.withheld = map[string]withheldTool{}
+	}
+	for name, w := range g.withheld { // this list replaces whatever was withheld from the server before
+		if w.server == server {
+			delete(g.withheld, name)
 		}
-		keep[name] = true
-		g.owners[name] = server
-		g.server.AddTool(&mcp.Tool{
-			Name: name, Title: t.Title, Description: t.Description,
-			InputSchema: t.InputSchema, OutputSchema: t.OutputSchema, Annotations: t.Annotations,
-		}, g.forward(server, t.Name))
+	}
+	keep := map[string]bool{}
+	for _, t := range servable {
+		name := server + "__" + t.Name
+		switch {
+		case checkErr != nil:
+			g.withheld[name] = withheldTool{server: server, tool: t, unchecked: true}
+		case changed[t.Name]:
+			g.withheld[name] = withheldTool{server: server, tool: t}
+			slog.Warn("derbent: tool withheld: it changed since it was pinned; review it with derbent pins", "tool", name)
+		case g.serve(server, name, t):
+			keep[name] = true
+		}
 	}
 	var gone []string
 	for name, owner := range g.owners {
@@ -64,6 +93,96 @@ func (g *Gate) SyncTools(server string, tools []*mcp.Tool) {
 	}
 	if len(gone) > 0 {
 		g.server.RemoveTools(gone...)
+	}
+}
+
+// checkPins pins the server's tools on first sight and reports which changed since (ADR 0013). A gate
+// without pins, or a server with pin = false, pins nothing and reports nothing changed.
+func (g *Gate) checkPins(ctx context.Context, server string, tools []*mcp.Tool) (map[string]bool, error) {
+	if g.Pins == nil || g.Unpinned[server] {
+		return nil, nil
+	}
+	return g.Pins.Check(ctx, server, tools)
+}
+
+// serve lists t to the agent as name, unless the rules hide it from this agent, and reports whether it
+// did. g.mu must be held.
+func (g *Gate) serve(server, name string, t *mcp.Tool) bool {
+	if !knobs.skipHiding && g.Rules.Hidden(g.Agent, name) {
+		return false
+	}
+	g.owners[name] = server
+	g.server.AddTool(&mcp.Tool{
+		Name: name, Title: t.Title, Description: t.Description,
+		InputSchema: t.InputSchema, OutputSchema: t.OutputSchema, Annotations: t.Annotations,
+	}, g.forward(server, t.Name))
+	return true
+}
+
+// held returns the withheld tool of that gate name, if there is one.
+func (g *Gate) held(name string) (withheldTool, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	w, ok := g.withheld[name]
+	return w, ok
+}
+
+// pinRecheck is how often WatchPins looks at the withheld tools.
+const pinRecheck = 2 * time.Second
+
+// WatchPins serves again, until ctx ends, each withheld tool whose new definition the user has accepted
+// with derbent pins accept, or whose pin could at last be checked; the SDK tells the agent through
+// list_changed. It looks every two seconds and does nothing while no tool is withheld. A server that
+// goes back to the pinned definition says so with list_changed, which SyncTools handles.
+func (g *Gate) WatchPins(ctx context.Context) {
+	every := pinRecheck
+	if knobs.pinRecheck > 0 {
+		every = knobs.pinRecheck
+	}
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			g.recheckPins(ctx)
+		}
+	}
+}
+
+// recheckPins checks the withheld tools against their pins again, one transaction per server, and
+// serves each one that now matches.
+func (g *Gate) recheckPins(ctx context.Context) {
+	g.mu.Lock()
+	byServer := map[string][]*mcp.Tool{}
+	for _, w := range g.withheld {
+		byServer[w.server] = append(byServer[w.server], w.tool)
+	}
+	g.mu.Unlock()
+	for server, tools := range byServer {
+		changed, err := g.checkPins(ctx, server, tools)
+		if err != nil {
+			continue // still withheld; SyncTools said why when it withheld them
+		}
+		g.mu.Lock()
+		for _, t := range tools {
+			name := server + "__" + t.Name
+			w, ok := g.withheld[name]
+			switch {
+			case !ok || w.tool != t: // a newer list from the server took its place meanwhile
+			case changed[t.Name]:
+				if w.unchecked { // SyncTools could not say so when it withheld the tool
+					slog.Warn("derbent: tool withheld: it changed since it was pinned; review it with derbent pins", "tool", name)
+				}
+				w.unchecked = false
+				g.withheld[name] = w
+			default:
+				delete(g.withheld, name)
+				g.serve(server, name, t)
+			}
+		}
+		g.mu.Unlock()
 	}
 }
 

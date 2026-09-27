@@ -102,7 +102,7 @@ type toolLists struct {
 	calls int
 }
 
-func (l *toolLists) record(server string, tools []*mcp.Tool) {
+func (l *toolLists) record(_ context.Context, server string, tools []*mcp.Tool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.lists == nil {

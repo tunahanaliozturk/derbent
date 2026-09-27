@@ -18,6 +18,8 @@ type Server struct {
 	Env     map[string]string
 	URL     string
 	Headers map[string]string
+	// Pin is false for a server whose tools are served without pinning (pin = false; ADR 0013).
+	Pin bool
 }
 
 type serverFile struct {
@@ -25,6 +27,7 @@ type serverFile struct {
 	Env     map[string]string `toml:"env"`
 	URL     string            `toml:"url"`
 	Headers map[string]string `toml:"headers"`
+	Pin     *bool             `toml:"pin"`
 }
 
 var (
@@ -68,7 +71,7 @@ func servers(files map[string]serverFile, skipUnset bool) ([]Server, []string, e
 		if slices.ContainsFunc(f.Command, envRef.MatchString) {
 			return nil, nil, fmt.Errorf("server %s: command cannot use ${env:...}; pass secrets to the server in env", name)
 		}
-		s := Server{Name: name, Command: f.Command, URL: f.URL}
+		s := Server{Name: name, Command: f.Command, URL: f.URL, Pin: f.Pin == nil || *f.Pin}
 		var err error
 		if s.URL != "" {
 			if err = checkURL(name, s.URL); err != nil {

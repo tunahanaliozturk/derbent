@@ -17,7 +17,7 @@ var version = "dev"
 
 var errUsage = errors.New("usage: derbent [--db path] | derbent mcp --agent <name> | derbent pending | " +
 	"derbent approve [--session] <id> | derbent deny <id> | derbent grants | derbent revoke <id>|--all | " +
-	"derbent receipts | derbent verify | derbent config check | derbent gate --agent <name> | derbent version")
+	"derbent pins [show|accept] | derbent receipts | derbent verify | derbent config check | derbent gate --agent <name> | derbent version")
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -50,6 +50,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runGrants(ctx, args[1:], stdout, stderr)
 	case "revoke":
 		return runRevoke(ctx, args[1:], stdout, stderr)
+	case "pins":
+		return runPins(ctx, args[1:], stdout, stderr)
 	case "receipts":
 		return runReceipts(ctx, args[1:], stdout, stderr)
 	case "verify":
