@@ -238,9 +238,11 @@ derbent approve --session 12   # like A; flags go before the id
 derbent deny '#12'             # quote the # in a shell that reads it as a comment
 ```
 
-Editing or reordering the rules never widens a grant: since the first matching rule wins, a change to the
-granted rule or to any rule above it asks again, and a change below it keeps the grant
-([ADR 0011](docs/adr/0011-grants-follow-the-rule.md)).
+Editing or reordering the rules never widens a grant ([ADR 0011](docs/adr/0011-grants-follow-the-rule.md)).
+The hook reads the config on every call, so there, while the granted rule or a rule above it differs
+from when you approved, its calls ask again, and undoing the edit makes the grant apply again; a change
+below the granted rule keeps the grant. A `derbent mcp` gate reads the config only when it starts, so an
+edit does not affect its grants.
 
 Approvals guard against mistakes and against prompt injection that stays inside MCP. They are not a
 boundary against an agent that can already run shell commands as you: it can run `derbent approve` itself

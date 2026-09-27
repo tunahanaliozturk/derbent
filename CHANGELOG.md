@@ -36,9 +36,9 @@ The first release.
   seconds. A newly highlighted call takes `a`, `A` or `d` only after 750 ms on screen, so a key meant for
   the call before it cannot land on it.
 - Session grants follow the rule that asked and the rules above it
-  ([ADR 0011](docs/adr/0011-grants-follow-the-rule.md)): an `A` on a `git push` does not let through a
-  `terraform apply` that another rule asks about, and editing or reordering the rules never widens a
-  grant.
+  ([ADR 0011](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0011-grants-follow-the-rule.md)):
+  an `A` on a `git push` does not let through a `terraform apply` that another rule asks about, and
+  editing or reordering the rules never widens a grant.
 - `derbent gate`: a pre-tool hook for Claude Code, Codex, Copilot CLI and Antigravity CLI, so built-in
   tools such as the shell and file edits pass the same rules, approvals and receipts as MCP tools, named
   `native__<tool>`.
@@ -46,9 +46,10 @@ The first release.
   needs none of their secrets.
 - Release binaries for Windows, Linux and macOS on amd64 and arm64, with `SHA256SUMS`. Each binary is
   built twice and published only when both builds are identical, and a clean checkout of the tag rebuilds
-  the same bytes.
+  the same bytes with Go 1.27.1 (see the README's Check a release).
 - Benchmarks of what the gate adds to an MCP call and what a hook call costs, with results from GitHub's
-  Linux and Windows runners in [docs/benchmark-results](docs/benchmark-results/README.md).
+  Linux and Windows runners in
+  [docs/benchmark-results](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/benchmark-results/README.md).
 
 ### Security
 

@@ -196,12 +196,14 @@ arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's
   MCP call, the CLI's own session for a hook call (see Built-in tools). Under first match, which calls a
   rule catches depends on the rules above it, so the grant is keyed on a fingerprint of the rule and
   every rule above it.
-  Editing or reordering the config never widens a grant: a change to the granted rule or to any rule
-  above it asks again, and a change below it keeps the grant (ADR 0011). `A` takes a second press
-  within five seconds, so one press can never grant the session, and the question and the status after
-  it name the tool, the rule's number and the agent. An `a` typed with Caps Lock on arrives as `a` with
-  Caps Lock from a terminal that reports modifiers, and the UI takes it as `a`; a terminal that reports
-  none sends `A`, which still needs the second press. Nothing the UI does changes the config file.
+  Editing or reordering the config never widens a grant. The hook reads the config on every call, so
+  there a change to the granted rule or to any rule above it asks again while the change stands, and
+  the grant applies again if the change is undone; a change below it keeps the grant. A `derbent mcp`
+  gate reads the config only when it starts, so an edit does not affect its grants (ADR 0011). `A`
+  takes a second press within five seconds, so one press can never grant the session, and the question
+  and the status after it name the tool, the rule's number and the agent. An `a` typed with Caps Lock on
+  arrives as `a` with Caps Lock from a terminal that reports modifiers, and the UI takes it as `a`; a
+  terminal that reports none sends `A`, which still needs the second press. Nothing the UI does changes the config file.
 - `derbent approve [--session] <id>` and `derbent deny <id>` do the same from any shell, by the id the
   UI shows, written `12` or `#12`. An approval written by a gate from before grants followed the rule,
   still running after the upgrade, names no rule and grants nothing: `A` in the UI says it approves the
@@ -435,8 +437,9 @@ derbent/
 - GitHub Actions runs every gate on `windows-latest` and `ubuntu-latest`, and builds on `macos-latest`.
 - `scripts/release.sh` builds Windows, Linux and macOS binaries for amd64 and arm64 with `-trimpath`, CGO
   off and no build id, each twice, the second time from an empty build cache, and fails unless every pair
-  is byte-identical; it then writes `SHA256SUMS`. CI's `reproducible` job runs it on every push, and the
-  release workflow runs it on the tag, without a restored cache, before it publishes. A clean checkout of
+  is byte-identical; it then writes `SHA256SUMS`. CI's `reproducible` job runs it on every push to main
+  and every pull request, and the release workflow runs it on the tag, without a restored cache, before
+  it publishes. A clean checkout of
   a tag, built with go1.27.1 and no `GOFLAGS`, `GOAMD64` or `GOARM64` overrides, gives the published
   checksums.
 
@@ -533,8 +536,11 @@ Not in v1, in rough order of value:
   itself. Approvals and `args` rules on shell tools guard against mistakes and prompt injection that stay
   inside MCP, not against an agent that already has a shell.
 - Approvals depend on the user watching. Unattended, `ask` means denied after the timeout.
-- A session grant cannot be listed or revoked. It ends with the session, or early when the granted rule or
-  a rule above it is edited (ADR 0011).
+- A session grant cannot be listed or revoked, and it lasts for the session. On the hook path, which reads
+  the config on every call, it stops applying while the granted rule or a rule above it differs, and
+  applies again if the edit is undone, since grants are kept and looked up by the rule's fingerprint. A
+  `derbent mcp` gate reads the config only when it starts, so an edit does not affect its grants
+  (ADR 0011).
 - Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call
   took 68.96 ms at p50, 46.87 ms of it for starting the binary; on Linux, 6.374 ms
   (`docs/benchmark-results/`).

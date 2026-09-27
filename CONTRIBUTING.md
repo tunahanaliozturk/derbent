@@ -26,11 +26,11 @@ gofumpt must print nothing, and golangci-lint must report 0 issues. Some tests s
 the `derbent` command or as a small MCP server, and one starts four processes that append receipts at
 once; `go test -short ./...` skips that one.
 
-On every push and pull request, CI also checks that `go mod tidy` changes nothing, runs the tests with
-`-race` on Linux and Windows, checks the licence of every module in the build against the allow list
-(Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC), builds on macOS, and runs `scripts/release.sh` to show
-that two builds of every release binary are identical. The race detector needs cgo, so run `-race`
-locally only if you have a C compiler.
+On every push to main and every pull request, CI also checks that `go mod tidy` changes nothing, runs
+the tests with `-race` on Linux and Windows, checks the licence of every module in the build against the
+allow list (Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC), builds on macOS, and runs
+`scripts/release.sh` to show that two builds of every release binary are identical. The race detector
+needs cgo, so run `-race` locally only if you have a C compiler.
 
 A few rules the code follows:
 
@@ -54,8 +54,8 @@ numbered after the last one, with its context, the decision and its consequences
 design's Decisions table. When a decision changes, a new ADR says what changed and why, and the old one's
 status names the ADR that replaced it.
 
-Documentation is plain English written for a user. Every claim in the README names the test or the
-measurement behind it; a claim with nothing behind it is left out.
+Documentation is plain English written for a user. Every claim in the README is backed by a test or a
+measurement (see the design's Evidence section); a claim with nothing behind it is left out.
 
 ## Sign your commits
 

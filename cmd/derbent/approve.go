@@ -59,8 +59,8 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 	q := approval.NewQueue(db)
 	notPending := fmt.Errorf("approval %d is not pending: it was already decided, timed out, or its agent gave up", id)
 	if verdict == approval.ApproveSession {
-		// Say what the grant covers: the tool's calls that the rule which asked holds, in one agent's
-		// session. The approval's row names all three.
+		// Say what the grant covers: the tool's calls that the rule which asked holds, under the same rules
+		// above it, in one agent's session. The approval's row names all three.
 		var list []approval.Pending
 		if list, err = q.Pending(ctx); err != nil {
 			return err

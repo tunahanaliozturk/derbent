@@ -38,13 +38,17 @@ Migration 0003 adds `rule_key` to `approvals` and rebuilds `grants` on
   still asks. `internal/gate` tests this on the hook path and on the MCP path, where the rules are on
   `memory_write`, since the MCP gate refuses `native__` names.
 - Editing or reordering the config never widens a grant. A change to the granted rule or to any rule
-  above it gives a new fingerprint, so the calls that rule asks about ask again, even within a session
-  that had a grant. A change below it keeps the grant, since it cannot change which calls reach the
-  rule. `internal/gate` tests on the hook path that a grant holds when the rules below it are reordered
-  or edited, and asks again when the granted rule is edited, when a rule above it is narrowed, and when
-  the two push rules described under Context swap places.
-- The cost is extra questions: any edit above a granted rule asks again, even one that cannot change
-  what the rule catches, and a rule added at the top asks again for every grant. Telling a harmless edit
+  above it gives a new fingerprint. On the hook path, which reads the config on every call, the calls
+  that rule asks about then ask again while the change stands, even within a session that had a grant;
+  grants are kept and looked up by fingerprint, so undoing the change makes the grant apply again. A
+  change below it keeps the grant, since it cannot change which calls reach the rule. A `derbent mcp`
+  gate reads the config only when it starts, so an edit does not affect its grants, and its next
+  process is a new session with none. `internal/gate` tests on the hook path that a grant holds when the
+  rules below it are reordered or edited, and asks again when the granted rule is edited, when a rule
+  above it is narrowed, and when the two push rules described under Context swap places.
+- The cost is extra questions on the hook path: any edit above a granted rule asks again while it
+  stands, even one that cannot change what the rule catches, and a rule added at the top asks again for
+  every grant. Telling a harmless edit
   from a widening one would mean comparing glob patterns, which is not worth saving one question per
   grant.
 - The grants written before the upgrade are dropped by migration 0003, since they do not say which rule
