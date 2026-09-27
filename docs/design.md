@@ -330,10 +330,14 @@ agent reads and follows. The gate pins each downstream tool (ADR 0013).
 ## Project rules
 
 A repository can make Derbent stricter for itself, never looser (ADR 0014). A `.derbent.toml` file at the
-project root, the directory Derbent uses for the project key, may hold `[[rule]]` tables and nothing
-else. It is looked up under the root in the path's own case, not under the lower-cased key. The project
-root is the git root, and for a linked worktree the main checkout's root, so a worktree follows the main
-checkout's file and a `.derbent.toml` at the worktree's own root is not read.
+root of the checkout the agent works in may hold `[[rule]]` tables and nothing else. That root is the
+nearest directory holding `.git` at or above the directory the project is found from (`--project`, the
+call's directory on the hook, or the working directory), which for a linked worktree is the worktree's
+own root, or that directory itself outside git. The file is looked up there in the path's own case, not
+under the lower-cased key. A linked worktree reads its own file, so a branch that adds or tightens it is
+enforced in its worktree, and a worktree of a bare repository has a file to read; its calls still share
+the main checkout's project key, memory and receipts. Rules only tighten, so reading the worktree's own
+file never loosens anything, and a grant is keyed on what the rules say, not on where the file is.
 
 - Project rules use the rule syntax and are tried in order, first match wins, with no final catch-all:
   when none matches, the project adds nothing.

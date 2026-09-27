@@ -210,8 +210,8 @@ line. A `derbent mcp` gate reads the file when its CLI starts it; the hook reads
 
 ## Project rules
 
-A repository can make Derbent stricter for itself. A `.derbent.toml` at the project root holds `[[rule]]`
-tables and nothing else:
+A repository can make Derbent stricter for itself. A `.derbent.toml` at the root of a checkout holds
+`[[rule]]` tables and nothing else:
 
 ```toml
 [[rule]]
@@ -220,9 +220,9 @@ args   = { command = "terraform *" }
 action = "ask"
 ```
 
-The project root is the git root, and for a linked worktree the main checkout's root: a worktree follows
-the main checkout's file, as it shares its memory, and a `.derbent.toml` at the worktree's own root is not
-read.
+The file is read at the root of the checkout the agent works in: the git root, or for a linked worktree
+the worktree's own root, so a branch that adds or tightens the file is enforced in its worktree. A worktree
+still shares the main checkout's memory and receipts.
 
 Project rules are tried in order and need no final rule; when none matches, the project adds nothing. A
 call gets the stricter of your decision and the project's, deny over ask over allow, so a project rule can

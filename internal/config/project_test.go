@@ -203,7 +203,7 @@ func TestProjectRulesReadTheFileAgainOnlyWhenItChanges(t *testing.T) {
 }
 
 // On Windows the key is lower-cased, but a directory can be case-sensitive there, so the rules file is
-// looked up under the root in the path's own case.
+// looked up under the checkout's root in the path's own case.
 func TestProjectRootKeepsTheCaseOfThePath(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "MyRepo")
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o700); err != nil {
@@ -216,6 +216,9 @@ func TestProjectRootKeepsTheCaseOfThePath(t *testing.T) {
 	root, err := config.ProjectRoot(sub)
 	if err != nil || filepath.Base(root) != "MyRepo" {
 		t.Fatalf("ProjectRoot = %q, %v; want the repository root in its own case", root, err)
+	}
+	if checkout, cerr := config.CheckoutRoot(sub); cerr != nil || checkout != root {
+		t.Fatalf("CheckoutRoot = %q, %v; want %q", checkout, cerr, root)
 	}
 	key, err := config.ProjectKey(sub)
 	if err != nil {

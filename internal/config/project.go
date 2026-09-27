@@ -17,30 +17,43 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/rule"
 )
 
-// ProjectRoot returns the directory a project's key is made from: the root of the git repository
-// containing dir, or dir itself outside a repository. A linked worktree belongs to the repository it was
-// added from, so agents working in separate worktrees of one repository share a project. The root is
-// absolute, cleaned, with symbolic links and Windows short names resolved, in the path's own case, so
-// files at the root, such as the project rules file, can be found on a case-sensitive directory.
+// CheckoutRoot returns the root of the checkout that contains dir: the nearest directory at or above
+// dir that holds .git, which for a linked worktree is the worktree's own root, or dir itself outside a
+// repository. The project rules file is read there (ADR 0014). The root is absolute, cleaned, with
+// symbolic links and Windows short names resolved, in the path's own case, so the rules file can be
+// found on a case-sensitive directory.
+func CheckoutRoot(dir string) (string, error) {
+	root, _, err := checkoutRoot(dir)
+	return root, err
+}
+
+// ProjectRoot returns the directory a project's key is made from: the CheckoutRoot of dir, except that a
+// linked worktree belongs to the repository it was added from, so agents working in separate worktrees
+// of one repository share a project.
 func ProjectRoot(dir string) (string, error) {
+	root, gitFile, err := checkoutRoot(dir)
+	if err != nil || !gitFile {
+		return root, err
+	}
+	return filepath.Clean(resolve(mainCheckout(root))), nil
+}
+
+// checkoutRoot finds the CheckoutRoot of dir and reports whether its .git is a file, as in a linked
+// worktree or a submodule, rather than a directory.
+func checkoutRoot(dir string) (root string, gitFile bool, err error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return "", fmt.Errorf("resolve project %s: %w", dir, err)
+		return "", false, fmt.Errorf("resolve project %s: %w", dir, err)
 	}
-	root := resolve(abs)
+	root = resolve(abs)
 	for d := root; ; d = filepath.Dir(d) {
 		if fi, statErr := os.Stat(filepath.Join(d, ".git")); statErr == nil {
-			root = d
-			if !fi.IsDir() {
-				root = mainCheckout(d)
-			}
-			break
+			return filepath.Clean(d), !fi.IsDir(), nil
 		}
 		if filepath.Dir(d) == d {
-			break
+			return filepath.Clean(root), false, nil
 		}
 	}
-	return filepath.Clean(resolve(root)), nil
 }
 
 // ProjectKey returns the key that notes and receipts for dir are filed under: its ProjectRoot, written
@@ -58,7 +71,7 @@ func ProjectKey(dir string) (string, error) {
 	return key, nil
 }
 
-// ProjectRulesFile is the file at a project's root whose rules can only tighten the user's (ADR 0014).
+// ProjectRulesFile is the file at a checkout's root whose rules can only tighten the user's (ADR 0014).
 const ProjectRulesFile = ".derbent.toml"
 
 // maxSmallFile is the most a project rules file or a .git file may hold. Either is read on every call,
@@ -104,7 +117,7 @@ type ProjectRules struct {
 	err  error
 }
 
-// NewProjectRules returns the rules file at root, a directory from ProjectRoot.
+// NewProjectRules returns the rules file at root, a directory from CheckoutRoot.
 func NewProjectRules(root string) *ProjectRules {
 	return &ProjectRules{path: filepath.Join(root, ProjectRulesFile)}
 }
