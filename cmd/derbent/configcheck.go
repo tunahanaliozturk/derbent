@@ -42,7 +42,7 @@ func runConfigCheck(ctx context.Context, args []string, stdout, stderr io.Writer
 	if missing {
 		note = " (not found: every call is allowed)"
 	}
-	if _, err = fmt.Fprintf(stdout, "config: %s%s\nrules: %d\n", path, note, cfg.Rules.Len()); err != nil {
+	if _, err = fmt.Fprintf(stdout, "config: %s%s\nrules: %d\nbudgets: %d\n", path, note, cfg.Rules.Len(), cfg.Budgets.Len()); err != nil {
 		return err
 	}
 	dbPath, err := databasePath(*dbFlag)

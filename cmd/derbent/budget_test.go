@@ -57,3 +57,17 @@ action = "allow"
 		t.Fatalf("decided_by = %v", by)
 	}
 }
+
+// config check says how many budgets it read, next to the rules.
+func TestConfigCheckCountsBudgets(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.toml")
+	text := "[[budget]]\ntool = \"native__Bash\"\ncalls = 200\nper = \"1h\"\n\n" +
+		"[[budget]]\nagent = \"codex\"\ncalls = 50\nper = \"10m\"\n\n[[rule]]\naction = \"allow\"\n"
+	if err := os.WriteFile(cfg, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := runOK(t, "config", "check", "--config", cfg, "--db", filepath.Join(dir, "p.db")); !strings.Contains(out, "rules: 1\nbudgets: 2\n") {
+		t.Fatalf("config check:\n%s", out)
+	}
+}
