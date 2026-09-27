@@ -70,6 +70,12 @@ func runDecide(ctx context.Context, command string, args []string, stdout, stder
 			return notPending
 		}
 		p := list[i]
+		// A gate from before grants followed the rule, still running after the upgrade, writes no rule key,
+		// and such an approval grants nothing (ADR 0011). There is no question to confirm here, so refuse
+		// rather than approve once when the user asked for the session.
+		if p.RuleKey == "" {
+			return fmt.Errorf("%s: approval %d cannot be approved for the session, because the gate that asked predates rule-scoped grants; approve it once with derbent approve %d", command, id, id)
+		}
 		done = fmt.Sprintf("approved %s calls that rule %d asks about, for the rest of %s's session:",
 			visible.Escape(p.Tool), p.Rule, visible.Escape(p.Agent))
 	}

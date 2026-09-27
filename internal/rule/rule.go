@@ -68,6 +68,7 @@ func Compile(specs []Spec) (Set, error) {
 		return Set{}, fmt.Errorf("%w: the last rule must have no agent, tool or args condition", ErrInvalid)
 	}
 	set := Set{rules: make([]compiled, 0, len(specs))}
+	prefix := sha256.New() // the forms of the rules so far, each written as its length, a colon and its bytes
 	for i, sp := range specs {
 		switch sp.Action {
 		case Allow, Deny, Ask:
@@ -77,7 +78,9 @@ func Compile(specs []Spec) (Set, error) {
 		if !agentPattern.MatchString(sp.Agent) {
 			return Set{}, fmt.Errorf("%w: rule %d: agent %q can never match: agent names are lower-case letters, digits, dashes and underscores", ErrInvalid, i+1, sp.Agent)
 		}
-		c := compiled{agent: newGlob(sp.Agent), tool: newGlob(sp.Tool), action: sp.Action, key: key(sp)}
+		f := form(sp)
+		fmt.Fprintf(prefix, "%d:%s", len(f), f)
+		c := compiled{agent: newGlob(sp.Agent), tool: newGlob(sp.Tool), action: sp.Action, key: hex.EncodeToString(prefix.Sum(nil))}
 		if len(sp.Args) > 0 {
 			c.args = make(map[string]glob, len(sp.Args))
 			for name, pattern := range sp.Args {
@@ -95,8 +98,10 @@ func (s Set) Len() int {
 }
 
 // Key returns a fingerprint of rule n (1-based, as Decision.Rule), or "" when there is no such rule.
-// It follows the rule's content, not its position, so a session grant keyed on it covers only what the
-// same rule asks about: moving a rule keeps its key, and editing it gives a new one (ADR 0011).
+// Under first match, which calls rule n catches depends on rules 1 to n, so the key is the SHA-256, in
+// hex, of their forms in order, each written as its length, a colon and its bytes. A session grant keyed
+// on it covers only what the same rule asks about under the same rules above it: a change to rule n or
+// to any rule above it gives a new key, and a change below it cannot (ADR 0011).
 func (s Set) Key(n int) string {
 	if n < 1 || n > len(s.rules) {
 		return ""
@@ -104,12 +109,11 @@ func (s Set) Key(n int) string {
 	return s.rules[n-1].key
 }
 
-// key is the SHA-256, in hex, of a canonical form of sp: its agent, tool and action, then its args
-// conditions sorted by name, each string written as its length, a colon and its bytes so that no two
-// different rules share a form.
-func key(sp Spec) string {
-	h := sha256.New()
-	field := func(s string) { fmt.Fprintf(h, "%d:%s", len(s), s) }
+// form is a canonical form of sp: its agent, tool and action, then its args conditions sorted by name,
+// each string written as its length, a colon and its bytes so that no two different rules share a form.
+func form(sp Spec) string {
+	var b strings.Builder
+	field := func(s string) { fmt.Fprintf(&b, "%d:%s", len(s), s) }
 	field(sp.Agent)
 	field(sp.Tool)
 	field(string(sp.Action))
@@ -117,7 +121,7 @@ func key(sp Spec) string {
 		field(name)
 		field(sp.Args[name])
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return b.String()
 }
 
 // Decide returns the decision of the first rule matching the call. args holds the call's arguments

@@ -251,9 +251,11 @@ CLI directly is decided the same way, as `native__mcp__<server>__<tool>`.
 `A` on a built-in tool approves the tool's calls that the same rule asks about, for the rest of the CLI's
 session: its session id in Claude Code, Codex and Copilot CLI, its conversation id in Antigravity CLI.
 Every shell command is one tool, such as `native__Bash`, so an `A` on a `git push` does not let through
-a `terraform apply` that another rule asks about, and editing or reordering the rules never widens a
-grant ([ADR 0011](docs/adr/0011-grants-follow-the-rule.md)). For MCP tools the session is one
-`derbent mcp` process. A grant on one path never covers the other, since the tools have different names.
+a `terraform apply` that another rule asks about. Editing or reordering the rules never widens a grant:
+since the first matching rule wins, a change to the granted rule or to any rule above it asks again,
+and a change below it keeps the grant ([ADR 0011](docs/adr/0011-grants-follow-the-rule.md)). For MCP
+tools the session is one `derbent mcp` process. A grant on one path never covers the other, since the
+tools have different names.
 
 The hook reads the same config file but starts no servers, so a `${env:NAME}` that is not set where the
 hook runs is left alone, and server secrets can stay in the CLI's MCP entry for Derbent. Receipts from

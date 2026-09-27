@@ -298,8 +298,7 @@ func (m Model) decide(v approval.Verdict, asked int64) (tea.Model, tea.Cmd) {
 	p := m.pending[i]
 	if v == approval.ApproveSession && (asked != p.ID || m.now().Sub(m.confirmAt) > confirmFor) {
 		m.confirm, m.confirmAt = p.ID, m.now()
-		m.status = fmt.Sprintf("press A again to approve %s calls that rule %d asks about, for the rest of %s's session",
-			p.Tool, p.Rule, p.Agent)
+		m.status = "press A again to approve " + sessionScope(p)
 		return m, nil
 	}
 	// The call is about to leave the list; that is no news to report.
@@ -309,20 +308,26 @@ func (m Model) decide(v approval.Verdict, asked int64) (tea.Model, tea.Cmd) {
 		if err := m.approvals.Decide(m.ctx, p.ID, v); err != nil {
 			return statusMsg(fmt.Sprintf("#%d: %v", p.ID, err))
 		}
-		return statusMsg(fmt.Sprintf("#%d %s: %s %s", p.ID, verdictText(v), p.Agent, p.Tool))
+		switch v {
+		case approval.ApproveSession:
+			return statusMsg(fmt.Sprintf("#%d approved %s", p.ID, sessionScope(p)))
+		case approval.ApproveOnce:
+			return statusMsg(fmt.Sprintf("#%d approved once: %s %s", p.ID, p.Agent, p.Tool))
+		case approval.Deny:
+			return statusMsg(fmt.Sprintf("#%d denied: %s %s", p.ID, p.Agent, p.Tool))
+		}
+		return statusMsg(fmt.Sprintf("#%d %s: %s %s", p.ID, v, p.Agent, p.Tool))
 	}
 }
 
-func verdictText(v approval.Verdict) string {
-	switch v {
-	case approval.ApproveOnce:
-		return "approved once"
-	case approval.ApproveSession:
-		return "approved for the rest of the session"
-	case approval.Deny:
-		return "denied"
+// sessionScope is what A approves for p: the tool's calls that the rule which asked holds, for the rest
+// of the agent's session. An approval with no rule key was written by a gate from before grants followed
+// the rule, still running after the upgrade, and it grants nothing (ADR 0011), so A approves it once.
+func sessionScope(p approval.Pending) string {
+	if p.RuleKey == "" {
+		return fmt.Sprintf("%s's %s call once, since the gate that asked predates rule-scoped grants", p.Agent, p.Tool)
 	}
-	return string(v)
+	return fmt.Sprintf("%s calls that rule %d asks about, for the rest of %s's session", p.Tool, p.Rule, p.Agent)
 }
 
 // verify walks the receipt chain off the UI goroutine.

@@ -238,7 +238,7 @@ func TestKeysDecideTheSelectedCall(t *testing.T) {
 		status            string
 	}{
 		{[]string{"a"}, true, false, "approved once"},
-		{[]string{"A", "A"}, true, true, "approved for the rest of the session"},
+		{[]string{"A", "A"}, true, true, "approved github__create_pull_request calls that rule 2 asks about, for the rest of codex's session"},
 		{[]string{"d"}, false, false, "denied"},
 	} {
 		t.Run(tc.keys[0], func(t *testing.T) {
@@ -592,6 +592,30 @@ func TestSessionApprovalNeedsASecondA(t *testing.T) {
 				t.Fatalf("screen lacks %q:\n%s", want, screen(m))
 			}
 		})
+	}
+}
+
+// A gate from before grants followed the rule, still running after the upgrade, writes approvals with no
+// rule key, and such an approval grants nothing. So A on one says it approves the call once, and does.
+func TestSessionApprovalWithNoRuleKeySaysItApprovesOnce(t *testing.T) {
+	m, d := newModel(t)
+	keyless := askReq
+	keyless.RuleKey = ""
+	done := waiting(t, d.q, keyless)
+	waitPending(t, d.q, 1)
+	m, _ = refresh(m)
+	m, _ = press(later(m, armAfter), "A")
+	scope := "codex's github__create_issue call once, since the gate that asked predates rule-scoped grants"
+	if want := "press A again to approve " + scope; !strings.Contains(screen(m), want) {
+		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
+	}
+	m, cmd := press(m, "A")
+	m = settle(m, cmd)
+	if out := <-done; !out.Approved {
+		t.Fatalf("outcome = %+v, want it approved", out)
+	}
+	if want := "approved " + scope; !strings.Contains(screen(m), want) {
+		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
 	}
 }
 

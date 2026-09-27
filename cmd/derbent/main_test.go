@@ -521,6 +521,39 @@ func TestApproveForTheSessionLeavesAGrant(t *testing.T) {
 	}
 }
 
+// A gate from before grants followed the rule, still running after the upgrade, writes approvals with no
+// rule key, and such an approval grants nothing. approve --session refuses it and says how to approve it
+// once, and the call keeps waiting until it is.
+func TestApproveForTheSessionRefusesAnApprovalWithNoRuleKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.ExecContext(t.Context(), `INSERT INTO approvals
+		(created_ms, deadline_ms, project, agent, session, tool, args, rule) VALUES (?, ?, 'p', 'codex', 's', 'echo__echo', '{}', 1)`,
+		time.Now().UnixMilli(), time.Now().Add(time.Minute).UnixMilli())
+	var id int64
+	if err == nil {
+		id, err = res.LastInsertId()
+	}
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"approve", "--session", "--db", path, fmt.Sprint(id)}, strings.NewReader(""), io.Discard, io.Discard)
+	if want := fmt.Sprintf("approve it once with derbent approve %d", id); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want one saying %q", err, want)
+	}
+	var out bytes.Buffer
+	if err = run(t.Context(), []string{"approve", "--db", path, fmt.Sprint(id)}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatalf("approving once after the refusal: %v", err)
+	}
+	if !strings.Contains(out.String(), fmt.Sprintf("approved %d", id)) {
+		t.Fatalf("approve output: %q", out.String())
+	}
+}
+
 // The id can be written as the UI shows it, #12.
 func TestDenyRefusesTheWaitingCall(t *testing.T) {
 	path, p, done := askedEcho(t, "hi")

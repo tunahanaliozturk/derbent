@@ -118,13 +118,14 @@ func TestHookAskWaitsForTheUserAndASessionGrantCoversLaterHookCalls(t *testing.T
 }
 
 // Built-in tools are coarse: every shell command is native__Bash. A session grant from one ask rule
-// must not let through a command another ask rule holds, and it follows the rule, not its position,
-// so the same grant holds under a reordered config and a rule edited since asks again.
+// must not let through a command another ask rule holds. It follows the rule and the rules above it,
+// so the same grant holds when only rules below it are reordered, and a rule edited since asks again.
 func TestHookSessionGrantCoversOnlyTheRuleThatAsked(t *testing.T) {
 	e := newEnv(t)
 	push := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push*"}, Action: rule.Ask}
 	apply := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "terraform apply*"}, Action: rule.Ask}
-	g := e.gate(t, "claude", push, apply, rule.Spec{Action: rule.Allow})
+	rm := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "rm -rf*"}, Action: rule.Deny}
+	g := e.gate(t, "claude", push, apply, rm, rule.Spec{Action: rule.Allow})
 	g.ApprovalTimeout = 300 * time.Millisecond
 	done := hookAsync(t, g, `{"command":"git push origin main"}`)
 	p := waitPending(t, e.approvals)
@@ -149,10 +150,10 @@ func TestHookSessionGrantCoversOnlyTheRuleThatAsked(t *testing.T) {
 		t.Fatalf("terraform apply = %+v, want it asked about and timed out", ans)
 	}
 
-	reordered := e.gate(t, "claude", apply, push, rule.Spec{Action: rule.Allow})
+	reordered := e.gate(t, "claude", push, rm, apply, rule.Spec{Action: rule.Allow})
 	reordered.ApprovalTimeout = 300 * time.Millisecond
 	if ans := hook(reordered, "git push"); ans.Verdict != gate.Allowed {
-		t.Fatalf("push under a reordered config = %+v, want the same grant to hold", ans)
+		t.Fatalf("push with the rules below it reordered = %+v, want the same grant to hold", ans)
 	}
 	edited := e.gate(t, "claude", rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push origin*"}, Action: rule.Ask},
 		rule.Spec{Action: rule.Allow})
@@ -173,6 +174,63 @@ func TestHookSessionGrantCoversOnlyTheRuleThatAsked(t *testing.T) {
 	if len(by) != 5 || by[0] != fmt.Sprintf("user:%d", p.ID) || by[1] != grant || !strings.HasPrefix(by[2], "timeout:") ||
 		by[3] != grant || !strings.HasPrefix(by[4], "timeout:") {
 		t.Fatalf("decided_by = %v", by)
+	}
+}
+
+// Under first match, which calls a rule asks about depends on the rules above it. With "git push*--force*"
+// above "git push*", A on a plain push must not let a force push through once the two rules swap, or once
+// the force rule is narrowed. A grant follows its rule and every rule above it, so a change there asks
+// again, and a change below it keeps the grant (ADR 0011).
+func TestHookSessionGrantAsksAgainWhenARuleAboveItChanges(t *testing.T) {
+	e := newEnv(t)
+	force := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push*--force*"}, Action: rule.Ask}
+	push := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push*"}, Action: rule.Ask}
+	rm := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "rm -rf*"}, Action: rule.Deny}
+	allow := rule.Spec{Action: rule.Allow}
+	done := hookAsync(t, e.gate(t, "claude", force, push, rm, allow), `{"command":"git push origin main"}`)
+	p := waitPending(t, e.approvals)
+	if p.Rule != 2 {
+		t.Fatalf("pending = %+v, want it asked by the plain push rule, 2", p)
+	}
+	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
+		t.Fatal(err)
+	}
+	if ans := awaitHook(t, done); ans.Verdict != gate.Allowed {
+		t.Fatalf("answer = %+v", ans)
+	}
+	hook := func(command string, specs ...rule.Spec) gate.HookAnswer {
+		t.Helper()
+		g := e.gate(t, "claude", specs...)
+		g.ApprovalTimeout = 300 * time.Millisecond
+		ans, err := g.Hook(t.Context(), "native__Bash", json.RawMessage(`{"command":"`+command+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ans
+	}
+	asked := func(ans gate.HookAnswer) bool {
+		return ans.Verdict == gate.Denied && strings.Contains(ans.Reason, "none came within")
+	}
+
+	below := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "rm -r*"}, Action: rule.Deny}
+	if ans := hook("git push --tags", force, push, below, allow); ans.Verdict != gate.Allowed {
+		t.Fatalf("push with a rule below it edited = %+v, want the grant to hold", ans)
+	}
+	if ans := hook("git push --force origin main", push, force, rm, allow); !asked(ans) {
+		t.Fatalf("force push with the two rules swapped = %+v, want it asked about again", ans)
+	}
+	narrower := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push --force*"}, Action: rule.Ask}
+	if ans := hook("git push origin --force", narrower, push, rm, allow); !asked(ans) {
+		t.Fatalf("force push with the rule above narrowed = %+v, want it asked about again", ans)
+	}
+
+	var by []string
+	for _, r := range hookReceipts(t, e) {
+		by = append(by, r.decidedBy)
+	}
+	if len(by) != 4 || by[0] != fmt.Sprintf("user:%d", p.ID) || by[1] != fmt.Sprintf("grant:%d", p.ID) ||
+		!strings.HasPrefix(by[2], "timeout:") || !strings.HasPrefix(by[3], "timeout:") {
+		t.Fatalf("decided_by = %v, want user:%d, grant:%d, then two timeouts", by, p.ID, p.ID)
 	}
 }
 

@@ -181,49 +181,73 @@ func TestAsk(t *testing.T) {
 	}
 }
 
-// A session grant is keyed on the rule that asked, so the key must follow a rule's content and not its
-// position: moving a rule keeps its key, and any change to what it matches or does gives a new one.
-func TestKeyFollowsTheRuleNotItsPosition(t *testing.T) {
+// A session grant is keyed on the rule that asked. Under first match, which calls rule n catches
+// depends on rules 1 to n, so its key covers all of them: a change to rule n or to any rule above it
+// gives a new key, and a change below it keeps the key.
+func TestKeyCoversTheRuleAndTheRulesAboveIt(t *testing.T) {
+	force := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push*--force*"}, Action: rule.Ask}
 	push := rule.Spec{Agent: "codex", Tool: "native__Bash", Args: map[string]string{"command": "git push*", "cwd": "/work/*"}, Action: rule.Ask}
-	set := mustCompile(t,
-		push,
-		rule.Spec{Tool: "memory_*", Action: rule.Allow},
-		push,
-		rule.Spec{Action: rule.Allow},
-	)
-	if set.Key(1) == "" || set.Key(1) != set.Key(3) {
-		t.Fatalf("equal rules at 1 and 3 have keys %q and %q", set.Key(1), set.Key(3))
+	rm := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "rm -rf*"}, Action: rule.Deny}
+	memory := rule.Spec{Tool: "memory_*", Action: rule.Allow}
+	last := rule.Spec{Action: rule.Allow}
+	key := func(n int, specs ...rule.Spec) string {
+		t.Helper()
+		return mustCompile(t, specs...).Key(n)
+	}
+	want := key(2, force, push, rm, last)
+	if want == "" || key(2, force, push, rm, last) != want {
+		t.Fatal("the same config gave rule 2 no key, or a different key each time")
 	}
 	for name, n := range map[string]int{"no rule": 0, "past the end": 5, "negative": -1} {
-		if got := set.Key(n); got != "" {
+		if got := key(n, force, push, rm, last); got != "" {
 			t.Errorf("%s: Key(%d) = %q, want empty", name, n, got)
 		}
 	}
 
-	key := func(sp rule.Spec) string {
-		t.Helper()
-		return mustCompile(t, sp, rule.Spec{Action: rule.Allow}).Key(1)
+	argsReordered := rule.Spec{Agent: "codex", Tool: "native__Bash", Args: map[string]string{"cwd": "/work/*", "command": "git push*"}, Action: rule.Ask}
+	for name, got := range map[string]string{
+		"args written in another order": key(2, force, argsReordered, rm, last),
+		"a rule below edited":           key(2, force, push, memory, last),
+		"a rule below removed":          key(2, force, push, last),
+		"a rule below added":            key(2, force, push, rm, memory, last),
+		"rules below reordered":         key(2, force, push, memory, rm, last),
+	} {
+		if got != want {
+			t.Errorf("%s changed rule 2's key", name)
+		}
 	}
+
 	with := func(change func(sp *rule.Spec)) rule.Spec {
 		sp := push
 		sp.Args = map[string]string{"command": "git push*", "cwd": "/work/*"}
 		change(&sp)
 		return sp
 	}
-	reordered := rule.Spec{Agent: "codex", Tool: "native__Bash", Args: map[string]string{"cwd": "/work/*", "command": "git push*"}, Action: rule.Ask}
-	if key(reordered) != set.Key(1) {
-		t.Fatal("the order args are written in changed the key")
-	}
-	for name, sp := range map[string]rule.Spec{
-		"agent":        with(func(sp *rule.Spec) { sp.Agent = "claude" }),
-		"tool":         with(func(sp *rule.Spec) { sp.Tool = "native__Shell" }),
-		"args pattern": with(func(sp *rule.Spec) { sp.Args["command"] = "terraform apply*" }),
-		"args name":    with(func(sp *rule.Spec) { delete(sp.Args, "cwd"); sp.Args["dir"] = "/work/*" }),
-		"fewer args":   with(func(sp *rule.Spec) { delete(sp.Args, "cwd") }),
-		"action":       with(func(sp *rule.Spec) { sp.Action = rule.Deny }),
+	narrower := rule.Spec{Tool: "native__Bash", Args: map[string]string{"command": "git push --force*"}, Action: rule.Ask}
+	for name, got := range map[string]string{
+		"agent":                  key(2, force, with(func(sp *rule.Spec) { sp.Agent = "claude" }), rm, last),
+		"tool":                   key(2, force, with(func(sp *rule.Spec) { sp.Tool = "native__Shell" }), rm, last),
+		"args pattern":           key(2, force, with(func(sp *rule.Spec) { sp.Args["command"] = "terraform apply*" }), rm, last),
+		"args name":              key(2, force, with(func(sp *rule.Spec) { delete(sp.Args, "cwd"); sp.Args["dir"] = "/work/*" }), rm, last),
+		"fewer args":             key(2, force, with(func(sp *rule.Spec) { delete(sp.Args, "cwd") }), rm, last),
+		"action":                 key(2, force, with(func(sp *rule.Spec) { sp.Action = rule.Deny }), rm, last),
+		"the rule above edited":  key(2, narrower, push, rm, last),
+		"the rule above removed": key(1, push, rm, last),
+		"the two rules swapped":  key(1, push, force, rm, last),
+		"a rule added above":     key(3, memory, force, push, rm, last),
 	} {
-		if key(sp) == set.Key(1) {
-			t.Errorf("a different %s kept the key", name)
+		if got == want {
+			t.Errorf("%s kept rule 2's key", name)
 		}
+	}
+
+	// Each rule's form is written with its length, so two different lists never run together into the
+	// same bytes: without it, the args of the first list's rule 2 read as the args of the second's rule 1.
+	first := key(2, rule.Spec{Agent: "a", Tool: "t", Action: rule.Ask},
+		rule.Spec{Agent: "p", Tool: "q", Args: map[string]string{"n": "deny"}, Action: rule.Allow}, last)
+	second := key(2, rule.Spec{Agent: "a", Tool: "t", Args: map[string]string{"p": "q"}, Action: rule.Ask},
+		rule.Spec{Agent: "allow", Tool: "n", Action: rule.Deny}, last)
+	if first == second {
+		t.Fatal("two different rule lists share a key")
 	}
 }

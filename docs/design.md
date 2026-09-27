@@ -193,16 +193,21 @@ arguments, and the terminal bell rings. A tool behind `ask` stays in the agent's
 
 - `a` approves once, `d` denies, and `A` approves the tool's calls that the same rule asks about, for
   the rest of that agent's gate session: one `derbent mcp` process for an MCP call, the CLI's own
-  session for a hook call (see Built-in tools). The grant is keyed on a fingerprint of the rule's
-  content, not its position, so editing or reordering the config never widens it, and a rule edited
-  since asks again (ADR 0011). `A` takes a second press within five seconds, so one press can never
-  grant the session. An `a` typed with Caps Lock on arrives as `a` with Caps Lock from a terminal that
-  reports modifiers, and the UI takes it as `a`; a terminal that reports none sends `A`, which still
-  needs the second press. Nothing the UI does changes the config file.
+  session for a hook call (see Built-in tools). Under first match, which calls a rule catches depends
+  on the rules above it, so the grant is keyed on a fingerprint of the rule and every rule above it.
+  Editing or reordering the config never widens a grant: a change to the granted rule or to any rule
+  above it asks again, and a change below it keeps the grant (ADR 0011). `A` takes a second press
+  within five seconds, so one press can never grant the session, and the question and the status after
+  it name the tool, the rule's number and the agent. An `a` typed with Caps Lock on arrives as `a` with
+  Caps Lock from a terminal that reports modifiers, and the UI takes it as `a`; a terminal that reports
+  none sends `A`, which still needs the second press. Nothing the UI does changes the config file.
 - `derbent approve [--session] <id>` and `derbent deny <id>` do the same from any shell, by the id the
-  UI shows, written `12` or `#12`. `derbent pending` lists the waiting calls with their whole arguments,
-  read-only, as rows or JSON lines, so they can be read before deciding. The deciding commands, and the
-  UI given `--db`, refuse a database path that does not exist instead of creating one.
+  UI shows, written `12` or `#12`. An approval written by a gate from before grants followed the rule,
+  still running after the upgrade, names no rule and grants nothing: `A` in the UI says it approves the
+  call once, and `derbent approve --session` refuses it and says to approve it once. `derbent pending`
+  lists the waiting calls with their whole arguments, read-only, as rows or JSON lines, so they can be
+  read before deciding. The deciding commands, and the UI given `--db`, refuse a database path that does
+  not exist instead of creating one.
 - If no decision arrives within `approvals.timeout`, the call is denied with a tool error that says no
   approval came in time and tells the agent to try again and ask the user to approve it in the UI while
   it waits. The default of 50 seconds sits ten below Codex's 60, the shortest documented default tool
@@ -347,10 +352,16 @@ database migrates it inside `BEGIN IMMEDIATE`.
   through. The timeout path denies.
 - **Approval races.** Tests in one process race a decision against the deadline, and two decisions
   against each other, and find one winner in every round.
-- **Grants follow the rule.** On the MCP path and the hook path, `A` on a call one ask rule holds lets
-  the next such call through while a call another ask rule holds on the same tool still asks; under a
-  reordered config the grant holds, and under an edited rule the call asks again. A store test migrates
-  a database from before grants were keyed on the rule and finds its grants dropped.
+- **Grants follow the rule.** On the hook path, and on the MCP path with `memory_write` rules since the
+  MCP gate refuses `native__` names, `A` on a call one ask rule holds lets the next such call through
+  while a call another ask rule holds on the same tool still asks. On the hook path the grant holds
+  when the rules below it are reordered or edited, and the call asks again when the granted rule is
+  edited, when a rule above it is narrowed, and when `ask git push*--force*` and `ask git push*` swap
+  places after an `A` on a plain push. Rule tests check that a rule's fingerprint changes with any
+  change at or above it and with none below it, and that two different rule lists never hash the same
+  bytes. A store test migrates a database from before grants were keyed on the rule and finds its
+  grants dropped. UI and command tests check that an approval with no rule key is approved once by `A`
+  and refused by `derbent approve --session`.
 - **Escaping.** A test feeds the UI escape sequences, a clipboard write, a bell, a bidirectional
   override and invisible characters in the agent, tool and argument fields, and asserts that none reaches
   the main screen, the detail view or the memory browser raw and no line is wider than the window. Tests
@@ -427,7 +438,7 @@ derbent/
 | 0008 | SQLite through `modernc.org/sqlite`, with no cgo. |
 | 0009 | Downstream servers are supervised from the moment the gate starts. |
 | 0010 | Derbent is written in Go. |
-| 0011 | A session grant covers only the calls that the same rule asks about, keyed on the rule's fingerprint. |
+| 0011 | A session grant covers only the calls that the same rule asks about, keyed on a fingerprint of that rule and the rules above it. |
 
 ## Milestones
 
