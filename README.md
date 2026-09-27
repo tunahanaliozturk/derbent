@@ -458,6 +458,12 @@ tool's pin state and pins nothing, and the UI says how many tools changed. A ser
 change on every start can opt out with `pin = false` in its `[servers.<name>]` table. Pins trust what they
 see first, so look at a new server's tools with `derbent config check` before an agent uses them.
 
+That goes for a new tool that an update adds to a server already pinned, too: it is pinned and served at
+once, even in the middle of a session. For a server whose updates you do not review, name the tools you
+allow or ask about, such as `github__create_issue`, and deny `github__*` after them. A tool that no call
+can get through is left out of the agents' lists, so a new tool's description reaches no agent until you
+add it; an `allow` or `ask` on `github__*` lists it at once.
+
 ## Receipts and verify
 
 Each call through the gate appends one receipt: its sequence number, time, project, agent, gate session,
@@ -513,8 +519,9 @@ in the design. The ones to know first:
   adapters follow each CLI's documentation.
 - Argument globs match strings, not meaning: `git push*` does not match `cd repo && git push`.
 - Approvals depend on you watching. Unattended, `ask` means denied after the timeout.
-- Pins trust the first definition they see, and a budget can be passed by the calls in flight at the same
-  moment.
+- Pins trust the first definition they see, including a new tool that an update adds to a pinned server,
+  so name the tools you allow for a server whose updates you do not review. A budget can be passed by the
+  calls in flight at the same moment.
 - CI runs the tests on Windows and Linux and only builds on macOS.
 
 ## Decisions
