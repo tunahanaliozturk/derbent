@@ -22,8 +22,10 @@ only shared state.
 
 Milestone 3 of 5 is done. The gate serves shared memory tools and the tools of your own MCP servers,
 applies allow, deny and ask rules, masks secrets in stored arguments, and writes a hash-chained receipt
-for every call. It can hold a call until you approve it in a terminal UI. Gating Claude Code's built-in
-tools through its hooks comes next. The [design](docs/design.md) covers the whole plan, what Derbent
+for every call. It can hold a call until you approve it in a terminal UI or from another shell. The
+milestone's exit check ran with a real Claude Code session whose held call was approved from another
+process, not with Codex approved from the UI as first planned. Gating Claude Code's built-in tools
+through its hooks comes next. The [design](docs/design.md) covers the whole plan, what Derbent
 does not do, and how each claim is tested. Decisions are recorded in [docs/adr](docs/adr).
 
 ## Try it
@@ -106,24 +108,34 @@ timeout = "50s"
 
 The timeout is optional: 50 seconds unless you set it, and at least one second.
 
-Run `derbent` in a terminal of its own. Calls waiting for you sit at the top with the agent, the tool,
-the time left and the arguments, masked as they are in receipts, and the terminal bell rings when a new
-one arrives. The keys act on the highlighted call: `a` approves it once, `A` approves the tool for the
-rest of that agent's session, `d` denies it, and up and down pick another call. A call nobody answers is
-denied after the timeout, and the agent is told why. Below the waiting calls are the agents seen in the
-last hour and a live feed of receipts; `/` filters the feed, `m` searches memory across projects, `v`
-verifies the receipt chain, `?` lists the keys and `q` quits. Text from agents and tools is escaped
-before it is drawn, so it cannot send control sequences to your terminal.
+Run `derbent` in a terminal of its own. Calls waiting for you sit at the top, each as `#12` with the
+agent, the tool, the time left and the start of its arguments, masked as they are in receipts, and the
+terminal bell rings when a new one arrives. `enter` shows the highlighted call's whole arguments, and
+up, down, page up, page down, home and end scroll them. The keys act on the highlighted call: `a`
+approves it once, `A` pressed twice within five seconds approves the tool for the rest of that agent's
+session, `d` denies it, and up and down pick another call. A call that has just been highlighted takes
+none of these keys for its first 750 ms, so a key meant for the call before it cannot land on it. A call
+nobody answers is denied after the timeout, and the agent is told why. Below the waiting calls are the
+agents seen in the last hour and a live feed of receipts; `/` filters the feed, `m` searches memory
+across projects, `v` verifies the receipt chain, `?` lists the keys and `q` quits. Text from agents and
+tools is escaped before it is drawn, so it cannot send control sequences to your terminal or hide
+behind invisible characters.
 
-The same decisions work from any shell, by the id the UI shows, and receipts can be listed without it:
+The same decisions work from any shell, by the id the UI shows, written `12` or `#12`, and the waiting
+calls and the receipts can be listed without the UI:
 
 ```bash
+derbent pending                # the waiting calls with their whole arguments; --json for JSON lines
 derbent approve 12             # approves once, like a
 derbent approve --session 12   # like A; flags go before the id
-derbent deny 12
+derbent deny '#12'             # quote the # in a shell that reads it as a comment
 derbent receipts --agent codex --since 1h
 derbent receipts --json        # JSON lines
 ```
+
+Approvals guard against mistakes and against prompt injection that stays inside MCP. They are not a
+boundary against an agent that can already run shell commands as you: it can run `derbent approve`
+itself or write the database, so an approval or an `args` rule on a shell tool does not hold it back.
 
 The timeout sits below Codex's default tool timeout of 60 seconds ([ADR 0005](docs/adr/0005-approval-timeout.md)).
 If you raise it, raise `tool_timeout_sec` for the `derbent` server in Codex's config too.
