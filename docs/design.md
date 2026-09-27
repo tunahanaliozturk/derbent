@@ -71,7 +71,11 @@ TOML in the user config directory (`%APPDATA%\derbent\config.toml` on Windows,
 `$XDG_CONFIG_HOME/derbent/config.toml` or `~/.config/derbent/config.toml` on Linux,
 `~/Library/Application Support/derbent/config.toml` on macOS), decoded strictly: an unknown key is an
 error that names the key, and a syntax error names its line. `derbent config check` validates it and
-starts each downstream server once to list its tools.
+starts each downstream server once to list its tools. When the default file does not exist, every call
+is allowed: `derbent mcp` says so in one line on stderr when it starts, `derbent config check` says so,
+and the hook, which runs on every call, says nothing. A `--config` that names a file that does not
+exist is an error: `derbent mcp` and `derbent config check` exit with it, and the hook denies the call
+and names the path, so a mistyped path never allows everything.
 
 ```toml
 [servers.github]

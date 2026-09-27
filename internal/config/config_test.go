@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"errors"
+	"io/fs"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -60,12 +62,16 @@ func TestParseRejectsFileWithoutRules(t *testing.T) {
 	}
 }
 
-func TestLoadMissingFileGivesDefault(t *testing.T) {
-	cfg, err := config.Load(filepath.Join(t.TempDir(), "absent.toml"))
-	if err != nil {
-		t.Fatal(err)
+// A file that does not exist is an error naming it: only the command knows whether the user named the
+// file, which must then exist, or it is the default file, whose absence means Default.
+func TestLoadMissingFileIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "absent.toml")
+	for name, load := range map[string]func(string) (config.Config, error){"Load": config.Load, "LoadForHook": config.LoadForHook} {
+		if _, err := load(path); !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), path) {
+			t.Errorf("%s: err = %v, want a not-exist error naming %s", name, err, path)
+		}
 	}
-	if got := cfg.Rules.Decide("claude", "memory_write", nil); got.Action != rule.Allow {
+	if got := config.Default().Rules.Decide("claude", "memory_write", nil); got.Action != rule.Allow {
 		t.Fatalf("default decision = %+v, want allow", got)
 	}
 }

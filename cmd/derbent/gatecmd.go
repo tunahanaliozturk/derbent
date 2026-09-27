@@ -79,8 +79,9 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		return deny(err)
 	}
 	// The config says which tools are Derbent's, so it loads first: under a config that does not load,
-	// Derbent's own tools are denied with the rest rather than skipped.
-	cfg, err := loadConfig(*configPath, config.LoadForHook)
+	// Derbent's own tools are denied with the rest rather than skipped. A missing default file allows
+	// every call without a warning, since the hook runs on every call; a missing --config is an error.
+	cfg, _, _, err := loadConfig(*configPath, config.LoadForHook)
 	if err != nil {
 		return deny(err)
 	}

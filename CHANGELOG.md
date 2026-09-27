@@ -57,6 +57,8 @@ The first release.
   receipt, it denies the call and says why.
 - A session grant never covers a call that its rule matched on an argument it could not read, such as a
   `command` sent as an array: each such call asks.
+- A `--config` that names a file that does not exist is an error, never a config that allows every call:
+  the hook denies the call, and `derbent mcp` and `derbent config check` stop, naming the path.
 - A `url` server must use HTTPS, except on localhost, and redirects are refused, so its headers never
   reach another host.
 - Secrets come from `${env:...}` only through a server's `env` or `headers`, never in `command` or `url`,

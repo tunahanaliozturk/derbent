@@ -147,7 +147,7 @@ entries for the other three follow each CLI's documentation (see [Built-in tools
 Every agent now has `memory_write`, `memory_search` and `memory_read`, and a note one agent writes in a
 repository can be found by the others in the same repository. Search is full-text, and results mark
 each note with its author and as a note, not an instruction. Without a config file every call is
-allowed, and every call is recorded:
+allowed, and `derbent mcp` says so on stderr when it starts. Every call is recorded:
 
 ```bash
 derbent verify
@@ -166,7 +166,9 @@ a GitHub issue is described there too, and was not recorded.
 
 Rules live in `config.toml` in your user config directory: `%AppData%\derbent\` on Windows,
 `~/.config/derbent/` on Linux (or `$XDG_CONFIG_HOME/derbent/`), and
-`~/Library/Application Support/derbent/` on macOS.
+`~/Library/Application Support/derbent/` on macOS. When that file does not exist every call is allowed.
+`--config` names another file, which must exist: if it does not, `derbent mcp` and
+`derbent config check` stop with an error that names the path, and the hook denies the call.
 
 ```toml
 [[rule]]

@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"regexp"
 	"time"
@@ -46,9 +47,12 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if !agentName.MatchString(*agent) {
 		return fmt.Errorf("mcp: --agent must be 1 to 32 lower-case letters, digits, dashes or underscores, got %q", *agent)
 	}
-	cfg, err := loadConfig(*configPath, config.Load)
+	cfg, cfgPath, missing, err := loadConfig(*configPath, config.Load)
 	if err != nil {
 		return err
+	}
+	if missing {
+		fmt.Fprintf(stderr, "derbent: no config found at %s, so every call is allowed\n", cfgPath)
 	}
 	if *projectDir == "" {
 		if *projectDir, err = os.Getwd(); err != nil {
@@ -101,16 +105,22 @@ type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
 
-// loadConfig loads the config at path, or the default one, with load.
-func loadConfig(path string, load func(string) (config.Config, error)) (config.Config, error) {
-	if path == "" {
-		p, err := config.DefaultConfigPath()
-		if err != nil {
-			return config.Config{}, err
-		}
-		path = p
+// loadConfig loads the config with load from named, the --config the user gave, which must exist, or
+// else from the default config file. It returns the path it read and whether that was the default file
+// and did not exist, in which case the config is config.Default, which allows every call.
+func loadConfig(named string, load func(string) (config.Config, error)) (cfg config.Config, path string, missing bool, err error) {
+	if named != "" {
+		cfg, err = load(named)
+		return cfg, named, false, err
 	}
-	return load(path)
+	if path, err = config.DefaultConfigPath(); err != nil {
+		return config.Config{}, "", false, err
+	}
+	cfg, err = load(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return config.Default(), path, true, nil
+	}
+	return cfg, path, false, err
 }
 
 // databasePath is the --db a command was given, or the default database when it was given none.

@@ -40,7 +40,7 @@ type file struct {
 	} `toml:"receipts"`
 }
 
-// Default is the configuration used when there is no config file. It allows every call.
+// Default is the configuration used when the default config file does not exist. It allows every call.
 func Default() Config {
 	set, err := rule.Compile([]rule.Spec{{Action: rule.Allow}})
 	if err != nil {
@@ -57,7 +57,8 @@ func mustRedactor() *redact.Redactor {
 	return r
 }
 
-// Load reads the config file at path. A file that does not exist gives Default.
+// Load reads the config file at path. A file that does not exist is an error wrapping fs.ErrNotExist
+// and naming the path: whether that means Default depends on whether the user named the file.
 func Load(path string) (Config, error) {
 	return load(path, false)
 }
@@ -73,7 +74,7 @@ func LoadForHook(path string) (Config, error) {
 func load(path string, skipUnset bool) (Config, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // the path is the user's own config file
 	if errors.Is(err, fs.ErrNotExist) {
-		return Default(), nil
+		return Config{}, fmt.Errorf("config %s: %w", path, fs.ErrNotExist)
 	}
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)

@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -29,21 +28,13 @@ func runConfigCheck(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	path := *configPath
-	if path == "" {
-		p, err := config.DefaultConfigPath()
-		if err != nil {
-			return err
-		}
-		path = p
-	}
-	cfg, err := config.Load(path)
+	cfg, path, missing, err := loadConfig(*configPath, config.Load)
 	if err != nil {
 		return err
 	}
 	note := ""
-	if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
-		note = " (not found, using defaults)"
+	if missing {
+		note = " (not found: every call is allowed)"
 	}
 	if _, err = fmt.Fprintf(stdout, "config: %s%s\nrules: %d\n", path, note, cfg.Rules.Len()); err != nil {
 		return err

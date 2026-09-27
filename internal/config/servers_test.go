@@ -118,9 +118,6 @@ headers = { Authorization = "Bearer ${env:DERBENT_TEST_UNSET}" }
 	if masked := got.Redact.JSON(`{"note":"token ghp_0123456789abcdef"}`); strings.Contains(masked, "ghp_0123456789abcdef") {
 		t.Fatalf("a resolved secret is not masked: %s", masked)
 	}
-	if _, err = config.LoadForHook(filepath.Join(t.TempDir(), "absent.toml")); err != nil {
-		t.Fatalf("a missing file: %v, want the default config", err)
-	}
 }
 
 func TestMissingVariableErrorNeverShowsOtherValues(t *testing.T) {

@@ -171,10 +171,21 @@ func resultText(res *mcp.CallToolResult) string {
 	return b.String()
 }
 
+// writeAllowConfig writes a config that allows every call and has no servers, and returns its path.
+func writeAllowConfig(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[[rule]]\naction = \"allow\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestTwoAgentProcessesShareMemory(t *testing.T) {
 	dir := t.TempDir()
+	cfg := writeAllowConfig(t, dir)
 
-	claude := connectProcess(t, dir, "claude", filepath.Join(dir, "absent.toml"))
+	claude := connectProcess(t, dir, "claude", cfg)
 	res, err := claude.CallTool(t.Context(), &mcp.CallToolParams{Name: "memory_write", Arguments: map[string]any{
 		"title": "Retry policy", "body": "Payment calls retry three times with jitter.",
 	}})
@@ -185,7 +196,7 @@ func TestTwoAgentProcessesShareMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	codex := connectProcess(t, dir, "codex", filepath.Join(dir, "absent.toml"))
+	codex := connectProcess(t, dir, "codex", cfg)
 	res, err = codex.CallTool(t.Context(), &mcp.CallToolParams{Name: "memory_search", Arguments: map[string]any{"query": "jitter"}})
 	if err != nil || res.IsError {
 		t.Fatalf("search: err %v, result %q", err, resultText(res))
@@ -1127,6 +1138,81 @@ func TestHookFailsClosed(t *testing.T) {
 	_, errOut, code = runHook(t, dir, claudeHookInput(dir, "ls"), "--agent", "someone")
 	if code != 2 || !strings.Contains(errOut, "--cli") {
 		t.Fatalf("unknown cli: code %d, stderr %q", code, errOut)
+	}
+}
+
+// jsonText is s as it appears inside a JSON string, so a Windows path can be found in a hook's answer.
+func jsonText(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b[1 : len(b)-1])
+}
+
+// A --config the user named that does not exist is a mistake, not a request to allow everything: the
+// hook denies the call and names the path, and derbent mcp and config check refuse to start.
+func TestAMissingConfigTheUserNamedIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "config.toml")
+	out, errOut, code := runHook(t, dir, claudeHookInput(dir, "ls"), "--agent", "claude")
+	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, jsonText(missing)) {
+		t.Fatalf("hook: code %d, stdout %q, stderr %q; want a deny naming %s", code, out, errOut, missing)
+	}
+	for _, args := range [][]string{
+		{"mcp", "--agent", "claude", "--config", missing, "--db", filepath.Join(dir, "p.db"), "--project", dir},
+		{"config", "check", "--config", missing},
+	} {
+		err := run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), missing) {
+			t.Errorf("%s: err = %v, want one naming %s", args[0], err, missing)
+		}
+	}
+}
+
+// useConfigDir points the user config directory at dir, on every platform, and returns the default
+// config path under it.
+func useConfigDir(t *testing.T, dir string) string {
+	t.Helper()
+	t.Setenv("APPDATA", dir)         // Windows
+	t.Setenv("XDG_CONFIG_HOME", dir) // Linux
+	t.Setenv("HOME", dir)            // macOS
+	path, err := config.DefaultConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(path, dir) {
+		t.Fatalf("default config path %s is not under %s", path, dir)
+	}
+	return path
+}
+
+// Without --config, a missing default file keeps the first-run behaviour: every call is allowed.
+// derbent mcp says so once on stderr when it starts, config check says so, and the hook, which runs
+// on every call, says nothing.
+func TestWithoutAConfigFileEveryCallIsAllowed(t *testing.T) {
+	dir := t.TempDir()
+	path := useConfigDir(t, dir)
+	db := filepath.Join(dir, "p.db")
+
+	var errOut bytes.Buffer
+	if err := run(t.Context(), []string{"mcp", "--agent", "claude", "--db", db, "--project", dir}, strings.NewReader(""), io.Discard, &errOut); err != nil {
+		t.Fatalf("mcp: %v", err)
+	}
+	if want := "no config found at " + path + ", so every call is allowed"; !strings.Contains(errOut.String(), want) {
+		t.Fatalf("mcp stderr = %q, want it to say %q", errOut.String(), want)
+	}
+
+	var out bytes.Buffer
+	errOut.Reset()
+	err := run(t.Context(), []string{"gate", "--agent", "claude", "--db", db}, strings.NewReader(claudeHookInput(dir, "rm -rf /")), &out, &errOut)
+	if err != nil || out.Len() != 0 || errOut.Len() != 0 {
+		t.Fatalf("hook: err %v, stdout %q, stderr %q; want the call allowed without a word", err, out.String(), errOut.String())
+	}
+
+	out.Reset()
+	if err = run(t.Context(), []string{"config", "check"}, strings.NewReader(""), &out, io.Discard); err != nil {
+		t.Fatalf("config check: %v", err)
+	}
+	if want := "config: " + path + " (not found: every call is allowed)"; !strings.Contains(out.String(), want) {
+		t.Fatalf("config check output = %q, want it to say %q", out.String(), want)
 	}
 }
 
