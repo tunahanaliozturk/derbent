@@ -71,11 +71,12 @@ TOML in the user config directory (`%APPDATA%\derbent\config.toml` on Windows,
 `$XDG_CONFIG_HOME/derbent/config.toml` or `~/.config/derbent/config.toml` on Linux,
 `~/Library/Application Support/derbent/config.toml` on macOS), decoded strictly: an unknown key is an
 error that names the key, and a syntax error names its line. `derbent config check` validates it, says
-how many rules and budgets it holds, and starts each downstream server once to list its tools. When the default file does not exist, every call
-is allowed: `derbent mcp` says so in one line on stderr when it starts, `derbent config check` says so,
-and the hook, which runs on every call, says nothing. A `--config` that names a file that does not
-exist is an error: `derbent mcp` and `derbent config check` exit with it, and the hook denies the call
-and names the path, so a mistyped path never allows everything.
+how many rules and budgets it holds, and starts each downstream server once to list its tools. When the
+default file does not exist, every call is allowed: `derbent mcp` says so in one line on stderr when it
+starts, `derbent config check` says so, and the hook, which runs on every call, says nothing. A
+`--config` that names a file that does not exist is an error: `derbent mcp` and `derbent config check`
+exit with it, and the hook denies the call and names the path, so a mistyped path never allows
+everything.
 
 ```toml
 [servers.github]
@@ -360,9 +361,10 @@ file never loosens anything, and a grant is keyed on what the rules say, not on 
   missing file changes nothing.
 - Only a regular file of at most 64 KiB is read, through a reader that stops one byte past the limit. A
   symbolic link, a directory, a FIFO, a device or a larger file is refused as invalid, with a reason that
-  says which, since reading it could block the hook or fill its memory. The `.git` file of a linked
-  worktree, and the `commondir` file it leads to, are read under the same limits, and one that fails them
-  is taken as not a linked worktree.
+  says which, since reading it could block the hook or fill its memory. The open does not wait for a
+  FIFO's writer and the type is checked again on what was opened, so a file swapped in after the check
+  is refused too. The `.git` file of a linked worktree, and the `commondir` file it leads to, are read
+  under the same limits, and one that fails them is taken as not a linked worktree.
 - The file is read for each call's project and kept by path, size and modification time, so an edit takes
   effect on the next call on both paths.
 - Project rules decide calls and never change tool lists: a tool the project denies stays listed, and its
