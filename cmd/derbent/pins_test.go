@@ -1,16 +1,25 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// acceptLine is the line of derbent pins show that says how to accept the change, hash included, and
+// pinnedLine the one with the pinned definition's hash.
+var (
+	acceptLine = regexp.MustCompile(`derbent pins accept echo__echo ([0-9a-f]{64})`)
+	pinnedLine = regexp.MustCompile(`pinned [^,]+, sha256 ([0-9a-f]{64})`)
 )
 
 // writePinConfig writes a config with the echo stand-in as server echo, whose echo tool has the
@@ -89,7 +98,16 @@ func TestAChangedToolIsWithheldUntilAccepted(t *testing.T) {
 			t.Errorf("pins show lacks %q:\n%s", want, show)
 		}
 	}
-	if out := runOK(t, "pins", "accept", "--db", db, "echo__echo"); !strings.Contains(out, "accepted echo__echo") {
+	m, pinned := acceptLine.FindStringSubmatch(show), pinnedLine.FindStringSubmatch(show)
+	if m == nil || pinned == nil {
+		t.Fatalf("pins show does not show both hashes, or how to accept the change:\n%s", show)
+	}
+	// A hash that is not the recorded change's, here the pinned one, accepts nothing.
+	err = run(t.Context(), []string{"pins", "accept", "--db", db, "echo__echo", pinned[1]}, strings.NewReader(""), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "echo__echo: the change on record is not the one given; run derbent pins show again") {
+		t.Fatalf("accept with the pinned hash: err = %v", err)
+	}
+	if out := runOK(t, "pins", "accept", "--db", db, "echo__echo", m[1][:12]); !strings.Contains(out, "accepted echo__echo") {
 		t.Fatalf("pins accept output %q", out)
 	}
 	for deadline := time.Now().Add(10 * time.Second); !slices.Contains(listedTools(t, second), "echo__echo"); time.Sleep(100 * time.Millisecond) {
@@ -163,8 +181,11 @@ func TestPinsCommandsNameWhatIsWrong(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"pins", "accept", "--db", db, "echo__echo"}, "echo__echo has no change to accept"},
-		{[]string{"pins", "accept", "--db", db, "echo__nope"}, "echo__nope has no pin"},
+		{[]string{"pins", "accept", "--db", db, "echo__echo", "0123456789abcdef"}, "echo__echo has no change to accept"},
+		{[]string{"pins", "accept", "--db", db, "echo__nope", "01234567"}, "echo__nope has no pin"},
+		{[]string{"pins", "accept", "--db", db, "echo__echo"}, "give the tool and the sha256 of its new definition"},
+		{[]string{"pins", "accept", "--db", db, "echo__echo", "0123456"}, `"0123456" is not the sha256 of the new definition`},
+		{[]string{"pins", "accept", "--db", db, "echo__echo", "0123456z"}, `"0123456z" is not the sha256 of the new definition`},
 		{[]string{"pins", "show", "--db", db, "echo"}, `"echo" is not <server>__<tool>`},
 		{[]string{"pins", "show", "--db", db}, "give one tool"},
 		{[]string{"pins", "--db", db, "extra"}, "unexpected argument"},
@@ -210,5 +231,55 @@ func TestConfigCheckShowsPinStatesAndPinsNothing(t *testing.T) {
 	writePinConfig(t, dir, "v2", "pin = false\n")
 	if out := check(); !strings.Contains(out, "echo__echo  (not pinned: pin = false)") {
 		t.Fatalf("config check with pinning off:\n%s", out)
+	}
+}
+
+// databaseBeforePins creates a database at path as a Derbent from before tool pins left it: migrations
+// 0001 to 0004 applied and schema version 4.
+func databaseBeforePins(t *testing.T, path string) {
+	t.Helper()
+	names, err := filepath.Glob(filepath.Join("..", "..", "internal", "store", "migrations", "000[1-4]_*.sql"))
+	if err != nil || len(names) != 4 {
+		t.Fatalf("migrations before pins = %v, %v", names, err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range names {
+		script, readErr := os.ReadFile(name)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if _, err = db.ExecContext(t.Context(), string(script)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if _, err = db.ExecContext(t.Context(), `PRAGMA user_version = 4`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The commands that only read never migrate, so right after an upgrade they meet a database without the
+// pins table. It holds no pins: config check shows every tool new, pins lists none and pins show finds
+// none.
+func TestPinCommandsReadADatabaseFromBeforePins(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "p.db")
+	databaseBeforePins(t, db)
+	cfg := writePinConfig(t, dir, "v1", "")
+	if out := runOK(t, "config", "check", "--config", cfg, "--db", db); !strings.Contains(out, "echo__echo  (pin: new)") {
+		t.Fatalf("config check:\n%s", out)
+	}
+	if out := runOK(t, "pins", "--db", db); strings.TrimSpace(out) != "no pins" {
+		t.Fatalf("pins output %q", out)
+	}
+	if out := runOK(t, "pins", "--json", "--db", db); out != "" {
+		t.Fatalf("pins --json output %q", out)
+	}
+	err := run(t.Context(), []string{"pins", "show", "--db", db, "echo__echo"}, strings.NewReader(""), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "echo__echo has no pin") {
+		t.Fatalf("pins show: err = %v", err)
 	}
 }

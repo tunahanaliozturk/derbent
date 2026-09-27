@@ -75,12 +75,16 @@ func (g *Gate) SyncTools(ctx context.Context, server string, tools []*mcp.Tool) 
 	for _, t := range servable {
 		name := server + "__" + t.Name
 		switch {
+		case !knobs.skipHiding && g.Rules.Hidden(g.Agent, name):
+			// Refused by the rule that hides it, changed or not, exactly as before pins, so a refusal never
+			// tells the agent the tool exists. Its pin was checked above all the same.
 		case checkErr != nil:
 			g.withheld[name] = withheldTool{server: server, tool: t, unchecked: true}
 		case changed[t.Name]:
 			g.withheld[name] = withheldTool{server: server, tool: t}
 			slog.Warn("derbent: tool withheld: it changed since it was pinned; review it with derbent pins", "tool", name)
-		case g.serve(server, name, t):
+		default:
+			g.serve(server, name, t)
 			keep[name] = true
 		}
 	}
@@ -105,18 +109,14 @@ func (g *Gate) checkPins(ctx context.Context, server string, tools []*mcp.Tool) 
 	return g.Pins.Check(ctx, server, tools)
 }
 
-// serve lists t to the agent as name, unless the rules hide it from this agent, and reports whether it
-// did. g.mu must be held.
-func (g *Gate) serve(server, name string, t *mcp.Tool) bool {
-	if !knobs.skipHiding && g.Rules.Hidden(g.Agent, name) {
-		return false
-	}
+// serve lists t to the agent as name. The rules never hide a tool that reaches it: SyncTools leaves
+// those out, and withholds none of them. g.mu must be held.
+func (g *Gate) serve(server, name string, t *mcp.Tool) {
 	g.owners[name] = server
 	g.server.AddTool(&mcp.Tool{
 		Name: name, Title: t.Title, Description: t.Description,
 		InputSchema: t.InputSchema, OutputSchema: t.OutputSchema, Annotations: t.Annotations,
 	}, g.forward(server, t.Name))
-	return true
 }
 
 // held returns the withheld tool of that gate name, if there is one.
@@ -151,38 +151,56 @@ func (g *Gate) WatchPins(ctx context.Context) {
 	}
 }
 
-// recheckPins checks the withheld tools against their pins again, one transaction per server, and
-// serves each one that now matches.
+// recheckPins looks at the withheld tools again and serves each one that now matches its pin. The tools
+// whose pins could not be checked are checked again, one transaction per server. A tool withheld because
+// it changed is only compared with its pin, which writes nothing while a change is recorded (see
+// pin.Store.Recheck): waiting gates take no write lock, and never replace the change the user reviews.
 func (g *Gate) recheckPins(ctx context.Context) {
 	g.mu.Lock()
-	byServer := map[string][]*mcp.Tool{}
+	unchecked := map[string][]*mcp.Tool{}
+	var differing []withheldTool
 	for _, w := range g.withheld {
-		byServer[w.server] = append(byServer[w.server], w.tool)
+		if w.unchecked {
+			unchecked[w.server] = append(unchecked[w.server], w.tool)
+		} else {
+			differing = append(differing, w)
+		}
 	}
 	g.mu.Unlock()
-	for server, tools := range byServer {
+	for server, tools := range unchecked {
 		changed, err := g.checkPins(ctx, server, tools)
 		if err != nil {
 			continue // still withheld; SyncTools said why when it withheld them
 		}
-		g.mu.Lock()
 		for _, t := range tools {
-			name := server + "__" + t.Name
-			w, ok := g.withheld[name]
-			switch {
-			case !ok || w.tool != t: // a newer list from the server took its place meanwhile
-			case changed[t.Name]:
-				if w.unchecked { // SyncTools could not say so when it withheld the tool
-					slog.Warn("derbent: tool withheld: it changed since it was pinned; review it with derbent pins", "tool", name)
-				}
-				w.unchecked = false
-				g.withheld[name] = w
-			default:
-				delete(g.withheld, name)
-				g.serve(server, name, t)
-			}
+			g.release(server, t, changed[t.Name])
 		}
-		g.mu.Unlock()
+	}
+	for _, w := range differing {
+		if changed, err := g.Pins.Recheck(ctx, w.server, w.tool); err == nil {
+			g.release(w.server, w.tool, changed)
+		}
+	}
+}
+
+// release serves a withheld tool that now matches its pin and keeps withholding one that differs,
+// unless a newer list from its server took its place since recheckPins read it.
+func (g *Gate) release(server string, t *mcp.Tool, changed bool) {
+	name := server + "__" + t.Name
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	w, ok := g.withheld[name]
+	switch {
+	case !ok || w.tool != t:
+	case changed:
+		if w.unchecked { // SyncTools could not say so when it withheld the tool
+			slog.Warn("derbent: tool withheld: it changed since it was pinned; review it with derbent pins", "tool", name)
+		}
+		w.unchecked = false
+		g.withheld[name] = w
+	default:
+		delete(g.withheld, name)
+		g.serve(server, name, t)
 	}
 }
 

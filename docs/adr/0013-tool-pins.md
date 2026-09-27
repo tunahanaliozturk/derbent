@@ -20,7 +20,8 @@ new text under the same name and the same rules.
 - When a definition differs from its pin, the gate withholds the tool from the agent's list, records the
   new definition next to the pin, and writes a warning to stderr. A call to it is refused before any rule
   is read, with `decided_by` = `pin`. The user reviews the change with `derbent pins show` and accepts it
-  with `derbent pins accept`, and a running gate serves it again within two seconds.
+  with `derbent pins accept`, giving the hash `pins show` printed, and a running gate serves it again
+  within two seconds.
 - Pins are global per server and tool, not per agent or project.
 - `pin = false` on a server turns pinning off, for servers whose descriptions change on every start.
 
@@ -32,14 +33,21 @@ new text under the same name and the same rules.
   its first listing is pinned as it is. `derbent config check` shows the tools and their pin states before
   an agent uses them.
 - Global pins mean one review covers every agent and project, and a tool the rules hide from one agent is
-  still pinned for the next agent that can see it.
+  still pinned for the next agent that can see it. The agent it is hidden from gets the refusal of the
+  rule that hides it, changed or not, so a pin never tells an agent that a hidden tool exists.
 - A tool that disappears keeps its pin, so it cannot come back changed without notice. This version never
   deletes a pin.
 - The pin covers the definition as the SDK decodes it, so a server that sends the same schema with other
   key order or spacing has not changed it.
-- `derbent pins accept` accepts the definition recorded last. If the server changed it again after
-  `pins show`, the accepted definition is not the one reviewed; `accept` prints the hash it accepted,
-  which matches the one `pins show` printed when nothing changed in between.
+- `derbent pins accept` takes the hash of the change the user reviewed, as `pins show` prints it or its
+  first 8 hex digits, and refuses when the change on record has another, so a change recorded after the
+  review is never accepted unseen.
+- A gate waiting on a changed tool only reads its pin, and records its own definition as the change only
+  when none is recorded. Two gates holding different definitions, such as `npx pkg@latest` resolved at
+  different starts, therefore never replace each other's record while the user reviews it; the other
+  definition becomes the change once the first is accepted, and is reviewed in turn.
+- The commands that only read the database never migrate it, so right after an upgrade they can meet a
+  database without the pins table. It counts as holding no pins: every tool is `new`.
 - Only downstream servers are pinned: the memory tools are Derbent's own, and the CLIs' built-in tools
   have no definition the gate receives.
 - A pin check that fails withholds the server's tools until a check succeeds, so a database problem never

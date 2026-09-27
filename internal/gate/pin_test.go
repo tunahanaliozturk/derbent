@@ -73,6 +73,20 @@ func pinState(t *testing.T, e *env, server, tool string) pin.State {
 	return p.State()
 }
 
+// accept accepts the change recorded for server's tool, as derbent pins accept does with the hash that
+// pins show printed.
+func accept(t *testing.T, e *env, server, tool string) {
+	t.Helper()
+	s := pin.NewStore(e.db)
+	p, err := s.Get(t.Context(), server, tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Accept(t.Context(), server, tool, p.NewSHA256); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAToolIsPinnedOnFirstUseAndServed(t *testing.T) {
 	e := newEnv(t)
 	g, cs, _ := pinGate(t, e, "claude")
@@ -119,9 +133,7 @@ func TestAnAcceptedToolIsServedAgainWhileTheGateRuns(t *testing.T) {
 	if got := toolNames(t, cs); len(got) != 0 {
 		t.Fatalf("tools = %v, want get_me withheld", got)
 	}
-	if _, err := pin.NewStore(e.db).Accept(t.Context(), "github", "get_me"); err != nil {
-		t.Fatal(err)
-	}
+	accept(t, e, "github", "get_me")
 	select {
 	case <-changed:
 	case <-time.After(5 * time.Second):
@@ -232,5 +244,88 @@ func TestToolsWithheldUncheckedAreServedOnceTheirPinsCanBeChecked(t *testing.T) 
 	}
 	if s := pinState(t, e, "github", "get_me"); s != pin.Pinned {
 		t.Fatalf("pin state = %q", s)
+	}
+}
+
+// Two gates that hold different changed definitions of one tool leave the recorded change alone while
+// they wait, so the change the user reviews is the one they accept. Once it is accepted, the gate that
+// holds the other definition records that one as the change.
+func TestGatesHoldingDifferentChangesDoNotFlipTheRecordedChange(t *testing.T) {
+	gate.SetPinRecheck(t, 10*time.Millisecond)
+	e := newEnv(t)
+	first, _, _ := pinGate(t, e, "claude")
+	first.SyncTools(t.Context(), "github", []*mcp.Tool{described("get_me", "v1")})
+	a, _, _ := pinGate(t, e, "claude")
+	a.SyncTools(t.Context(), "github", []*mcp.Tool{described("get_me", "v2")})
+	b, bs, changed := pinGate(t, e, "codex")
+	b.SyncTools(t.Context(), "github", []*mcp.Tool{described("get_me", "v3")})
+	watch(t, a)
+	watch(t, b)
+	pins := pin.NewStore(e.db)
+	recorded, err := pins.Get(t.Context(), "github", "get_me")
+	if err != nil || !strings.Contains(recorded.NewDefinition, `"v3"`) {
+		t.Fatalf("recorded change = %+v, %v; want v3, the last one listed", recorded, err)
+	}
+	for range 40 { // about twenty rechecks by each gate
+		time.Sleep(5 * time.Millisecond)
+		p, err := pins.Get(t.Context(), "github", "get_me")
+		if err != nil || p != recorded {
+			t.Fatalf("the recorded change moved while the gates waited:\n%+v\nwant\n%+v (%v)", p, recorded, err)
+		}
+	}
+	accept(t, e, "github", "get_me")
+	select {
+	case <-changed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the gate holding v3 did not serve it after the accept")
+	}
+	if got := toolNames(t, bs); !slices.Equal(got, []string{"github__get_me"}) {
+		t.Fatalf("tools of the gate holding v3 = %v", got)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		p, err := pins.Get(t.Context(), "github", "get_me")
+		if err == nil && strings.Contains(p.NewDefinition, `"v2"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pin = %+v, %v; want v2, which the other gate holds, recorded as the change", p, err)
+		}
+	}
+}
+
+// A tool the rules hide from this agent is refused by the rule that hides it even when it changed, so
+// the refusal does not tell the agent that the tool exists. Its change is still recorded.
+func TestAChangedToolHiddenFromThisAgentIsRefusedByItsRule(t *testing.T) {
+	e := newEnv(t)
+	first, _, _ := pinGate(t, e, "claude")
+	first.SyncTools(t.Context(), "github", []*mcp.Tool{described("secret", "v1")})
+	g, cs, _ := pinGate(t, e, "codex", rule.Spec{Tool: "github__secret", Action: rule.Deny}, allowRest)
+	g.SyncTools(t.Context(), "github", []*mcp.Tool{described("secret", "v2")})
+	if got := toolNames(t, cs); len(got) != 0 {
+		t.Fatalf("tools = %v, want secret hidden", got)
+	}
+	res := call(t, cs, "github__secret", nil)
+	if want := "derbent: github__secret is not allowed for this agent (rule 1)"; !res.IsError || text(res) != want {
+		t.Fatalf("call = %q, want %q", text(res), want)
+	}
+	if by := decidedBy(t, e.db); !slices.Equal(by, []string{"rule:1"}) {
+		t.Fatalf("decided_by = %v", by)
+	}
+	if s := pinState(t, e, "github", "secret"); s != pin.Changed {
+		t.Fatalf("pin state = %q, want the change recorded", s)
+	}
+}
+
+// The same holds when the pins cannot be checked: the hidden tool is refused by its rule.
+func TestAHiddenToolWhosePinCannotBeCheckedIsRefusedByItsRule(t *testing.T) {
+	e := newEnv(t)
+	g, cs, _ := pinGate(t, e, "codex", rule.Spec{Tool: "github__secret", Action: rule.Deny}, allowRest)
+	if _, err := e.db.ExecContext(t.Context(), `DROP TABLE pins`); err != nil {
+		t.Fatal(err)
+	}
+	g.SyncTools(t.Context(), "github", []*mcp.Tool{described("secret", "v1")})
+	res := call(t, cs, "github__secret", nil)
+	if want := "derbent: github__secret is not allowed for this agent (rule 1)"; !res.IsError || text(res) != want {
+		t.Fatalf("call = %q, want %q", text(res), want)
 	}
 }
