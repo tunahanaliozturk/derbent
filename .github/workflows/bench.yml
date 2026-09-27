@@ -1,0 +1,38 @@
+name: bench
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Benchmark
+        shell: bash
+        env:
+          # Git Bash on Windows would rewrite benchstat's "/path" and "/call" into Windows paths.
+          MSYS_NO_PATHCONV: "1"
+          BENCHSTAT: golang.org/x/perf/cmd/benchstat@v0.0.0-20260908200009-22c9c6c9d4da
+        run: |
+          echo "runner-image: $ImageOS $ImageVersion" > raw.txt
+          go test ./cmd/derbent/ -run '^$' -bench '^BenchmarkEcho$' -benchtime 2000x -count 10 -timeout 30m >> raw.txt
+          go test ./cmd/derbent/ -run '^$' -bench '^BenchmarkHook$' -benchtime 200x -count 10 -timeout 30m >> raw.txt
+          go run "$BENCHSTAT" -filter .name:Echo -col /path raw.txt > summary.txt
+          go run "$BENCHSTAT" -filter .name:Hook -col /call raw.txt >> summary.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-${{ matrix.os }}
+          path: |
+            raw.txt
+            summary.txt

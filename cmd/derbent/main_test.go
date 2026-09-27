@@ -137,7 +137,7 @@ func (b *lockedBuffer) String() string {
 
 // gateCommand is a gate process for agent. Its stderr, and its downstream servers', is printed if the
 // test fails, so a failure says what the gate saw.
-func gateCommand(t *testing.T, dir, agent, configPath string) *exec.Cmd {
+func gateCommand(t testing.TB, dir, agent, configPath string) *exec.Cmd {
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "mcp", "--agent", agent,
 		"--db", filepath.Join(dir, "p.db"), "--config", configPath, "--project", dir)
 	cmd.Env = append(os.Environ(), "DERBENT_TEST_MAIN=1")
@@ -851,7 +851,7 @@ func TestUIOpensAndQuits(t *testing.T) {
 // runHook starts this test binary as `derbent gate` with stdin and returns its stdout, stderr and exit
 // code, as a CLI's hook runner would see them. It may run on a goroutine of its own, so a process that
 // cannot start is reported with Errorf, and its code is -1.
-func runHook(t *testing.T, dir, stdin string, args ...string) (string, string, int) {
+func runHook(t testing.TB, dir, stdin string, args ...string) (string, string, int) {
 	t.Helper()
 	base := []string{"gate", "--db", filepath.Join(dir, "p.db"), "--config", filepath.Join(dir, "config.toml")}
 	cmd := exec.CommandContext(t.Context(), os.Args[0], append(base, args...)...)
