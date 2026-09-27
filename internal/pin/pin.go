@@ -43,11 +43,20 @@ var (
 // Definition returns the canonical form of t that a pin is taken over: a JSON object with its name,
 // title, description, input schema, output schema and annotations, object keys sorted, no insignificant
 // whitespace, numbers as written and no HTML escaping. Every key is present, null or empty when the
-// server left it out, so the form does not depend on which fields the SDK omits.
+// server left it out, so the form does not depend on which fields the SDK omits. The annotations are
+// written here field by field, since the SDK's own encoding of them changes with its version and with
+// MCPGODEBUG=hintomitempty.
 func Definition(t *mcp.Tool) (string, error) {
+	var annotations any // null when the server sent none
+	if a := t.Annotations; a != nil {
+		annotations = map[string]any{
+			"title": a.Title, "readOnlyHint": a.ReadOnlyHint, "idempotentHint": a.IdempotentHint,
+			"destructiveHint": a.DestructiveHint, "openWorldHint": a.OpenWorldHint,
+		}
+	}
 	raw, err := json.Marshal(map[string]any{
 		"name": t.Name, "title": t.Title, "description": t.Description,
-		"inputSchema": t.InputSchema, "outputSchema": t.OutputSchema, "annotations": t.Annotations,
+		"inputSchema": t.InputSchema, "outputSchema": t.OutputSchema, "annotations": annotations,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode tool %s: %w", t.Name, err)
