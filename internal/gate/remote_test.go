@@ -124,6 +124,7 @@ func TestUnservableToolsAreLeftOut(t *testing.T) {
 		objectTool(strings.Repeat("a", 62)),
 		{Name: "string_schema", InputSchema: map[string]any{"type": "string"}},
 		{Name: "no_schema"},
+		badHeaderTool(),
 	})
 	if got := toolNames(t, cs); !slices.Equal(got, []string{"x__fine"}) {
 		t.Fatalf("tools = %v", got)
@@ -212,6 +213,13 @@ func TestServableName(t *testing.T) {
 	}
 }
 
+// badHeaderTool has an x-mcp-header on an object property, which the SDK's Server.AddTool panics on.
+func badHeaderTool() *mcp.Tool {
+	return &mcp.Tool{Name: "bad_header", InputSchema: map[string]any{"type": "object", "properties": map[string]any{
+		"p": map[string]any{"type": "object", "x-mcp-header": "X-P"},
+	}}}
+}
+
 func TestLeftOutSaysWhy(t *testing.T) {
 	tests := map[string]struct {
 		name string
@@ -222,6 +230,7 @@ func TestLeftOutSaysWhy(t *testing.T) {
 		"bad name":         {"x__has space", objectTool("has space"), "not a tool name"},
 		"string schema":    {"x__s", &mcp.Tool{Name: "s", InputSchema: map[string]any{"type": "string"}}, "not an object"},
 		"no schema at all": {"x__n", &mcp.Tool{Name: "n"}, "not an object"},
+		"bad x-mcp-header": {"x__h", badHeaderTool(), "refuses its definition"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {

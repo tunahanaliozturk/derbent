@@ -148,9 +148,11 @@ per   = "1h"
 
 - Downstream tools are listed as `<server>__<tool>`, so two servers can never collide. Server names
   are lower-case letters, digits and dashes, so the name splits one way only. A gate tool name must be
-  1 to 64 letters, digits, underscores or dashes; a tool that does not fit, or whose input schema is not
-  an object, is left out with a warning on stderr and marked by `derbent config check`, never
-  truncated.
+  1 to 64 letters, digits, underscores or dashes; a tool that does not fit, whose input schema is not
+  an object, or whose definition the MCP SDK refuses to serve, such as an `x-mcp-header` on a property
+  that is not a string, integer or boolean, is left out with a warning on stderr and marked by
+  `derbent config check`, never truncated. The SDK panics on such a definition, so the gate tries it on
+  a throwaway server first, and one bad tool never takes down the gate.
 - A downstream `notifications/tools/list_changed` is passed on to the agent after the rules are applied
   to the new list.
 - A downstream server is supervised from the moment the gate starts (ADR 0009): it is started again
