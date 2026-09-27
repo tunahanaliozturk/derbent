@@ -22,12 +22,16 @@ glob matches, within a sliding window `per` of one minute to 24 hours.
   receipts on `(agent, at)` so the count reads only that agent's window.
 - The rules decide first, and a `deny` stays a deny. Otherwise a used-up budget refuses the call without
   asking: `decided_by` = `budget:<n>`, outcome `refused`, and the agent reads which budget, the limit and
-  about how long until the next call is possible.
+  about how long until the next call is possible. The message says "budget <n> in the config is used up",
+  since an agent read "budget 1 reached: 2 calls" as a limit of one. When several matching budgets are
+  used up, it names the one with the longest wait, since the call is refused until each has room.
 - A budget that cannot be counted refuses the call, with `decided_by` = `gate`.
 
 ## Consequences
 
-- A looping agent never floods the approval queue: once its budget is used up, its calls stop there.
+- Once the calls a looping agent had let through use its budget up, its further calls are refused without
+  asking the user. Asked calls that the user denies or that time out are not let through and do not
+  count, so until then such a loop can still reach the approval queue.
 - Counting and appending are not one transaction across processes. Two calls counted at the same moment
   can both pass when one call is left, so a budget can be passed by at most the number of calls in flight
   at once. An exact count would need a lock held from the count to the append, across processes, on every

@@ -44,6 +44,9 @@ func TestBudgetReached(t *testing.T) {
 		"a tool no budget covers":          {"codex", "memory_write", []rule.Passed{passed("memory_write", time.Minute)}, 0, 0},
 		"a glob counts every tool it hits": {"codex", "github__create_issue", []rule.Passed{passed("github__get_me", 5*time.Minute)}, 2, 5 * time.Minute},
 		"every matching budget applies":    {"claude", bash, []rule.Passed{passed(bash, time.Minute), passed(read, 2*time.Minute), passed(read, 3*time.Minute)}, 3, 57 * time.Minute},
+		"two used up, the longer wait": {"claude", bash, []rule.Passed{
+			passed(bash, 50*time.Minute), passed(read, 5*time.Minute), passed(read, 3*time.Minute), passed(bash, time.Minute),
+		}, 3, 55 * time.Minute},
 		"over the limit, the wait frees one call": {"claude", bash, []rule.Passed{
 			passed(bash, 40*time.Minute), passed(bash, 30*time.Minute), passed(bash, 20*time.Minute),
 		}, 1, 30 * time.Minute},
@@ -84,12 +87,12 @@ func TestBudgetWindowIsTheLongestThatApplies(t *testing.T) {
 
 func TestBudgetMessage(t *testing.T) {
 	r := rule.Reached{N: 1, Spec: rule.BudgetSpec{Tool: "native__Bash", Calls: 200, Per: "1h"}, Wait: 12*time.Minute + 300*time.Millisecond}
-	want := "budget 1 reached: 200 calls to native__Bash per 1h for claude; the next call is possible in about 12m0s"
+	want := "budget 1 in the config is used up: 200 calls to native__Bash per 1h for claude; the next call is possible in about 12m0s"
 	if got := r.Message("claude"); got != want {
 		t.Fatalf("Message = %q, want %q", got, want)
 	}
 	one := rule.Reached{N: 2, Spec: rule.BudgetSpec{Calls: 1, Per: "1m"}, Wait: 10 * time.Millisecond}
-	want = "budget 2 reached: 1 call to * per 1m for codex; the next call is possible in about 1s"
+	want = "budget 2 in the config is used up: 1 call to * per 1m for codex; the next call is possible in about 1s"
 	if got := one.Message("codex"); got != want {
 		t.Fatalf("Message = %q, want %q", got, want)
 	}

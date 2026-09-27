@@ -35,7 +35,7 @@ action = "allow"
 		t.Fatalf("first hook call: code %d, stdout %q, stderr %q", code, out, errOut)
 	}
 	out, _, _ := runHook(t, dir, claudeHookInput(dir, "echo two"), "--agent", "claude")
-	if !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "budget 1 reached: 1 call to native__Bash per 1h for claude") {
+	if !strings.Contains(out, `"permissionDecision":"deny"`) || !strings.Contains(out, "budget 1 in the config is used up: 1 call to native__Bash per 1h for claude") {
 		t.Fatalf("second hook call answered %q", out)
 	}
 	cs := connectProcess(t, dir, "codex", cfg)
@@ -45,7 +45,7 @@ action = "allow"
 		if err != nil || res.IsError != wantRefused {
 			t.Fatalf("memory_search %d: err %v, result %q", i+1, err, resultText(res))
 		}
-		if wantRefused && !strings.Contains(resultText(res), "budget 2 reached: 1 call to memory_search per 1m for codex") {
+		if wantRefused && !strings.Contains(resultText(res), "budget 2 in the config is used up: 1 call to memory_search per 1m for codex") {
 			t.Fatalf("memory_search %d: %q", i+1, resultText(res))
 		}
 	}
