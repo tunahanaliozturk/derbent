@@ -26,7 +26,8 @@ anyone who can open a pull request, or any agent that can write a file, turn off
 - A grant for a call the project's rules asked about is keyed on both fingerprints, the user's rules up to
   the one that decided and the project's up to the one that asked (ADR 0011).
 - The approval records which list asked (migration 0006), so the UI and the commands can say
-  `project rule <n>`.
+  `project rule <n>`. The commands that only read never migrate, and on a database from before 0006 they
+  take every approval as asked by the user's rules, which is what it was.
 
 ## Consequences
 
