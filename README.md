@@ -175,7 +175,11 @@ tool   = "memory_write"
 action = "deny"
 
 [[rule]]
-tool   = "github__create_*"
+tool   = "github__issue_read"
+action = "allow"
+
+[[rule]]
+tool   = "github__*"
 action = "ask"
 
 [[rule]]
@@ -189,6 +193,8 @@ action = "allow"
 ```
 
 Rules are tried in order and the first match wins ([ADR 0003](docs/adr/0003-first-match-rules.md)).
+Here `github__issue_read` is allowed and every other GitHub tool asks, because a server can write under
+names that a pattern such as `github__create_*` misses, like the GitHub server's `issue_write`.
 `agent` and `tool` are globs, where `*` matches any run of characters and `?` exactly one, and `args`
 matches top-level string arguments the same way. The last rule must have no condition, so every call gets
 its decision from your file. A tool that no call can get through, such as one a plain `deny` catches
@@ -205,7 +211,7 @@ An `ask` rule holds the call until you decide. The tool stays listed to the agen
 
 ```toml
 [[rule]]
-tool   = "github__create_*"
+tool   = "github__*"
 action = "ask"
 
 [[rule]]
@@ -347,7 +353,9 @@ headers = { Authorization = "Bearer ${env:DOCS_TOKEN}" }
 redact = ['ghp_[A-Za-z0-9]{36}']
 ```
 
-Their tools appear as `github__get_me` and so on, under the same rules and receipts. A `command` server
+Their tools appear as `github__get_me` and so on, under the same rules and receipts. The GitHub server
+writes under many tool names, such as `issue_write` and `add_issue_comment`, so ask about `github__*`
+as in [Rules](#rules), or start it with `--read-only` or fewer `--toolsets`. A `command` server
 speaks MCP over stdio, and a `url` server over HTTP, which must be `https` except on `localhost`,
 `127.0.0.1` or `::1`; redirects are refused, so its headers never reach another host. Secrets come from
 the environment through `${env:...}` in `env` or `headers`, never in `command` or `url`, where they could

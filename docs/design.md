@@ -91,7 +91,11 @@ tool   = "github__*"
 action = "deny"
 
 [[rule]]
-tool   = "github__create_*"
+tool   = "github__issue_read"
+action = "allow"
+
+[[rule]]
+tool   = "github__*"
 action = "ask"
 
 [[rule]]
@@ -399,7 +403,7 @@ migrates it inside `BEGIN IMMEDIATE`.
   the agent names `claude` and `reviewer`: `claude` writes a decision to memory, `reviewer` finds it and
   asks to write a follow-up note with `memory_write`, an `ask` rule holds the call until `derbent approve`
   approves it from another shell, and `derbent verify` ends clean. The cross-vendor version, in which
-  Codex finds the note, asks for `github__create_issue` and the user approves it from the UI, is
+  Codex finds the note, asks to create a GitHub issue and the user approves it from the UI, is
   described there as a scenario and was not recorded: Codex was left out by the owner's choice, and no
   GitHub repository or issue was approved.
 
@@ -476,7 +480,7 @@ Each milestone gets its own implementation plan and ends with a green CI run.
 3. **Approvals and the UI.** Exit: a real Codex session waits on `ask` and is approved from the UI.
 4. **Built-in tools.** The Claude Code hook, and the other three CLIs checked for hooks, with adapters
    where they exist. Exit: the coverage table is filled from real sessions.
-5. **Proof and release.** The overhead benchmark, the demo recording, README, ADRs finished,
+5. **Proof and release.** The overhead benchmark, the demo transcript, README, ADRs finished,
    reproducible binaries, `v1.0.0`.
 
 How the exit checks went: milestone 1 as planned, its tests running in CI on Windows and Linux, and
@@ -486,6 +490,9 @@ gate. Milestone 3's check ran with a real Claude Code session whose held call wa
 and the UI's keys are covered by tests instead. Milestone 4's coverage table has one real session,
 Claude Code's; Codex was left out, Copilot CLI's monthly quota ran out before any tool call, and
 Antigravity CLI was not installed, so those three rows come from each CLI's documentation.
+Milestone 5's demo ran with two real Claude Code sessions under two agent names, the held call approved
+with `derbent approve` from another shell, and is published as a transcript in demo.md, not as a
+recording of Codex approved from the UI.
 
 ## Later
 

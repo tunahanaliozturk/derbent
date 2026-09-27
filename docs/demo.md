@@ -136,7 +136,7 @@ end:     success after 2 turns, 3785 ms
 
 ## 2. `reviewer` finds it and asks to add a note
 
-In the first shell, run in the background:
+In one shell:
 
 ```bash
 cd "$DEMO/project"
@@ -256,7 +256,7 @@ chain:    intact
 
 The same run, with the approval given by pressing `a`:
 
-1. Build Derbent and write the two files as in [Setup](#setup), then run step 1. Its gate creates
+1. Build Derbent and write the three files as in [Setup](#setup), then run step 1. Its gate creates
    `<demo>/derbent.db`, which the UI needs: given `--db`, it refuses a file that does not exist.
 2. In a terminal of its own, start the UI on that database: `"$DEMO/derbent.exe" --db "$DEMO/derbent.db"`.
 3. In another terminal, run the reviewer command from step 2.
@@ -264,13 +264,13 @@ The same run, with the approval given by pressing `a`:
    terminal bell rings. With it highlighted, press `a` within the 50 seconds. A newly highlighted call
    takes none of `a`, `A` and `d` for its first 750 ms.
 5. The reviewer session goes on as above, and its receipt says `user:1`. Press `v` in the UI, or run
-   `derbent verify --db "$DEMO/derbent.db"`, to check the chain.
+   `"$DEMO/derbent.exe" verify --db "$DEMO/derbent.db"`, to check the chain.
 
 ## The cross-vendor version, not recorded
 
 The design's demo, which needs Codex, a GitHub token and a scratch repository, was not run. Its config
-puts github-mcp-server behind the gate with only the `issues` toolset, asks about every
-`github__create_*` call and allows the rest:
+puts github-mcp-server behind the gate with only the `issues` toolset, allows three GitHub tools that
+only read, asks about every other GitHub tool, and allows the rest, such as Derbent's memory tools:
 
 ```toml
 [servers.github]
@@ -278,16 +278,30 @@ command = ["github-mcp-server", "stdio", "--toolsets=issues"]
 env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "${env:GITHUB_TOKEN}" }
 
 [[rule]]
-tool   = "github__create_*"
+tool   = "github__issue_read"
+action = "allow"
+
+[[rule]]
+tool   = "github__list_issues"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_issues"
+action = "allow"
+
+[[rule]]
+tool   = "github__*"
 action = "ask"
 
 [[rule]]
 action = "allow"
 ```
 
-Give it a fine-grained token that can reach only the scratch repository. In the build of
-github-mcp-server checked here, the `issues` toolset also has tools that write under other names, such
-as `issue_write`, `add_issue_comment` and `update_issue_body`, and the last rule allows them.
+The `issues` toolset writes under several names, not only `create_*`. In the build of
+github-mcp-server checked here, `derbent config check` listed ten tools for it, and four of them write:
+`issue_write`, which creates and updates issues, `add_issue_comment`, `sub_issue_write` and
+`update_issue_comment`. That is why the config asks about every GitHub tool except the named reads.
+Give it a fine-grained token that can reach only the scratch repository.
 
 Codex's entry for Derbent passes the token's variable through, since Codex starts MCP servers with only
 a few environment variables:
@@ -299,12 +313,18 @@ args     = ["mcp", "--agent", "codex"]
 env_vars = ["GITHUB_TOKEN"]
 ```
 
+Both CLIs' `derbent` entries must name the same config and database, with the same `--config` and
+`--db` or with neither. Each database holds its own memory, so with two of them Codex would not find
+the note.
+
 The steps:
 
-1. Claude Code, as agent `claude`, writes the decision to memory, as in step 1 above.
+1. Claude Code, as agent `claude`, writes the decision to memory, as in step 1 above, through a
+   `derbent` entry with the same config and database as Codex's.
 2. `codex exec`, as agent `codex`, searches memory from the same repository and finds the note.
-3. Codex asks for `github__create_issue` to open an issue about the decision in the scratch repository.
-   Rule 1 holds the call.
+3. Codex asks for `github__issue_write` with `method` `create` to open an issue about the decision in
+   the scratch repository, since the build checked here creates issues with `issue_write`. Rule 4 holds
+   the call.
 4. The user presses `a` on it in `derbent`. The issue is created, and its receipt says `user:<id>`.
 5. `derbent receipts --json` shows the token masked wherever it appears in arguments, and
    `derbent verify` reports the chain intact.
