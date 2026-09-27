@@ -33,5 +33,8 @@ input schema is not an object, are left out with a warning; `derbent config chec
 session of a server that has gone is closed explicitly, because the SDK keeps a goroutine for its
 notification subscription until then; the leak test found this. Closing the gate closes every session
 first, so a command server can exit on its own when its stdin closes, and only then cancels what is still
-running. A url server that answers with a redirect is refused, because the configured headers would
-follow it to another host, even over plain http.
+running. A command server still running two seconds after its stdin closed is stopped, with SIGTERM and
+then a kill (a kill at once on Windows), instead of after the SDK's default of five seconds: an agent CLI
+waits about five seconds for the gate to exit, and a gate waiting that long for one server was still
+running when a client gave up on it in CI. A url server that answers with a redirect is refused, because
+the configured headers would follow it to another host, even over plain http.

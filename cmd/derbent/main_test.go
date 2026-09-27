@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,10 +115,37 @@ func TestMCPNeedsAValidAgent(t *testing.T) {
 	}
 }
 
+// lockedBuffer collects a child process's stderr, which exec copies on a goroutine of its own.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// gateCommand is a gate process for agent. Its stderr, and its downstream servers', is printed if the
+// test fails, so a failure says what the gate saw.
 func gateCommand(t *testing.T, dir, agent, configPath string) *exec.Cmd {
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "mcp", "--agent", agent,
 		"--db", filepath.Join(dir, "p.db"), "--config", configPath, "--project", dir)
 	cmd.Env = append(os.Environ(), "DERBENT_TEST_MAIN=1")
+	stderr := &lockedBuffer{}
+	cmd.Stderr = stderr
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("stderr of the %s gate:\n%s", agent, stderr.String())
+		}
+	})
 	return cmd
 }
 

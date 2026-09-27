@@ -247,7 +247,9 @@ func (m *Manager) connect(ctx context.Context, s Spec) (*mcp.ClientSession, erro
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 		cmd.Stderr = m.opts.Stderr
-		transport = &mcp.CommandTransport{Command: cmd}
+		// A server that has not exited two seconds after its stdin closed is stopped, so the gate exits
+		// before the agent CLI, which waits about five seconds for it, gives up on it.
+		transport = &mcp.CommandTransport{Command: cmd, TerminateDuration: 2 * time.Second}
 	}
 	connectCtx, cancel := context.WithTimeout(ctx, m.opts.ConnectTimeout)
 	defer cancel()

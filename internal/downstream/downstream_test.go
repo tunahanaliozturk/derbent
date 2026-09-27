@@ -78,6 +78,9 @@ func serveTestServer() {
 		os.Exit(1)
 	}
 	// Run returns once stdin is closed: the client shut the session down properly.
+	if os.Getenv("DERBENT_TEST_LINGER") != "" {
+		time.Sleep(30 * time.Second) // a server slow to exit, which the client has to stop
+	}
 	if marker := os.Getenv("DERBENT_TEST_EXIT_MARKER"); marker != "" {
 		_ = os.WriteFile(marker, nil, 0o600)
 	}
@@ -322,6 +325,20 @@ func TestCloseLetsServersExitOnTheirOwn(t *testing.T) {
 	m.Close()
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatal("the server was killed instead of being let to exit when its stdin closed")
+	}
+}
+
+// A server that does not exit when its stdin closes is stopped after two seconds, so that the gate
+// itself exits within the few seconds an agent CLI waits for it.
+func TestCloseStopsAServerThatLingers(t *testing.T) {
+	m, _ := start(t, stdioSpec("test", map[string]string{"DERBENT_TEST_LINGER": "1"}))
+	if _, err := callText(t, m, "test", "echo", `{"text":"up"}`); err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now()
+	m.Close()
+	if took := time.Since(began); took > 4*time.Second {
+		t.Fatalf("Close took %s with a server that lingers", took)
 	}
 }
 
