@@ -28,5 +28,9 @@ func perfCounter() int64 {
 // stopwatch starts timing and returns a function that reads the time since.
 func stopwatch() func() time.Duration {
 	start := perfCounter()
-	return func() time.Duration { return time.Duration((perfCounter() - start) * int64(time.Second) / perfFreq) }
+	return func() time.Duration {
+		d := perfCounter() - start
+		// Whole seconds and the remainder separately, so d*1e9 cannot overflow on a long span.
+		return time.Duration(d/perfFreq*int64(time.Second) + d%perfFreq*int64(time.Second)/perfFreq)
+	}
 }
