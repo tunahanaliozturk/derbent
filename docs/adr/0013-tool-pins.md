@@ -39,13 +39,17 @@ new text under the same name and the same rules.
   deletes a pin.
 - The pin covers the definition as the SDK decodes it, so a server that sends the same schema with other
   key order or spacing has not changed it.
-- `derbent pins accept` takes the hash of the change the user reviewed, as `pins show` prints it or its
-  first 8 hex digits, and refuses when the change on record has another, so a change recorded after the
-  review is never accepted unseen.
-- A gate waiting on a changed tool only reads its pin, and records its own definition as the change only
-  when none is recorded. Two gates holding different definitions, such as `npx pkg@latest` resolved at
-  different starts, therefore never replace each other's record while the user reviews it; the other
-  definition becomes the change once the first is accepted, and is reviewed in turn.
+- `derbent pins accept` takes the whole hash of the change the user reviewed, all 64 hex digits as
+  `pins show` prints them, and refuses when the change on record has another, so a change recorded after
+  the review is never accepted unseen. A prefix is not enough: a hostile server controls every
+  definition of its tool, so it could find two whose hashes share their first 8 hex digits in about 2^16
+  tries, show one for review and send the other.
+- The watcher of a gate waiting on a changed tool only reads its pin, and records its own definition as
+  the change only when none is recorded, so it never replaces the recorded change. A gate that lists the
+  server's tools again, at its start, on a reconnect or after `list_changed`, does record its definition
+  as the change, and two gates holding different definitions, such as `npx pkg@latest` resolved at
+  different starts, can then replace each other's. An accept of the hash the user reviewed is refused
+  after that, so what is accepted is always what was read.
 - The commands that only read the database never migrate it, so right after an upgrade they can meet a
   database without the pins table. It counts as holding no pins: every tool is `new`.
 - Only downstream servers are pinned: the memory tools are Derbent's own, and the CLIs' built-in tools

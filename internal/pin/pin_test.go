@@ -120,7 +120,7 @@ func TestAcceptMakesTheNewDefinitionThePin(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := pin.Sum(def)
-	p, err := s.Accept(t.Context(), "github", "get_me", sum[:8]) // a prefix is enough
+	p, err := s.Accept(t.Context(), "github", "get_me", sum)
 	if err != nil || p.SHA256 != sum {
 		t.Fatalf("Accept = %+v, %v; want the v2 definition's hash", p, err)
 	}
@@ -137,7 +137,9 @@ func TestAcceptMakesTheNewDefinitionThePin(t *testing.T) {
 }
 
 // The user accepts the change they reviewed: a hash that is not the recorded change's is refused, and
-// the pin stays as it was.
+// the pin stays as it was. So is a prefix of the recorded change's own hash: a hostile server controls
+// every definition of its tool and can find two whose hashes share a short prefix, show one for review
+// and send the other.
 func TestAcceptRefusesAChangeThatIsNotTheOneGiven(t *testing.T) {
 	s, _ := open(t)
 	for _, desc := range []string{"v1", "v2"} {
@@ -153,7 +155,7 @@ func TestAcceptRefusesAChangeThatIsNotTheOneGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, given := range []string{pin.Sum(reviewed), pin.Sum(reviewed)[:8], before.SHA256, ""} {
+	for _, given := range []string{pin.Sum(reviewed), before.SHA256, before.NewSHA256[:8], before.NewSHA256[:63], ""} {
 		if _, err = s.Accept(t.Context(), "github", "get_me", given); !errors.Is(err, pin.ErrOtherChange) {
 			t.Errorf("Accept(%q): err = %v, want ErrOtherChange", given, err)
 		}

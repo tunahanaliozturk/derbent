@@ -40,9 +40,6 @@ var (
 	ErrOtherChange = errors.New("the change on record is not the one given")
 )
 
-// MinPrefix is the fewest hex digits of a hash that Accept takes.
-const MinPrefix = 8
-
 // Definition returns the canonical form of t that a pin is taken over: a JSON object with its name,
 // title, description, input schema, output schema and annotations, object keys sorted, no insignificant
 // whitespace, numbers as written and no HTML escaping. Every key is present, null or empty when the
@@ -272,11 +269,12 @@ func (s *Store) State(ctx context.Context, server string, t *mcp.Tool) (State, e
 	return Changed, nil
 }
 
-// Accept makes the change recorded for server's tool its pin, when that change's hash starts with given,
-// and returns the pin as it now is. given is the hash pins show printed, or its first MinPrefix hex
-// digits or more; binding the accept to it means a change recorded after the user reviewed another is
-// never accepted unseen. A tool with no recorded change gives ErrNotChanged, one with no pin ErrNoPin,
-// and a hash that is not the recorded change's ErrOtherChange.
+// Accept makes the change recorded for server's tool its pin, when that change's hash is given, and
+// returns the pin as it now is. given is the whole hash as pins show printed it, in lower-case hex;
+// binding the accept to it means a change recorded after the user reviewed another is never accepted
+// unseen. A prefix is never enough: a hostile server controls every definition of its tool, so it can
+// find two whose hashes share a short prefix, show one for review and then send the other. A tool with
+// no recorded change gives ErrNotChanged, one with no pin ErrNoPin, and any other hash ErrOtherChange.
 func (s *Store) Accept(ctx context.Context, server, tool, given string) (Pin, error) {
 	var accepted Pin
 	err := store.Immediate(ctx, s.db, func(ctx context.Context, conn *sql.Conn) error {
@@ -288,7 +286,7 @@ func (s *Store) Accept(ctx context.Context, server, tool, given string) (Pin, er
 			return fmt.Errorf("read pin %s__%s: %w", server, tool, err)
 		case p.NewSHA256 == "":
 			return fmt.Errorf("%s__%s: %w", server, tool, ErrNotChanged)
-		case len(given) < MinPrefix || !strings.HasPrefix(p.NewSHA256, given):
+		case given != p.NewSHA256:
 			return fmt.Errorf("%s__%s: %w", server, tool, ErrOtherChange)
 		}
 		now := s.now().UnixMilli()
