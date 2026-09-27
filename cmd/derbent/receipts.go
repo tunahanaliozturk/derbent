@@ -6,16 +6,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
-	"unicode"
-	"unicode/utf8"
+	"unicode/utf16"
 
 	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
+	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
 // receiptLine is one receipt as `derbent receipts --json` prints it.
@@ -93,37 +92,29 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	fmt.Fprintln(w, "SEQ\tTIME\tAGENT\tTOOL\tDECISION\tBY\tOUTCOME\tMS")
 	for _, r := range list {
 		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", r.Seq, r.At.Local().Format("2006-01-02 15:04:05"),
-			printable(r.Agent), printable(r.Tool), printable(r.Decision), printable(r.DecidedBy), printable(r.Outcome),
-			r.Duration.Milliseconds())
+			visible.Escape(r.Agent), visible.Escape(r.Tool), visible.Escape(r.Decision), visible.Escape(r.DecidedBy),
+			visible.Escape(r.Outcome), r.Duration.Milliseconds())
 	}
 	return w.Flush()
 }
 
-// printable returns s as it is, or quoted with Go escapes when it holds a control character, a
-// bidirectional override or bytes that are not UTF-8. Stored text can come from an agent (a call to an
-// unknown tool is recorded under the name the agent sent), and it must not add rows, move the cursor
-// or send an escape sequence to the user's terminal.
-func printable(s string) string {
-	if strings.ContainsFunc(s, needsEscape) || !utf8.ValidString(s) {
-		return strconv.Quote(s)
-	}
-	return s
-}
-
-func needsEscape(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) }
-
-// escapeRaw writes \u escapes for the runes encoding/json leaves raw that a terminal still acts on:
-// DEL, the C1 controls and bidirectional overrides. In a JSON line they can only stand inside a
-// string, where the escape decodes to the same rune; every one of them is in the Basic Multilingual
-// Plane, so four hex digits hold it.
+// escapeRaw writes \u escapes for the runes encoding/json leaves raw that visible.Unsafe says a
+// terminal must not see raw: DEL, the C1 controls, bidirectional overrides, invisible format
+// characters and variation selectors. In a JSON line they can only stand inside a string, where the
+// escape decodes to the same rune; one above U+FFFF is written as a UTF-16 surrogate pair, as JSON
+// requires.
 func escapeRaw(line string) string {
 	var b strings.Builder
 	for _, r := range line {
-		if needsEscape(r) {
+		switch {
+		case !visible.Unsafe(r):
+			b.WriteRune(r)
+		case r > 0xFFFF:
+			hi, lo := utf16.EncodeRune(r)
+			fmt.Fprintf(&b, `\u%04x\u%04x`, hi, lo)
+		default:
 			fmt.Fprintf(&b, `\u%04x`, r)
-			continue
 		}
-		b.WriteRune(r)
 	}
 	return b.String()
 }

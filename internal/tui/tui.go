@@ -18,6 +18,7 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
 const (
@@ -306,7 +307,7 @@ const helpText = `derbent keys
 Nothing here changes the config file.`
 
 // lines collects screen lines, each clipped to the window before it is styled. Every piece of text
-// from outside Derbent goes through clean first.
+// from outside Derbent goes through visible.Escape first.
 type lines struct {
 	width int
 	out   []string
@@ -335,7 +336,7 @@ func (m Model) main() string {
 	}
 	agents := make([]string, 0, len(m.agents))
 	for _, a := range m.agents {
-		agents = append(agents, clean(a.Agent)+" "+a.Last.Local().Format("15:04"))
+		agents = append(agents, visible.Escape(a.Agent)+" "+a.Last.Local().Format("15:04"))
 	}
 	seen := strings.Join(agents, ", ")
 	if seen == "" {
@@ -345,7 +346,7 @@ func (m Model) main() string {
 	l.blank()
 	title := "RECEIPTS"
 	if m.filter != "" || m.editing {
-		title += "   filter: " + clean(m.filter)
+		title += "   filter: " + visible.Escape(m.filter)
 		if m.editing {
 			title += "_"
 		}
@@ -363,11 +364,11 @@ func (m Model) main() string {
 			style = denyStyle
 		}
 		l.add(style, fmt.Sprintf("%s  %-10s %-34s %-5s %-14s %-8s %6dms", r.At.Local().Format("15:04:05"),
-			clean(r.Agent), clean(r.Tool), clean(r.Decision), clean(r.DecidedBy), clean(r.Outcome), r.Duration.Milliseconds()))
+			visible.Escape(r.Agent), visible.Escape(r.Tool), visible.Escape(r.Decision), visible.Escape(r.DecidedBy), visible.Escape(r.Outcome), r.Duration.Milliseconds()))
 	}
 	l.blank()
 	for _, s := range status {
-		l.add(faintStyle, clean(s))
+		l.add(faintStyle, visible.Escape(s))
 	}
 	return l.String()
 }
@@ -405,10 +406,10 @@ func (m Model) drawWaiting(l *lines) {
 	for _, p := range rows {
 		left := max(p.Deadline.Sub(m.now()), 0).Round(time.Second)
 		if p.ID != m.selected {
-			l.add(plainStyle, fmt.Sprintf("#%d  %s  %s  %s left  %s", p.ID, clean(p.Agent), clean(p.Tool), left, clean(p.Args)))
+			l.add(plainStyle, fmt.Sprintf("#%d  %s  %s  %s left  %s", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left, visible.Escape(p.Args)))
 			continue
 		}
-		l.add(selectedStyle, fmt.Sprintf("#%d  %s  %s  %s left", p.ID, clean(p.Agent), clean(p.Tool), left))
+		l.add(selectedStyle, fmt.Sprintf("#%d  %s  %s  %s left", p.ID, visible.Escape(p.Agent), visible.Escape(p.Tool), left))
 		for _, a := range args {
 			l.add(plainStyle, a)
 		}
@@ -420,10 +421,10 @@ func (m Model) drawWaiting(l *lines) {
 
 // argLines wraps the highlighted call's arguments, which the agent controls, over up to a third of
 // the window and at least three lines, so the user sees what they approve rather than a prefix of it.
-// The text is cleaned before it is wrapped; lines.add clips each line again.
+// The text is escaped before it is wrapped; lines.add clips each line again.
 func (m Model) argLines(args string) []string {
 	const indent = "    "
-	out := strings.Split(ansi.Hardwrap(clean(args), max(m.width-len(indent), 1), true), "\n")
+	out := strings.Split(ansi.Hardwrap(visible.Escape(args), max(m.width-len(indent), 1), true), "\n")
 	if most := max(m.height/3, 3); len(out) > most {
 		out = append(out[:most], fmt.Sprintf("+%d more lines", len(out)-most))
 	}

@@ -541,8 +541,15 @@ func TestDecidingNeedsAnExistingDatabase(t *testing.T) {
 	}
 }
 
+// sneaky holds runes a terminal draws as nothing or uses to change how text reads: a tag character, a
+// zero-width space, a zero-width joiner, a line separator and a variation selector.
+const (
+	sneaky        = "\U000e0041\U0000200b\U0000200d\U00002028\U0000fe0f"
+	sneakyEscaped = "\\U000e0041\\u200b\\u200d\\u2028\\ufe0f"
+)
+
 // Tool names are stored as the agent sent them, so the table must not hand an agent's control
-// characters to the user's terminal: no fake rows, no escape sequences, no reordered text.
+// characters to the user's terminal: no fake rows, no escape sequences, no reordered or hidden text.
 func TestReceiptsTableEscapesStoredText(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
 	db, err := store.Open(t.Context(), path)
@@ -550,7 +557,7 @@ func TestReceiptsTableEscapesStoredText(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = receipt.NewLog(db).Append(t.Context(), receipt.Receipt{
-		Project: "p", Agent: "codex", Session: "s", Tool: "evil\n\x1b]52;c;ZXZpbA==\x07\u202e",
+		Project: "p", Agent: "codex", Session: "s", Tool: "evil\n\x1b]52;c;ZXZpbA==\x07\U0000202e" + sneaky,
 		Args: "{}", Decision: "deny", DecidedBy: "rule:2", Outcome: "refused",
 	})
 	db.Close()
@@ -562,23 +569,24 @@ func TestReceiptsTableEscapesStoredText(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := table.String()
-	if strings.ContainsAny(out, "\x1b\a\u202e") || strings.Count(out, "\n") != 2 {
+	if strings.ContainsAny(out, "\x1b\a\U0000202e"+sneaky) || strings.Count(out, "\n") != 2 {
 		t.Fatalf("raw control characters reached the table:\n%q", out)
 	}
-	if want := `"evil\n\x1b]52;c;ZXZpbA==\a\u202e"`; !strings.Contains(out, want) {
-		t.Fatalf("table lacks the quoted tool name %s:\n%q", want, out)
+	if want := `evil\n\u001b]52;c;ZXZpbA==\u0007` + "\\u202e" + sneakyEscaped; !strings.Contains(out, want) {
+		t.Fatalf("table lacks the escaped tool name %s:\n%q", want, out)
 	}
 }
 
 // encoding/json escapes only the C0 controls, so JSON lines need the same care as the table: an agent
-// writes the args, and DEL, a C1 control or a bidirectional override must not reach a terminal raw.
+// writes the args, and DEL, a C1 control, a bidirectional override or an invisible rune must not reach a
+// terminal raw.
 func TestReceiptsJSONEscapesWhatATerminalActsOn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
 	db, err := store.Open(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool, args := "gh\u009b2Jissue\u202e", "{\"x\":\"\u009b2J\u202egnp.exe\x7f\u2066\"}"
+	tool, args := "gh\u009b2Jissue\U0000202e"+sneaky, "{\"x\":\"\u009b2J\U0000202egnp.exe\x7f\U00002066"+sneaky+"\"}"
 	_, err = receipt.NewLog(db).Append(t.Context(), receipt.Receipt{
 		Project: "p", Agent: "codex", Session: "s", Tool: tool, Args: args, Decision: "deny", DecidedBy: "rule:2", Outcome: "refused",
 	})
@@ -591,7 +599,7 @@ func TestReceiptsJSONEscapesWhatATerminalActsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := out.String()
-	if strings.ContainsAny(line, "\u009b\u202e\x7f\u2066") {
+	if strings.ContainsAny(line, "\u009b\U0000202e\x7f\U00002066"+sneaky) {
 		t.Fatalf("raw control characters reached the JSON line: %q", line)
 	}
 	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {

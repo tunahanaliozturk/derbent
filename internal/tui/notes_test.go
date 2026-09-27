@@ -50,14 +50,15 @@ func TestMemoryBrowserSearchesAndReads(t *testing.T) {
 
 func TestNoteTextIsCleaned(t *testing.T) {
 	m, d := newModel(t)
-	writeNote(t, d.mem, "\x1b[2J wipe", "body \x1b]0;owned\x07 end") // the space lets FTS5 index "wipe" as a word
+	// The spaces let FTS5 index "wipe" as a word.
+	writeNote(t, d.mem, "\x1b[2J wipe "+sneaky, "body \x1b]0;owned\x07 end "+sneaky)
 	check := func(s string) {
 		t.Helper()
-		if strings.Contains(s, "\x1b[2J") || strings.Contains(s, "\x1b]0;") || strings.Contains(s, "\a") {
-			t.Fatalf("raw escape sequences reached the screen: %q", s)
-		}
-		if !strings.Contains(s, `\u001b[2J wipe`) || !strings.Contains(s, `\u001b]0;owned\u0007`) {
-			t.Fatalf("the title or the body is not shown escaped:\n%s", s)
+		noRawText(t, s, 140)
+		for _, want := range []string{`\u001b[2J wipe`, `\u001b]0;owned\u0007`, sneakyEscaped} {
+			if !strings.Contains(s, want) {
+				t.Errorf("screen lacks %q, the escaped form:\n%s", want, s)
+			}
 		}
 	}
 	m, cmd := press(m, "m", "w", "i", "p", "e", "enter")

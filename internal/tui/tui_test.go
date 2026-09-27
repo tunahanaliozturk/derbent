@@ -123,6 +123,32 @@ var askReq = approval.Request{
 	Project: "/work/shop", Agent: "codex", Session: "s1", Tool: "github__create_issue", Args: `{"title":"Fix login"}`, Rule: 2,
 }
 
+// sneaky holds runes a terminal draws as nothing or uses to change how text reads: a tag character, a
+// zero-width space, a zero-width joiner, a line separator and a variation selector.
+const (
+	sneaky        = "\U000e0041\U0000200b\U0000200d\U00002028\U0000fe0f"
+	sneakyEscaped = "\\U000e0041\\u200b\\u200d\\u2028\\ufe0f"
+)
+
+// noRawText fails the test when s holds an escape sequence, a bell, a C1 control, a bidirectional
+// override or a rune of sneaky as it is, or a line wider than width cells.
+func noRawText(t *testing.T, s string, width int) {
+	t.Helper()
+	for _, bad := range []string{"\x1b]", "\x1b[2J", "\a", "\U0000202e", "\u009b"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("screen contains %q raw", bad)
+		}
+	}
+	if i := strings.IndexAny(s, sneaky); i >= 0 {
+		t.Errorf("screen contains an invisible rune raw at byte %d: %q", i, s)
+	}
+	for _, line := range strings.Split(s, "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Fatalf("a line of %d cells in a %d-cell window: %q", w, width, line)
+		}
+	}
+}
+
 // waiting runs q.Ask in the background until the test ends; the call's outcome arrives on the channel.
 func waiting(t *testing.T, q *approval.Queue, r approval.Request) <-chan approval.Outcome {
 	t.Helper()
@@ -474,27 +500,14 @@ func TestHostileTextCannotReachTheTerminal(t *testing.T) {
 	hostile := askReq
 	hostile.Agent = "co\x1b[2Jdex"
 	hostile.Tool = "gh\u009b2Jissue" + strings.Repeat("T", 200)
-	hostile.Args = "{\"x\":\"\x1b]52;c;ZXZpbA==\x07\u202egnp.exe\nsecond line" + strings.Repeat("A", 5000) + "\"}"
-	appendReceipt(t, d.log, "cl\x1b[2Jaude", "mem\u202eory\x1b]0;title\x07", "al\alow"+strings.Repeat("D", 200))
+	hostile.Args = sneaky + "{\"x\":\"\x1b]52;c;ZXZpbA==\x07\U0000202egnp.exe\nsecond line" + strings.Repeat("A", 5000) + "\"}"
+	appendReceipt(t, d.log, "cl\x1b[2Jaude", "mem\U0000202eory\x1b]0;title\x07"+sneaky, "al\alow"+strings.Repeat("D", 200))
 	waiting(t, d.q, hostile)
 	waitPending(t, d.q, 1)
 	m, _ = refresh(m)
-	check := func(s string) {
-		t.Helper()
-		for _, bad := range []string{"\x1b]", "\x1b[2J", "\a", "\u202e", "\u009b"} {
-			if strings.Contains(s, bad) {
-				t.Errorf("screen contains %q raw", bad)
-			}
-		}
-		for _, line := range strings.Split(s, "\n") {
-			if w := lipgloss.Width(line); w > 60 {
-				t.Fatalf("a line of %d cells in a 60-cell window: %q", w, line)
-			}
-		}
-	}
 	s := screen(m)
-	check(s)
-	for _, want := range []string{`\u001b]52`, `co\u001b[2Jdex`, `cl\u001b[2Jaude`, `mem\u202eory`} {
+	noRawText(t, s, 60)
+	for _, want := range []string{`\u001b]52`, `co\u001b[2Jdex`, `cl\u001b[2Jaude`, "mem\\u202eory", sneakyEscaped} {
 		if !strings.Contains(s, want) {
 			t.Errorf("screen lacks %q, the escaped form:\n%s", want, s)
 		}
@@ -505,5 +518,5 @@ func TestHostileTextCannotReachTheTerminal(t *testing.T) {
 	if s = screen(m); !strings.Contains(s, `approved once: co\u001b[2Jdex`) {
 		t.Errorf("the status line does not show the decision, escaped:\n%s", s)
 	}
-	check(s)
+	noRawText(t, s, 60)
 }
