@@ -35,7 +35,13 @@ var (
 	ErrNoPin = errors.New("no pin")
 	// ErrNotChanged marks an accept of a tool whose server has sent nothing but the pinned definition.
 	ErrNotChanged = errors.New("no change to accept")
+	// ErrOtherChange marks an accept whose hash is not the recorded change's, such as a change that was
+	// recorded after the user reviewed another.
+	ErrOtherChange = errors.New("the change on record is not the one given")
 )
+
+// MinPrefix is the fewest hex digits of a hash that Accept takes.
+const MinPrefix = 8
 
 // Definition returns the canonical form of t that a pin is taken over: a JSON object with its name,
 // title, description, input schema, output schema and annotations, object keys sorted, no insignificant
@@ -166,8 +172,50 @@ func (s *Store) Check(ctx context.Context, server string, tools []*mcp.Tool) (ma
 	return changed, nil
 }
 
+// Recheck compares t, which a gate withholds because it differed from its pin, with the pin again and
+// reports whether it still differs. It writes only when it does and no change is recorded, which is
+// after the user accepted another definition: it then records t's. It never replaces a recorded change,
+// so gates that hold different definitions of the tool do not overwrite each other's, and the change
+// the user reviews stays the change on record.
+func (s *Store) Recheck(ctx context.Context, server string, t *mcp.Tool) (bool, error) {
+	def, err := Definition(t)
+	if err != nil {
+		return false, err
+	}
+	sum := Sum(def)
+	p, err := s.Get(ctx, server, t.Name)
+	switch {
+	case err != nil:
+		return false, err
+	case p.SHA256 == sum:
+		return false, nil
+	case p.NewSHA256 != "":
+		return true, nil
+	}
+	// The conditions make this a no-op when another gate recorded a change or the pin became t's since
+	// the read above.
+	if _, err = s.db.ExecContext(ctx, `UPDATE pins SET new_sha256 = ?, new_definition = ?, changed_ms = ?
+		WHERE server = ? AND tool = ? AND new_sha256 = '' AND sha256 <> ?`, sum, def, s.now().UnixMilli(), server, t.Name, sum); err != nil {
+		return false, fmt.Errorf("record change of %s__%s: %w", server, t.Name, err)
+	}
+	return true, nil
+}
+
+// hasTable reports whether the database has the pins table. One from before migration 0005 that no
+// gate has migrated yet, opened read-only, has none and so holds no pins.
+func (s *Store) hasTable(ctx context.Context) (bool, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'pins'`).Scan(&n); err != nil {
+		return false, fmt.Errorf("read pins: %w", err)
+	}
+	return n > 0, nil
+}
+
 // List returns every pin, by server and tool.
 func (s *Store) List(ctx context.Context) ([]Pin, error) {
+	if ok, err := s.hasTable(ctx); err != nil || !ok {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, pinColumns+` ORDER BY server, tool`)
 	if err != nil {
 		return nil, fmt.Errorf("read pins: %w", err)
@@ -187,8 +235,15 @@ func (s *Store) List(ctx context.Context) ([]Pin, error) {
 	return out, nil
 }
 
-// Get returns the pin of server's tool, or ErrNoPin.
+// Get returns the pin of server's tool, or ErrNoPin, which a database without the pins table gives too.
 func (s *Store) Get(ctx context.Context, server, tool string) (Pin, error) {
+	ok, err := s.hasTable(ctx)
+	if err != nil {
+		return Pin{}, err
+	}
+	if !ok {
+		return Pin{}, fmt.Errorf("%s__%s: %w", server, tool, ErrNoPin)
+	}
 	p, err := scanPin(s.db.QueryRowContext(ctx, pinColumns+` WHERE server = ? AND tool = ?`, server, tool))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Pin{}, fmt.Errorf("%s__%s: %w", server, tool, ErrNoPin)
@@ -217,9 +272,12 @@ func (s *Store) State(ctx context.Context, server string, t *mcp.Tool) (State, e
 	return Changed, nil
 }
 
-// Accept makes the definition last recorded for server's tool its pin and returns the pin as it now
-// is. A tool with no recorded change gives ErrNotChanged, and one with no pin ErrNoPin.
-func (s *Store) Accept(ctx context.Context, server, tool string) (Pin, error) {
+// Accept makes the change recorded for server's tool its pin, when that change's hash starts with given,
+// and returns the pin as it now is. given is the hash pins show printed, or its first MinPrefix hex
+// digits or more; binding the accept to it means a change recorded after the user reviewed another is
+// never accepted unseen. A tool with no recorded change gives ErrNotChanged, one with no pin ErrNoPin,
+// and a hash that is not the recorded change's ErrOtherChange.
+func (s *Store) Accept(ctx context.Context, server, tool, given string) (Pin, error) {
 	var accepted Pin
 	err := store.Immediate(ctx, s.db, func(ctx context.Context, conn *sql.Conn) error {
 		p, err := scanPin(conn.QueryRowContext(ctx, pinColumns+` WHERE server = ? AND tool = ?`, server, tool))
@@ -230,6 +288,8 @@ func (s *Store) Accept(ctx context.Context, server, tool string) (Pin, error) {
 			return fmt.Errorf("read pin %s__%s: %w", server, tool, err)
 		case p.NewSHA256 == "":
 			return fmt.Errorf("%s__%s: %w", server, tool, ErrNotChanged)
+		case len(given) < MinPrefix || !strings.HasPrefix(p.NewSHA256, given):
+			return fmt.Errorf("%s__%s: %w", server, tool, ErrOtherChange)
 		}
 		now := s.now().UnixMilli()
 		if _, err = conn.ExecContext(ctx, `UPDATE pins SET sha256 = new_sha256, definition = new_definition, pinned_ms = ?,

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -26,8 +27,12 @@ type pinLine struct {
 	SHA256  string `json:"sha256"`
 }
 
-// runPins lists the tool pins, shows one tool's change, or accepts it:
-// derbent pins [--json], derbent pins show <server>__<tool>, derbent pins accept <server>__<tool>.
+// sha256Prefix is a hash as derbent pins accept takes it: the whole sha256, or its first pin.MinPrefix
+// hex digits or more.
+var sha256Prefix = regexp.MustCompile(fmt.Sprintf(`^[0-9a-f]{%d,64}$`, pin.MinPrefix))
+
+// runPins lists the tool pins, shows one tool's change, or accepts it: derbent pins [--json],
+// derbent pins show <server>__<tool>, derbent pins accept <server>__<tool> <sha256>.
 func runPins(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	sub := ""
 	if len(args) > 0 && (args[0] == "show" || args[0] == "accept") {
@@ -53,8 +58,12 @@ func runPins(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		}
 		return listPins(ctx, path, asJSON, stdout)
 	}
-	if flags.NArg() != 1 {
-		return fmt.Errorf("pins %s: give one tool as <server>__<tool>, as derbent pins lists it", sub)
+	switch {
+	case sub == "show" && flags.NArg() != 1:
+		return errors.New("pins show: give one tool as <server>__<tool>, as derbent pins lists it")
+	case sub == "accept" && flags.NArg() != 2:
+		return errors.New("pins accept: give the tool and the sha256 of its new definition, as derbent pins show prints them: " +
+			"derbent pins accept <server>__<tool> <sha256>")
 	}
 	server, tool, ok := strings.Cut(flags.Arg(0), "__")
 	if !ok || server == "" || tool == "" {
@@ -63,7 +72,12 @@ func runPins(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if sub == "show" {
 		return showPin(ctx, path, server, tool, stdout)
 	}
-	return acceptPin(ctx, path, server, tool, stdout)
+	given := strings.ToLower(flags.Arg(1))
+	if !sha256Prefix.MatchString(given) {
+		return fmt.Errorf("pins accept: %q is not the sha256 of the new definition, or its first %d hex digits or more; copy it from derbent pins show",
+			visible.Escape(flags.Arg(1)), pin.MinPrefix)
+	}
+	return acceptPin(ctx, path, server, tool, given, stdout)
 }
 
 // listPins prints every pin with its state, as rows or JSON lines. It opens the database read-only.
@@ -110,8 +124,9 @@ func listPins(ctx context.Context, path string, asJSON bool, stdout io.Writer) e
 	return w.Flush()
 }
 
-// showPin prints a tool's pinned definition and, when its server has since sent another, that one and
-// the lines that differ. Definitions come from a server, so every line is escaped.
+// showPin prints a tool's pinned definition and, when its server has since sent another, that one, the
+// lines that differ and the command that accepts exactly that one. Definitions come from a server, so
+// every line is escaped.
 func showPin(ctx context.Context, path, server, tool string, stdout io.Writer) error {
 	db, err := store.OpenExisting(ctx, path)
 	if err != nil {
@@ -138,25 +153,29 @@ func showPin(ctx context.Context, path, server, tool string, stdout io.Writer) e
 		removed, added := differ(pinned, changed)
 		writeLines(&b, "- ", removed)
 		writeLines(&b, "+ ", added)
+		fmt.Fprintf(&b, "to accept this change: derbent pins accept %s %s\n", name, visible.Escape(p.NewSHA256))
 	}
 	_, err = io.WriteString(stdout, b.String())
 	return err
 }
 
-// acceptPin makes the definition last recorded for a tool its pin, and prints the hash it accepted.
-func acceptPin(ctx context.Context, path, server, tool string, stdout io.Writer) error {
+// acceptPin makes the change recorded for a tool its pin when its hash starts with given, the hash
+// derbent pins show printed, and prints the hash it accepted.
+func acceptPin(ctx context.Context, path, server, tool, given string, stdout io.Writer) error {
 	db, err := store.OpenExistingWritable(ctx, path)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 	name := visible.Escape(server + "__" + tool)
-	p, err := pin.NewStore(db).Accept(ctx, server, tool)
+	p, err := pin.NewStore(db).Accept(ctx, server, tool, given)
 	switch {
 	case errors.Is(err, pin.ErrNoPin):
 		return fmt.Errorf("pins accept: %s has no pin", name)
 	case errors.Is(err, pin.ErrNotChanged):
 		return fmt.Errorf("pins accept: %s has no change to accept", name)
+	case errors.Is(err, pin.ErrOtherChange):
+		return fmt.Errorf("pins accept: %s: the change on record is not the one given; run derbent pins show again", name)
 	case err != nil:
 		return err
 	}

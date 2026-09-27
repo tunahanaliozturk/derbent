@@ -119,19 +119,82 @@ func TestAcceptMakesTheNewDefinitionThePin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.Accept(t.Context(), "github", "get_me")
-	if err != nil || p.SHA256 != pin.Sum(def) {
+	sum := pin.Sum(def)
+	p, err := s.Accept(t.Context(), "github", "get_me", sum[:8]) // a prefix is enough
+	if err != nil || p.SHA256 != sum {
 		t.Fatalf("Accept = %+v, %v; want the v2 definition's hash", p, err)
 	}
 	changed, err := s.Check(t.Context(), "github", []*mcp.Tool{tool("get_me", "v2")})
 	if err != nil || len(changed) != 0 {
 		t.Fatalf("check after accept = %v, %v", changed, err)
 	}
-	if _, err = s.Accept(t.Context(), "github", "get_me"); !errors.Is(err, pin.ErrNotChanged) {
+	if _, err = s.Accept(t.Context(), "github", "get_me", sum); !errors.Is(err, pin.ErrNotChanged) {
 		t.Fatalf("accepting twice: err = %v, want ErrNotChanged", err)
 	}
-	if _, err = s.Accept(t.Context(), "github", "nope"); !errors.Is(err, pin.ErrNoPin) {
+	if _, err = s.Accept(t.Context(), "github", "nope", sum); !errors.Is(err, pin.ErrNoPin) {
 		t.Fatalf("accepting an unknown tool: err = %v, want ErrNoPin", err)
+	}
+}
+
+// The user accepts the change they reviewed: a hash that is not the recorded change's is refused, and
+// the pin stays as it was.
+func TestAcceptRefusesAChangeThatIsNotTheOneGiven(t *testing.T) {
+	s, _ := open(t)
+	for _, desc := range []string{"v1", "v2"} {
+		if _, err := s.Check(t.Context(), "github", []*mcp.Tool{tool("get_me", desc)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := s.Get(t.Context(), "github", "get_me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed, err := pin.Definition(tool("get_me", "v3")) // what the user saw before the server changed again
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, given := range []string{pin.Sum(reviewed), pin.Sum(reviewed)[:8], before.SHA256, ""} {
+		if _, err = s.Accept(t.Context(), "github", "get_me", given); !errors.Is(err, pin.ErrOtherChange) {
+			t.Errorf("Accept(%q): err = %v, want ErrOtherChange", given, err)
+		}
+	}
+	if after, err := s.Get(t.Context(), "github", "get_me"); err != nil || after != before {
+		t.Fatalf("pin after refused accepts = %+v, %v; want %+v", after, err, before)
+	}
+}
+
+// Recheck, which a running gate calls for a tool it withholds, writes only when no change is recorded,
+// so two gates holding different definitions never overwrite each other's record.
+func TestRecheckRecordsAChangeOnlyWhenNoneIsRecorded(t *testing.T) {
+	s, _ := open(t)
+	for _, desc := range []string{"v1", "v2"} {
+		if _, err := s.Check(t.Context(), "github", []*mcp.Tool{tool("get_me", desc)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recorded, err := s.Get(t.Context(), "github", "get_me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := s.Recheck(t.Context(), "github", tool("get_me", "v3"))
+	if err != nil || !changed {
+		t.Fatalf("Recheck(v3) = %v, %v; want changed", changed, err)
+	}
+	p, err := s.Get(t.Context(), "github", "get_me")
+	if err != nil || p != recorded {
+		t.Fatalf("pin = %+v, %v; want the recorded v2 change left alone", p, err)
+	}
+	if _, err = s.Accept(t.Context(), "github", "get_me", recorded.NewSHA256); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err = s.Recheck(t.Context(), "github", tool("get_me", "v2")); err != nil || changed {
+		t.Fatalf("Recheck(v2) after accepting v2 = %v, %v; want not changed", changed, err)
+	}
+	if changed, err = s.Recheck(t.Context(), "github", tool("get_me", "v3")); err != nil || !changed {
+		t.Fatalf("Recheck(v3) after accepting v2 = %v, %v; want changed", changed, err)
+	}
+	if p, err = s.Get(t.Context(), "github", "get_me"); err != nil || !strings.Contains(p.NewDefinition, `"v3"`) {
+		t.Fatalf("pin = %+v, %v; want v3 recorded now that no change was", p, err)
 	}
 }
 
