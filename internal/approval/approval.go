@@ -78,9 +78,10 @@ func NewQueue(db *sql.DB) *Queue {
 // approval is withdrawn so that nobody can approve a call whose agent has gone.
 func (q *Queue) Ask(ctx context.Context, r Request, timeout time.Duration) (Outcome, error) {
 	created := q.now()
+	deadline := created.Add(timeout)
 	res, err := q.db.ExecContext(ctx, `INSERT INTO approvals
 		(created_ms, deadline_ms, project, agent, session, tool, args, rule) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		created.UnixMilli(), created.Add(timeout).UnixMilli(), r.Project, r.Agent, r.Session, r.Tool, r.Args, r.Rule)
+		created.UnixMilli(), deadline.UnixMilli(), r.Project, r.Agent, r.Session, r.Tool, r.Args, r.Rule)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("write approval: %w", err)
 	}
@@ -88,7 +89,8 @@ func (q *Queue) Ask(ctx context.Context, r Request, timeout time.Duration) (Outc
 	if err != nil {
 		return Outcome{}, fmt.Errorf("write approval: %w", err)
 	}
-	expire := time.NewTimer(timeout)
+	// The wait ends at the deadline the row carries, however long the write took.
+	expire := time.NewTimer(time.Until(deadline))
 	defer expire.Stop()
 	poll := time.NewTicker(pollEvery)
 	defer poll.Stop()
@@ -268,7 +270,7 @@ func (q *Queue) outcome(ctx context.Context, id int64) (Outcome, bool, error) {
 		return Outcome{ID: id, By: ByUser}, true, nil
 	case "expired":
 		return Outcome{ID: id, By: ByTimeout}, true, nil
-	default: // pending; only this Ask withdraws, after ctx has ended
+	default: // pending; only the Ask waiting on it withdraws it, when its ctx ends or a read fails
 		return Outcome{ID: id}, false, nil
 	}
 }

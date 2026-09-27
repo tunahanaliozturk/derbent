@@ -3,6 +3,7 @@ package gate_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -214,6 +215,82 @@ func TestAgentGivingUpLeavesAReceiptThatTheCallDidNotRun(t *testing.T) {
 	}
 	if pending, err := e.approvals.Pending(t.Context()); err != nil || len(pending) != 0 {
 		t.Fatalf("pending = %+v, %v; the abandoned call is still offered", pending, err)
+	}
+}
+
+// Approving once covers that call only: the next call of the same tool asks again. The Claude Code
+// hook reuses this path.
+func TestApprovingOnceDoesNotCoverTheNextCall(t *testing.T) {
+	e := newEnv(t)
+	cs := connect(t, e.gate(t, "codex", askWrites, allowRest))
+	done := callAsync(t.Context(), cs, "memory_write", map[string]any{"title": "one", "body": "b"})
+	first := waitPending(t, e.approvals)
+	if err := e.approvals.Decide(t.Context(), first.ID, approval.ApproveOnce); err != nil {
+		t.Fatal(err)
+	}
+	if c := awaitCall(t, done); c.err != nil || c.res.IsError {
+		t.Fatalf("first call: %+v, %v", c.res, c.err)
+	}
+	done = callAsync(t.Context(), cs, "memory_write", map[string]any{"title": "two", "body": "b"})
+	second := waitPending(t, e.approvals)
+	if second.ID == first.ID {
+		t.Fatalf("the second call reused approval %d", first.ID)
+	}
+	if err := e.approvals.Decide(t.Context(), second.ID, approval.Deny); err != nil {
+		t.Fatal(err)
+	}
+	if c := awaitCall(t, done); c.err != nil || !c.res.IsError || !strings.Contains(text(c.res), "the user denied") {
+		t.Fatalf("second call: %+v, %v", c.res, c.err)
+	}
+	want := []string{fmt.Sprintf("user:%d", first.ID), fmt.Sprintf("user:%d", second.ID)}
+	if by := decidedBy(t, e.db); !slices.Equal(by, want) {
+		t.Fatalf("decided_by = %v, want %v", by, want)
+	}
+}
+
+// An agent cannot fill the user's queue with calls that would fail anyway: a name the gate does not
+// serve is refused before any rule is read, even under a rule that asks about everything.
+func TestACallToAToolTheGateDoesNotServeIsNeverAsked(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "codex", rule.Spec{Action: rule.Ask})
+	g.ApprovalTimeout = time.Second
+	res := call(t, connect(t, g), "no_such_tool", map[string]any{"x": "y"})
+	if want := "derbent: no_such_tool is not a tool this gate serves"; !res.IsError || text(res) != want {
+		t.Fatalf("result = %q, IsError %v; want %q", text(res), res.IsError, want)
+	}
+	var asked int
+	if err := e.db.QueryRowContext(t.Context(), `SELECT count(*) FROM approvals`).Scan(&asked); err != nil || asked != 0 {
+		t.Fatalf("approvals written = %d, err %v; want none", asked, err)
+	}
+	if got := receipts(t, e.db); len(got) != 1 || got[0].decision != "deny" || got[0].outcome != "refused" {
+		t.Fatalf("receipts = %+v", got)
+	}
+	if by := decidedBy(t, e.db); !slices.Equal(by, []string{"gate"}) {
+		t.Fatalf("decided_by = %v, want [gate]", by)
+	}
+}
+
+// A gate told to stop withdraws the calls still waiting, so none of them can be approved while it
+// shuts down.
+func TestStoppingTheGateWithdrawsWaitingCalls(t *testing.T) {
+	e := newEnv(t)
+	g := e.gate(t, "codex", askWrites, allowRest)
+	stop, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	g.Stop = stop
+	cs := connect(t, g)
+	done := callAsync(t.Context(), cs, "memory_write", map[string]any{"title": "t", "body": "b"})
+	p := waitPending(t, e.approvals)
+	cancel()
+	c := awaitCall(t, done)
+	if c.err != nil || !c.res.IsError || !strings.Contains(text(c.res), "the gate is stopping") {
+		t.Fatalf("result = %+v, err %v", c.res, c.err)
+	}
+	if by := decidedBy(t, e.db); !slices.Equal(by, []string{fmt.Sprintf("withdrawn:%d", p.ID)}) {
+		t.Fatalf("decided_by = %v", by)
+	}
+	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveOnce); !errors.Is(err, approval.ErrNotPending) {
+		t.Fatalf("approving a withdrawn call: err = %v, want ErrNotPending", err)
 	}
 }
 

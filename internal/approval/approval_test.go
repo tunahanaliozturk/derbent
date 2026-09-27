@@ -158,6 +158,37 @@ func TestNoDecisionTimesOut(t *testing.T) {
 	noneLeft(t, q)
 }
 
+// The deadline is fixed before the approval is written, and the wait ends there even when the write
+// was slow, so a busy database cannot stretch a call's wait past the deadline the user is shown.
+func TestASlowWriteDoesNotStretchTheWait(t *testing.T) {
+	q, db := open(t)
+	locked, release := make(chan struct{}), make(chan struct{})
+	held := make(chan error, 1)
+	go func() {
+		held <- store.Immediate(t.Context(), db, func(context.Context, *sql.Conn) error {
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+	start := time.Now()
+	done := ask(t.Context(), q, req, time.Second)
+	time.Sleep(800 * time.Millisecond) // the write waits for the lock all this time
+	close(release)
+	a := result(t, done)
+	took := time.Since(start)
+	if err := <-held; err != nil {
+		t.Fatal(err)
+	}
+	if a.err != nil || a.out.By != approval.ByTimeout {
+		t.Fatalf("Ask = %+v, %v; want a timeout", a.out, a.err)
+	}
+	if took > 1500*time.Millisecond {
+		t.Fatalf("Ask returned %s after it began, well past its one-second deadline", took)
+	}
+}
+
 func TestAgentGivingUpWithdrawsTheApproval(t *testing.T) {
 	q, _ := open(t)
 	ctx, cancel := context.WithCancel(t.Context())

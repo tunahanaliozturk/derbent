@@ -190,14 +190,14 @@ func TestEveryCallGetsAReceipt(t *testing.T) {
 	if res := call(t, cs, "memory_write", map[string]any{"title": "no body"}); !res.IsError {
 		t.Fatal("a write without a body succeeded")
 	}
-	if _, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "nope"}); err == nil {
-		t.Fatal("an unknown tool succeeded")
+	if res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "nope"}); err != nil || !res.IsError {
+		t.Fatalf("an unknown tool: result %+v, err %v; want a tool error", res, err)
 	}
 	got := receipts(t, e.db)
 	want := []receiptRow{
 		{"claude", "memory_write", `{"body":"b","title":"t"}`, "allow", "ok"},
 		{"claude", "memory_write", `{"title":"no body"}`, "allow", "error"},
-		{"claude", "nope", `{}`, "allow", "error"},
+		{"claude", "nope", `{}`, "deny", "refused"},
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("receipts =\n%+v\nwant\n%+v", got, want)

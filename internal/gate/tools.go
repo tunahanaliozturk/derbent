@@ -84,6 +84,19 @@ func addTool[In, Out any](g *Gate, s *mcp.Server, t *mcp.Tool, h mcp.ToolHandler
 		return
 	}
 	mcp.AddTool(s, t, h)
+	if g.local == nil {
+		g.local = map[string]bool{}
+	}
+	g.local[t.Name] = true
+}
+
+// serves reports whether name is a tool this gate offers its agent, a memory tool or a downstream one,
+// or a tool the rules hide from it, which the deny rule that hid it refuses.
+func (g *Gate) serves(name string) bool {
+	g.mu.Lock()
+	_, downstream := g.owners[name]
+	g.mu.Unlock()
+	return g.local[name] || downstream || g.Rules.Hidden(g.Agent, name)
 }
 
 func (g *Gate) memoryWrite(ctx context.Context, _ *mcp.CallToolRequest, in writeInput) (*mcp.CallToolResult, writeOutput, error) {

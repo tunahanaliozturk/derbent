@@ -40,6 +40,9 @@ type Gate struct {
 	Approvals *approval.Queue
 	// ApprovalTimeout is how long a call waits for the user before it is denied.
 	ApprovalTimeout time.Duration
+	// Stop ends when the gate is told to stop, and withdraws the calls still waiting for the user so
+	// that none is approved while the gate shuts down. Nil never ends.
+	Stop context.Context
 	// ToolsReady, when set, holds the agent's tool listings and calls until it is closed or ToolsWait
 	// has passed since Server was called: a downstream server that comes up quickly is in the agent's
 	// first list, and one that is slow holds nothing for long. The agent's initialize is never held.
@@ -48,6 +51,7 @@ type Gate struct {
 
 	server  *mcp.Server
 	started time.Time
+	local   map[string]bool // the memory tools this gate registered, written only by Server
 	mu      sync.Mutex
 	owners  map[string]string // gate tool name to the downstream server it belongs to
 }
@@ -104,37 +108,44 @@ func (g *Gate) waitForTools(ctx context.Context) {
 	}
 }
 
+// call decides one tools/call request and records its receipt. The gate itself refuses, before any rule
+// is read, a name it does not serve and arguments that are not an object; the rules decide the rest.
 func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest, next mcp.MethodHandler) (mcp.Result, error) {
 	start := time.Now()
 	name := req.Params.Name
 	args, argsJSON, isObject := decodeArgs(req.Params.Arguments)
-	decision := g.Rules.Decide(g.Agent, name, args)
-	if knobs.skipRules {
-		decision = rule.Decision{Action: rule.Allow}
-	}
 	rec := receipt.Receipt{
 		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name,
 		Args: g.redact(argsJSON), ArgsSHA256: sha256Hex(req.Params.Arguments),
-		Decision: string(decision.Action), DecidedBy: "rule:" + strconv.Itoa(decision.Rule),
+		Decision: string(rule.Deny), DecidedBy: "gate", Outcome: "refused",
 	}
 	var (
 		res mcp.Result
 		err error
 	)
 	switch {
+	case !g.serves(name):
+		// Asking the user about it would only fill their queue with a call that fails anyway.
+		res = toolError("derbent: " + name + " is not a tool this gate serves")
 	case !isObject:
 		// MCP arguments are an object. Rules read named string arguments, so anything else would slip
 		// past an args condition that a deny depends on.
 		res = toolError("derbent: " + name + " was refused: its arguments are not a JSON object")
-		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), "gate", "refused"
-	case decision.Action == rule.Allow:
-		res, err = next(ctx, method, req)
-		rec.Outcome = outcome(res, err)
-	case decision.Action == rule.Ask:
-		res, err = g.ask(ctx, method, req, next, &rec, decision.Rule)
 	default:
-		res = refusal(name, decision.Rule)
-		rec.Outcome = "refused"
+		decision := g.Rules.Decide(g.Agent, name, args)
+		if knobs.skipRules {
+			decision = rule.Decision{Action: rule.Allow}
+		}
+		rec.Decision, rec.DecidedBy = string(decision.Action), "rule:"+strconv.Itoa(decision.Rule)
+		switch decision.Action { // rule.Compile admits these three and no other
+		case rule.Allow:
+			res, err = next(ctx, method, req)
+			rec.Outcome = outcome(res, err)
+		case rule.Ask:
+			res, err = g.ask(ctx, method, req, next, &rec, decision.Rule)
+		case rule.Deny:
+			res = refusal(name, decision.Rule)
+		}
 	}
 	rec.ResultSize, rec.ResultSHA256 = resultDigest(res, err)
 	rec.Duration = time.Since(start)
@@ -172,7 +183,14 @@ func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest,
 	if granted {
 		return run("grant:" + strconv.FormatInt(id, 10))
 	}
-	out, err := g.Approvals.Ask(ctx, approval.Request{
+	// The call waits until the agent gives up or the gate is told to stop, whichever comes first.
+	wait, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if g.Stop != nil {
+		stop := context.AfterFunc(g.Stop, cancel)
+		defer stop()
+	}
+	out, err := g.Approvals.Ask(wait, approval.Request{
 		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: rec.Args, Rule: ruleIndex,
 	}, g.ApprovalTimeout)
 	ref := strconv.FormatInt(out.ID, 10)
@@ -180,6 +198,8 @@ func (g *Gate) ask(ctx context.Context, method string, req *mcp.CallToolRequest,
 	case err != nil && ctx.Err() != nil:
 		rec.Decision, rec.DecidedBy, rec.Outcome = string(rule.Deny), "withdrawn:"+ref, "refused"
 		return nil, err
+	case err != nil && wait.Err() != nil:
+		return refuse("withdrawn:"+ref, name+" was withdrawn before the user decided, because the gate is stopping; it did not run")
 	case err != nil:
 		return refuse(rec.DecidedBy, name+" needs the user's approval, which could not be asked for: "+err.Error())
 	case out.Approved:
