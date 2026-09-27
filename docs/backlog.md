@@ -78,10 +78,10 @@ Overhead), so CI does not show this.
 
 ### 2. A byte order mark on hook input
 
-`derbent gate` denies input that starts with a UTF-8 byte order mark, with the reason "unusable hook
-input: invalid character '﻿' looking for beginning of value". A .NET Framework program that writes
-the hook input through `Process.StandardInput` sends one when the console input encoding is UTF-8, which
-is how it was found. Whether any of the four CLIs sends one is not known. The hook fails closed, so this
+`derbent gate` denies input that starts with a UTF-8 byte order mark (U+FEFF), with the reason "unusable
+hook input: invalid character ... looking for beginning of value", the character being the mark itself.
+A .NET Framework program that writes the hook input through `Process.StandardInput` sends one when the
+console input encoding is UTF-8, which is how it was found. Whether any of the four CLIs sends one is not known. The hook fails closed, so this
 is safe, but it would stop every built-in tool. Strip a leading `EF BB BF` before decoding the JSON.
 
 ### 3. `derbent init` and `derbent doctor`
