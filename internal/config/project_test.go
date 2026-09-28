@@ -377,3 +377,56 @@ func TestAProjectRulesErrorIsEscaped(t *testing.T) {
 		t.Fatalf("err = %q, want the override escaped", err)
 	}
 }
+
+// linkedRepo makes base/repo, a repository with a subdirectory sub, and returns the repository root as
+// the checkout root should name it and the subdirectory.
+func linkedRepo(t *testing.T) (base, want, sub string) {
+	t.Helper()
+	base = t.TempDir()
+	repo := filepath.Join(base, "repo")
+	sub = filepath.Join(repo, "sub")
+	for _, d := range []string{filepath.Join(repo, ".git"), sub} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base, want, sub
+}
+
+// A directory that does not exist yet, below a link into a repository, belongs to that repository as git
+// sees it: its rules are read and its key is the repository's.
+func TestCheckoutRootResolvesALinkAboveAMissingDirectory(t *testing.T) {
+	base, want, sub := linkedRepo(t)
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(sub, link); err != nil {
+		t.Skipf("cannot make a symbolic link here: %v", err)
+	}
+	for _, dir := range []string{link, filepath.Join(link, "new", "deeper")} {
+		if got, err := config.CheckoutRoot(dir); err != nil || got != want {
+			t.Errorf("CheckoutRoot(%s) = %q, %v; want %q", dir, got, err, want)
+		}
+	}
+}
+
+// A Windows junction is followed as git follows it, so a project opened through one is the repository
+// it leads into.
+func TestCheckoutRootFollowsAWindowsJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junctions are a Windows thing")
+	}
+	base, want, sub := linkedRepo(t)
+	junction := filepath.Join(base, "j")
+	if out, err := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", junction, sub).CombinedOutput(); err != nil {
+		t.Skipf("cannot make a junction here: %v %s", err, out)
+	}
+	if got, err := config.CheckoutRoot(junction); err != nil || got != want {
+		t.Fatalf("CheckoutRoot(junction) = %q, %v; want %q", got, err, want)
+	}
+	if got, repoKey := mustKey(t, junction), mustKey(t, want); got != repoKey {
+		t.Fatalf("key through the junction = %q, want %q", got, repoKey)
+	}
+}

@@ -23,8 +23,8 @@ import (
 // CheckoutRoot returns the root of the checkout that contains dir: the nearest directory at or above
 // dir that holds .git, which for a linked worktree is the worktree's own root, or dir itself outside a
 // repository. The project rules file is read there (ADR 0014). The root is absolute, cleaned, with
-// symbolic links and Windows short names resolved, in the path's own case, so the rules file can be
-// found on a case-sensitive directory.
+// symbolic links, and on Windows junctions, subst drives and short names, resolved as git resolves them
+// (see resolve), in the path's own case, so the rules file can be found on a case-sensitive directory.
 func CheckoutRoot(dir string) (string, error) {
 	root, _, err := checkoutRoot(dir)
 	return root, err
@@ -254,10 +254,17 @@ func lstatAndReadSmallFile(path string) ([]byte, error) {
 	return readSmallFile(path, fi)
 }
 
-// resolve expands symbolic links and Windows short names, and keeps the path as it is when that fails.
+// resolve expands symbolic links, and on Windows junctions, subst drives and short names too. A path that
+// does not exist is resolved as far as it exists: its nearest existing parent is resolved and the rest
+// joined as written, so a link above a directory not made yet is still followed. A path none of which
+// resolves is kept as it is.
 func resolve(path string) string {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+	if resolved, err := finalPath(path); err == nil {
 		return resolved
 	}
-	return path
+	parent := filepath.Dir(path)
+	if parent == path {
+		return path
+	}
+	return filepath.Join(resolve(parent), filepath.Base(path))
 }
