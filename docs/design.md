@@ -467,10 +467,10 @@ a first config.
 - **Presets.** `watch`, `balanced` and `strict` are commented TOML files embedded in the binary. `watch`
   is one rule that allows and records every call, and names no tool. `balanced` allows reading, and asks
   about pushing, `--force`, discarding work with `git reset --hard` or `git checkout --`, deleting
-  files, running a downloaded script, changing infrastructure with terraform, tofu, pulumi, kubectl or
-  helm, writing a `.env` file with a file tool or a shell redirect, `~/.ssh` in a file path or a shell
-  command, text typed into a running Copilot CLI shell, and every tool of a GitHub server behind Derbent
-  but twelve known reads. It names each CLI's read-only, shell and file tools and the argument keys they
+  files, running a downloaded script, the terraform, tofu, pulumi, kubectl and helm subcommands its
+  infrastructure section lists, writing a `.env` file with a file tool or a shell redirect, `~/.ssh` in
+  a file path or a shell command, text typed into a running Copilot CLI shell, and every tool of a
+  GitHub server behind Derbent but twelve known reads. It names each CLI's read-only, shell and file tools and the argument keys they
   use (see Built-in tools), and its comments say what its patterns catch, what they miss and where they
   catch too much. Its shell rules match text, so a command in a form they do not list, such as
   `"git" push`, gets through; the preset says so at the top. `strict` allows Derbent's memory tools, each

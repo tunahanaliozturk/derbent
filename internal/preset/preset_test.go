@@ -176,6 +176,34 @@ func TestPresetsDecideTheSampleCalls(t *testing.T) {
 		{"native__PowerShell", map[string]any{"command": "pulumi up --yes"}, allow, ask, ask},
 		{"native__Bash", map[string]any{"command": "tofu plan"}, allow, allow, ask},
 		{"native__Bash", map[string]any{"command": "pulumi preview"}, allow, allow, ask},
+
+		// The deploy subcommands of helm, kubectl, pulumi and tofu, while their reads stay allowed.
+		{"native__Bash", map[string]any{"command": "helm upgrade --install web ./chart"}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "helm install web ./chart"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "helm rollback web 1"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "kubectl scale deploy web --replicas=0"}, allow, ask, ask},
+		{"native__powershell", map[string]any{"command": `kubectl patch deploy web -p '{"spec":{}}'`}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "kubectl create ns x"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "kubectl replace -f web.yaml"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "kubectl rollout restart deploy/web"}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "kubectl rollout undo deploy/web"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "kubectl drain node1"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "kubectl edit deploy web"}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "kubectl set image deploy/web web=nginx:2"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "pulumi refresh --yes"}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "pulumi import aws:s3/bucket:Bucket b my-bucket"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "tofu import aws_s3_bucket.b my-bucket"}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "tofu taint aws_instance.web"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "helm list -A"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "helm template web ./chart"}, allow, allow, ask},
+		{"native__run_command", map[string]any{"CommandLine": "kubectl describe pod web"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "kubectl logs deploy/web --since 1h"}, allow, allow, ask},
+
+		// Discarding work with options in between.
+		{"native__Bash", map[string]any{"command": "git checkout HEAD -- ."}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "git checkout main -- src/"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "git reset -q --hard"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "git checkout main"}, allow, allow, ask},
 	} {
 		for name, want := range map[string]rule.Action{"watch": tc.watch, "balanced": tc.balanced, "strict": tc.strict} {
 			if got := sets[name].Decide("claude", tc.tool, tc.args).Action; got != want {

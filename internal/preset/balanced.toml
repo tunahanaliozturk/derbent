@@ -1,11 +1,11 @@
 # Derbent preset: balanced
 #
 # Reading is allowed. These ask you first: pushing, --force, discarding work with git reset --hard
-# or git checkout --, deleting files, running a downloaded script, changing infrastructure with
-# terraform, tofu, pulumi, kubectl or helm, writing a .env file with a file tool or a shell redirect,
-# ~/.ssh in a file path or a shell command, text typed into a running Copilot CLI shell, and every
-# tool of a GitHub server behind Derbent that is not a known read. Everything else is allowed, and
-# every call is recorded (derbent receipts).
+# or git checkout --, deleting files, running a downloaded script, the terraform, tofu, pulumi,
+# kubectl and helm subcommands listed in the infrastructure section, writing a .env file with a file
+# tool or a shell redirect, ~/.ssh in a file path or a shell command, text typed into a running
+# Copilot CLI shell, and every tool of a GitHub server behind Derbent that is not a known read.
+# Everything else is allowed, and every call is recorded (derbent receipts).
 #
 # Shell rules match text, not meaning, so a command written in a form these patterns do not list gets
 # through: a quoted program name (`"git" push`), a variable, an alias, a script, other spacing or a
@@ -278,26 +278,28 @@ tool   = "native__run_command"
 args   = { CommandLine = "*git *push*" }
 action = "ask"
 
-# Discarding work: `git reset --hard` and `git checkout -- <paths>`. Not caught: `git restore`,
-# `git checkout .` and `git switch --discard-changes`.
+# Discarding work: `git reset --hard` and `git checkout ... -- <paths>`, also with other words in
+# between (`git reset -q --hard`, `git checkout HEAD -- .`). `*git *checkout *-- *` also asks about a
+# later `-- ` in the same line, as in `git checkout main && npm test -- --watch`. Not caught:
+# `git restore`, `git checkout .` and `git switch --discard-changes`.
 [[rule]]
 tool   = "native__*"
-args   = { command = "*git *reset --hard*" }
+args   = { command = "*git *reset *--hard*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*git *reset --hard*" }
+args   = { CommandLine = "*git *reset *--hard*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*git *checkout -- *" }
+args   = { command = "*git *checkout *-- *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*git *checkout -- *" }
+args   = { CommandLine = "*git *checkout *-- *" }
 action = "ask"
 
 # --force. The short -f of `git push -f` and `rm -f` is caught by the push and delete rules.
@@ -314,11 +316,14 @@ args   = { CommandLine = "*--force*" }
 action = "ask"
 
 # Deleting files: rm, rmdir and unlink, also as the last word (`find . | xargs rm`), Remove-Item,
-# git clean with a flag (it does nothing without one), -delete or --delete (find, rsync) and rsync's
-# --remove-source-files. In PowerShell, rm is a name for Remove-Item. `*-delete*` also asks about a
-# path such as `soft-delete.ts` and about `gh pr merge --delete-branch`. Not caught: `del`, `erase`,
-# `rd` and PowerShell's `ri` (a pattern for "del" would catch "model x"), `shred`, and a delete done
-# by a script or another language.
+# git clean with a flag, -delete or --delete (find, rsync) and rsync's --remove-source-files. In
+# PowerShell, rm is a name for Remove-Item. These also ask about more than they name: `*-delete*`
+# about a path such as `soft-delete.ts` and about `gh pr merge --delete-branch`, and `*git *clean -*`
+# about `make clean -j4` or `dotnet clean -c Release` after a git command in the same line. Not
+# caught: a plain `git clean`, which deletes nothing while clean.requireForce is left at its default
+# (true) and deletes untracked files when it is set to false; `del`, `erase`, `rd` and PowerShell's
+# `ri` (a pattern for "del" would catch "model x"); `shred`; and a delete done by a script or another
+# language.
 [[rule]]
 tool   = "native__*"
 args   = { command = "*rm *" }
@@ -423,9 +428,10 @@ action = "ask"
 # (`bash -c "$(curl x)"`, `bash <(curl x)`, or backticks as in sh -c "`curl x`"), and in PowerShell
 # anything piped into iex or IEX, passed to `iex (`, `iex(`, `IEX (` or `IEX(`, run with
 # Invoke-Expression, or fetched with DownloadString. These also ask about more than they name:
-# `*curl*|*sh*` about `curl x | grep shell`, and `*$(curl*` about any command substitution that
-# calls curl, such as `TOKEN=$(curl -s https://x/token | jq -r .t)`. Not caught: a download saved to
-# a file and run by a later command, or piped into python, node, perl or another interpreter.
+# `*curl*|*sh*` about `curl x | grep shell`, `*$(curl*` about any command substitution that calls
+# curl, such as `TOKEN=$(curl -s https://x/token | jq -r .t)`, and the backtick patterns about a
+# commit message that puts curl or wget in backticks. Not caught: a download saved to a file and run
+# by a later command, or piped into python, node, perl or another interpreter.
 [[rule]]
 tool   = "native__*"
 args   = { command = "*curl*|*sh*" }
@@ -611,14 +617,24 @@ tool   = "native__run_command"
 args   = { CommandLine = "*>*.env*" }
 action = "ask"
 
-# Infrastructure, also with options before the subcommand, as in `kubectl -n prod delete`: apply and
-# destroy in terraform and tofu, up and destroy in pulumi, apply and delete in kubectl, and
-# uninstall, delete and del in helm. `*rm *` above already asks about every command that holds
-# "terraform "; the terraform rules still catch `terraform.exe apply`, and keep apply and destroy
-# asking if you narrow the delete rule. These also ask about more than they name:
-# `*terraform*apply*` about `git apply` in a terraform/ directory, `*pulumi*up*` about any pulumi
-# command with "up" in it, such as `pulumi preview --suppress-outputs`, and `*helm *del *` about a
-# helm command with a word that ends in "del" before a space.
+# Infrastructure. These subcommands ask, also with options before them (`kubectl -n prod delete`):
+#   terraform  apply, destroy (and every other terraform command, through `*rm *` above)
+#   tofu       apply, destroy, import, taint
+#   pulumi     up, destroy, refresh, import
+#   kubectl    apply, delete, create, replace, patch, edit, scale, set, drain, rollout restart,
+#              rollout undo
+#   helm       install, upgrade, rollback, uninstall, delete, del
+# The terraform rules still catch `terraform.exe apply`, and keep apply and destroy asking if you
+# narrow the delete rule. Reads such as `kubectl get`, `kubectl describe`, `kubectl logs`,
+# `helm list` and `helm template` are allowed; they are not named in an allow rule, because a
+# pattern allow above these asks would let `kubectl get x && kubectl delete y` through. Not caught:
+# every subcommand the list leaves out, such as `kubectl cordon`, `kubectl label`,
+# `kubectl annotate`, `kubectl expose`, `helm repo remove` or `helm push`. These also ask about more
+# than they name: `*terraform*apply*` about `git apply` in a terraform/ directory; `*pulumi*up*` about
+# any pulumi command with "up" in it, such as `pulumi preview --suppress-outputs`, about anything
+# after a path that holds "pulumi", such as `cd infra/pulumi && npm run setup`, and about
+# `pip install pulumi --upgrade`; `*kubectl *create*` about `kubectl create --dry-run=client`; and
+# `*helm *del *` about a helm command with a word that ends in "del" before a space.
 [[rule]]
 tool   = "native__*"
 args   = { command = "*terraform*apply*" }
@@ -727,6 +743,166 @@ action = "ask"
 [[rule]]
 tool   = "native__run_command"
 args   = { CommandLine = "*helm *del *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm *install*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm *install*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm *upgrade*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm *upgrade*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm *rollback*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm *rollback*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *create*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *create*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *replace*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *replace*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *patch*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *patch*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *edit*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *edit*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *scale*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *scale*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *set *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *set *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *drain*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *drain*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *rollout restart*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *rollout restart*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *rollout undo*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *rollout undo*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*pulumi*refresh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*pulumi*refresh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*pulumi*import*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*pulumi*import*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*tofu*import*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*tofu*import*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*tofu*taint*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*tofu*taint*" }
 action = "ask"
 
 # --- The GitHub MCP server, when it sits behind Derbent as [servers.github]: twelve read tools known
