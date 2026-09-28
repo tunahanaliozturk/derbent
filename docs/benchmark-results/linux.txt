@@ -2,39 +2,39 @@ runner-image: ubuntu24 20260920.314.1
 goos: linux
 goarch: amd64
 pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
-cpu: AMD EPYC 9V74 80-Core Processor                
+cpu: AMD EPYC 7763 64-Core Processor                
        │   direct    │                 gate                 │
        │   sec/op    │   sec/op     vs base                 │
-Echo-4   311.9µ ± 2%   801.2µ ± 1%  +156.84% (p=0.000 n=10)
+Echo-4   351.1µ ± 1%   901.2µ ± 2%  +156.67% (p=0.000 n=10)
 
        │   direct    │                gate                 │
        │   calls/s   │   calls/s    vs base                │
-Echo-4   3.205k ± 2%   1.248k ± 0%  -61.07% (p=0.000 n=10)
+Echo-4   2.848k ± 1%   1.109k ± 2%  -61.04% (p=0.000 n=10)
 
        │   direct   │                gate                 │
        │   p50-us   │   p50-us    vs base                 │
-Echo-4   264.0 ± 3%   731.5 ± 1%  +177.08% (p=0.000 n=10)
+Echo-4   304.5 ± 1%   825.5 ± 1%  +171.10% (p=0.000 n=10)
 
        │   direct   │                 gate                 │
        │   p99-us   │   p99-us     vs base                 │
-Echo-4   664.0 ± 2%   1438.0 ± 3%  +116.57% (p=0.000 n=10)
+Echo-4   731.0 ± 4%   1565.5 ± 3%  +114.16% (p=0.000 n=10)
 runner-image: ubuntu24 20260920.314.1
 goos: linux
 goarch: amd64
 pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
-cpu: AMD EPYC 9V74 80-Core Processor                
+cpu: AMD EPYC 7763 64-Core Processor                
        │    spawn    │                hook                 │
        │   sec/op    │   sec/op     vs base                │
-Hook-4   4.290m ± 1%   6.390m ± 1%  +48.94% (p=0.000 n=10)
+Hook-4   4.330m ± 1%   7.467m ± 1%  +72.44% (p=0.000 n=10)
 
        │   spawn    │                hook                │
        │  calls/s   │  calls/s    vs base                │
-Hook-4   233.1 ± 1%   156.5 ± 1%  -32.86% (p=0.000 n=10)
+Hook-4   230.9 ± 1%   133.9 ± 1%  -42.00% (p=0.000 n=10)
 
        │    spawn    │                hook                 │
        │   p50-us    │   p50-us     vs base                │
-Hook-4   4.282k ± 0%   6.374k ± 1%  +48.84% (p=0.000 n=10)
+Hook-4   4.316k ± 1%   7.381k ± 2%  +71.03% (p=0.000 n=10)
 
-       │    spawn    │                hook                 │
-       │   p99-us    │   p99-us     vs base                │
-Hook-4   4.673k ± 4%   6.907k ± 7%  +47.82% (p=0.000 n=10)
+       │    spawn    │                 hook                  │
+       │   p99-us    │    p99-us     vs base                 │
+Hook-4   4.815k ± 1%   10.678k ± 6%  +121.77% (p=0.000 n=10)

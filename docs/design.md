@@ -778,6 +778,6 @@ Not in v1, in rough order of value:
 - The project rules file is kept by size and modification time. An edit that keeps both, which only a
   file system with a coarse clock allows within one tick, is not seen until the file changes again.
 - Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call
-  took 68.96 ms at p50, 46.87 ms of it for starting the binary; on Linux, 6.374 ms
+  took 83.03 ms at p50, 46.91 ms of it for starting the binary; on Linux, 7.381 ms
   (`docs/benchmark-results/`).
 - CI runs the tests on Windows and Linux; on macOS it only builds.

@@ -487,24 +487,24 @@ neither happened.
 
 ## Overhead
 
-Measured on GitHub's hosted runners on 2026-09-27, from one workflow run: Linux on an AMD EPYC 9V74 with
-4 vCPUs (image `ubuntu-24.04`), Windows on an AMD EPYC 7763 with 4 vCPUs (image `windows-2025-vs2026`).
-Each value is the median of ten runs at p50, from
-[docs/benchmark-results](docs/benchmark-results/README.md):
+Measured on GitHub's hosted runners on 2026-09-27, after milestone 6, from one workflow run: Linux and
+Windows each on an AMD EPYC 7763 with 4 vCPUs (images `ubuntu-24.04` and `windows-2025-vs2026`). Each
+value is the median of ten runs at p50, from [docs/benchmark-results](docs/benchmark-results/README.md):
 
 | | Linux | Windows |
 |---|---|---|
-| MCP tool call, direct to the server | 264.0 µs | 348.5 µs |
-| MCP tool call, through the gate | 731.5 µs | 968.0 µs |
-| Starting the binary and exiting | 4.282 ms | 46.87 ms |
-| Hook call, `derbent gate`, allowed | 6.374 ms | 68.96 ms |
+| MCP tool call, direct to the server | 304.5 µs | 353.0 µs |
+| MCP tool call, through the gate | 825.5 µs | 1033.0 µs |
+| Starting the binary and exiting | 4.316 ms | 46.91 ms |
+| Hook call, `derbent gate`, allowed | 7.381 ms | 83.03 ms |
 
-So the gate adds 467.5 µs to an MCP call on Linux and 619.5 µs on Windows, for the extra stdio hop, the
-rule decision and the receipt written to SQLite. A hook call takes 2.092 ms longer than starting the
-binary and exiting on Linux, and 22.09 ms longer on Windows, where most of its cost is the process start
-itself. The results page has p99 and calls per second as well.
+So the gate adds 521.0 µs to an MCP call on Linux and 680.0 µs on Windows, for the extra stdio hop, the
+rule decision, the project rules check and the receipt written to SQLite. A hook call takes 3.065 ms
+longer than starting the binary and exiting on Linux, and 36.12 ms longer on Windows, where most of its
+cost is the process start itself. The results page has p99 and calls per second as well, and the numbers
+from before milestone 6.
 
-These numbers come from one run on shared runners with different CPUs, so compare the gate with its
+These numbers come from one run on shared runners, one VM for each OS, so compare the gate with its
 baseline within one OS, not one OS with the other. Another run may differ by more than the confidence
 intervals shown there. The hook's p99 rests on 200 samples per run, so it is about the second largest.
 The binary measured is the test build of `cmd/derbent`, not a release build.
