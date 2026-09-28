@@ -16,10 +16,11 @@ binary and change with each release, or a file Derbent writes once and the user 
   and `derbent init --preset <name> --print` prints it and writes nothing.
 - Derbent never changes a preset after writing it, and never replaces an existing config. There is no
   preset mode in the config file.
-- `watch` is one rule that allows every call. `strict` names each CLI's read-only built-in tools and
-  asks about every other tool. `balanced` names each CLI's read-only, shell and file tools and the
-  argument keys they use, and its comments say what its patterns catch, what they miss, and where they
-  catch too much.
+- `watch` is one rule that allows every call. `strict` allows Derbent's memory tools, each CLI's
+  read-only built-in tools, named per CLI, and twelve known read tools of the GitHub server, and asks
+  about every other tool. `balanced` names each CLI's read-only, shell and file tools and the argument
+  keys they use, and its comments say what its patterns catch, what they miss, and where they catch too
+  much.
 
 ## Consequences
 
