@@ -1,27 +1,32 @@
 # Derbent preset: balanced
 #
-# Reading is allowed. Pushing, force flags, deleting files, piping a download into a shell,
-# infrastructure commands and writes to .env files and ~/.ssh ask you first, and so does every
-# GitHub tool that is not a known read. Everything else is allowed, and every call is recorded
-# (derbent receipts).
+# Reading is allowed. These ask you first: pushing, --force, deleting files, running a downloaded
+# script, infrastructure commands, writing a .env file with a file tool or a shell redirect, ~/.ssh
+# in a file path or a shell command, text typed into a running Copilot CLI shell, and every tool of a
+# GitHub server behind Derbent that is not a known read. Everything else is allowed, and every call
+# is recorded (derbent receipts).
 #
 # Derbent wrote this file once and never changes it (ADR 0016): it is yours to edit. Rules are tried
 # from the top and the first match wins, so a rule wins over every rule below it. The last rule must
 # have no condition. `derbent config check` validates the file after an edit.
 #
-# Shell rules are text patterns, not a shell parser. `*git push*` matches "git push" anywhere in the
-# command, so `cd repo && git push` asks too. They can be fooled, by a variable, an alias, a script
-# or other spacing, so they guard against mistakes, not against an agent set on getting past them.
-# They are also stricter than they look where they catch too much: `*rm *` catches `git rm`,
-# `npm rm` and every word that ends in "rm" before a space, such as "platform x". Patterns are
-# case-sensitive.
+# Shell rules are text patterns, not a shell parser. `*git *push*` matches "git " and then "push"
+# anywhere in the command, so `cd repo && git push` and `git -C repo push` ask too. They can be
+# fooled, by a variable, an alias, a script, other spacing or a program's full name (`git.exe push`),
+# so they guard against mistakes, not against an agent set on getting past them. They also catch
+# more than they name: `*rm *` catches `git rm`, `npm rm`, every terraform command ("terraform " ends
+# in "rm ") and every word that ends in "rm" before a space, such as "platform x", and `*git *push*`
+# catches `git log --grep push`. Patterns are case-sensitive and PowerShell is not, so `remove-item`
+# gets past `*Remove-Item*`.
 #
 # Each CLI names its built-in tools and their arguments its own way, so the rules cover all four:
 #   Claude Code      native__Bash, native__PowerShell, native__Monitor (command)
 #                    native__Write, native__Edit (file_path)
 #   Codex            native__Bash (command), native__apply_patch (command: the whole patch)
 #   Copilot CLI      native__bash, native__powershell (command)
+#                    native__write_bash, native__write_powershell (input: text for a running shell)
 #                    native__create, native__edit (path)
+#                    native__apply_patch (the whole patch, in input or patch: not verified)
 #   Antigravity CLI  native__run_command (CommandLine)
 #                    native__write_to_file, native__replace_file_content,
 #                    native__multi_replace_file_content (TargetFile)
@@ -151,9 +156,9 @@ action = "allow"
 tool   = "native__grep_search"
 action = "allow"
 
-# --- Writes to .env files and to ~/.ssh ask. A rule with an args condition matches any tool that has
-# that argument, so these name the argument each CLI's file tools use. `*.env*` also catches
-# .env.local, prod.env and .envrc, and `*.ssh*` catches ~/.ssh with either kind of slash.
+# --- File tools writing a .env file or into ~/.ssh ask. A rule with an args condition matches any
+# tool that has that argument, so these name the argument each CLI's file tools use. `*.env*` also
+# catches .env.local, prod.env and .envrc, and `*.ssh*` catches ~/.ssh with either kind of slash.
 
 [[rule]]
 tool   = "native__*"
@@ -185,7 +190,12 @@ tool   = "native__*"
 args   = { TargetFile = "*.ssh*" }
 action = "ask"
 
-# Codex sends a file edit as a patch in `command`, with each file's path inside it.
+# --- File edits sent as a patch, with each file's path inside it. A patch that touches a .env file
+# or ~/.ssh, or deletes a file, asks. `*.env*` reads the whole patch, so a patch whose code mentions
+# process.env or os.environ asks too. Codex sends the patch in `command`. Copilot CLI's runtime takes
+# it as raw text or in `input` or `patch`, and which one its hook sends is not verified, so both keys
+# are named here; raw text is not JSON, and derbent gate denies a call whose arguments it cannot read.
+
 [[rule]]
 tool   = "native__apply_patch"
 args   = { command = "*.env*" }
@@ -196,27 +206,75 @@ tool   = "native__apply_patch"
 args   = { command = "*.ssh*" }
 action = "ask"
 
-# Every other Codex patch is allowed here, before the shell rules below: its `command` is the patch,
-# and code that mentions "git push", or a word ending in "rm", would otherwise ask on every edit.
+[[rule]]
+tool   = "native__apply_patch"
+args   = { command = "*Delete File: *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__apply_patch"
+args   = { input = "*.env*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__apply_patch"
+args   = { input = "*.ssh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__apply_patch"
+args   = { input = "*Delete File: *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__apply_patch"
+args   = { patch = "*.env*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__apply_patch"
+args   = { patch = "*.ssh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__apply_patch"
+args   = { patch = "*Delete File: *" }
+action = "ask"
+
+# Every other patch is allowed here, before the shell rules below: the patch is the argument, and
+# code that mentions "git push", or a word ending in "rm", would otherwise ask on every edit.
 [[rule]]
 tool   = "native__apply_patch"
 action = "allow"
 
+# --- Copilot CLI's write_bash and write_powershell type text into a shell that is already running,
+# where it can be a command or the answer to a prompt, so they always ask.
+
+[[rule]]
+tool   = "native__write_bash"
+action = "ask"
+
+[[rule]]
+tool   = "native__write_powershell"
+action = "ask"
+
 # --- Shell commands that are hard to undo ask. Each pattern comes twice: for the `command` of every
 # CLI's shell tool but Antigravity CLI's, and for Antigravity CLI's `CommandLine`.
 
-# Pushing.
+# Pushing, also with options before push, as in `git -C repo push`.
 [[rule]]
 tool   = "native__*"
-args   = { command = "*git push*" }
+args   = { command = "*git *push*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*git push*" }
+args   = { CommandLine = "*git *push*" }
 action = "ask"
 
-# Force flags. The short -f of `git push -f` and `rm -f` is caught by the push and delete rules.
+# --force. The short -f of `git push -f` and `rm -f` is caught by the push and delete rules.
+# PowerShell's -Force is not a pattern, because `New-Item -Force` is how PowerShell makes a
+# directory that may exist; `Remove-Item -Force` asks through the delete rules.
 [[rule]]
 tool   = "native__*"
 args   = { command = "*--force*" }
@@ -227,8 +285,10 @@ tool   = "native__run_command"
 args   = { CommandLine = "*--force*" }
 action = "ask"
 
-# Deleting files. In PowerShell, rm and del are names for Remove-Item; `del` itself is not a pattern
-# here, because "model x" holds it.
+# Deleting files: rm, rmdir, unlink, Remove-Item, git clean, and -delete or --delete (find, rsync).
+# In PowerShell, rm is a name for Remove-Item. Not caught: `del`, `erase`, `rd` and PowerShell's
+# `ri` (a pattern for "del" would catch "model x"), `shred`, and a delete done by a script or
+# another language.
 [[rule]]
 tool   = "native__*"
 args   = { command = "*rm *" }
@@ -241,6 +301,26 @@ action = "ask"
 
 [[rule]]
 tool   = "native__*"
+args   = { command = "*rmdir *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*rmdir *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*unlink *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*unlink *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
 args   = { command = "*Remove-Item*" }
 action = "ask"
 
@@ -249,8 +329,31 @@ tool   = "native__run_command"
 args   = { CommandLine = "*Remove-Item*" }
 action = "ask"
 
-# A download piped into a shell: curl or wget into sh or bash, or anything piped into iex
-# (Invoke-Expression) in PowerShell. `*curl*|*sh*` also catches `curl x | grep shell`.
+[[rule]]
+tool   = "native__*"
+args   = { command = "*git clean*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*git clean*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*-delete*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*-delete*" }
+action = "ask"
+
+# Running a download: curl or wget piped into sh or bash, or run through command substitution
+# (`bash -c "$(curl x)"`, `bash <(curl x)`), and in PowerShell anything piped into iex or IEX, passed
+# to `iex (` or `iex(`, run with Invoke-Expression, or fetched with DownloadString. `*curl*|*sh*` also
+# catches `curl x | grep shell`. Not caught: a download saved to a file and run by a later command,
+# or piped into python or node.
 [[rule]]
 tool   = "native__*"
 args   = { command = "*curl*|*sh*" }
@@ -273,12 +376,82 @@ action = "ask"
 
 [[rule]]
 tool   = "native__*"
+args   = { command = "*$(curl*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*$(curl*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*<(curl*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*<(curl*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*$(wget*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*$(wget*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*<(wget*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*<(wget*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
 args   = { command = "*|*iex*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
 args   = { CommandLine = "*|*iex*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*|*IEX*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*|*IEX*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*iex (*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*iex (*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*iex(*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*iex(*" }
 action = "ask"
 
 [[rule]]
@@ -291,60 +464,100 @@ tool   = "native__run_command"
 args   = { CommandLine = "*Invoke-Expression*" }
 action = "ask"
 
-# Infrastructure.
 [[rule]]
 tool   = "native__*"
-args   = { command = "*terraform apply*" }
+args   = { command = "*DownloadString*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*terraform apply*" }
+args   = { CommandLine = "*DownloadString*" }
 action = "ask"
 
+# ~/.ssh in a command asks, a read such as `cat ~/.ssh/config` too, since a pattern cannot tell a
+# read from a write. A .env file asks only after a redirect (`> .env`, `>> prod.env`), so reading
+# one does not ask, and `*>*.env*` also asks when any > comes before a .env, as in
+# `make 2>/dev/null; cat .env`. Not caught: writing a .env file with cp, mv, tee, sed -i, or
+# PowerShell's Set-Content or Out-File.
 [[rule]]
 tool   = "native__*"
-args   = { command = "*terraform destroy*" }
+args   = { command = "*.ssh*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*terraform destroy*" }
+args   = { CommandLine = "*.ssh*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl delete*" }
+args   = { command = "*>*.env*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl delete*" }
+args   = { CommandLine = "*>*.env*" }
+action = "ask"
+
+# Infrastructure, also with options before the subcommand, as in `kubectl -n prod delete`. `*rm *`
+# above already asks about every command that holds "terraform "; the terraform rules still catch
+# `terraform.exe apply`, and keep apply and destroy asking if you narrow the delete rule.
+[[rule]]
+tool   = "native__*"
+args   = { command = "*terraform*apply*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*terraform*apply*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl apply*" }
+args   = { command = "*terraform*destroy*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl apply*" }
+args   = { CommandLine = "*terraform*destroy*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*helm uninstall*" }
+args   = { command = "*kubectl *delete*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*helm uninstall*" }
+args   = { CommandLine = "*kubectl *delete*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl *apply*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl *apply*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm *uninstall*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm *uninstall*" }
 action = "ask"
 
 # --- The GitHub MCP server, when it sits behind Derbent as [servers.github]: twelve read tools known
 # by name are allowed, and every other GitHub tool asks, because the server writes under many names,
-# such as issue_write and add_issue_comment. Change the prefix if your server has another name.
+# such as issue_write and add_issue_comment. Change the prefix if your server has another name. A
+# GitHub server set up in the CLI itself, not behind Derbent, reaches these rules through the hook
+# under the CLI's own name, such as native__mcp__github__issue_write in Claude Code, and the last
+# rule allows it.
 
 [[rule]]
 tool   = "github__get_me"
