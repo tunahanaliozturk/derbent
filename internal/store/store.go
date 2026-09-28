@@ -67,10 +67,32 @@ func OpenExistingWritable(ctx context.Context, path string) (*sql.DB, error) {
 // -wal file as well; both stay after the connection closes. A schema newer than this binary knows is
 // refused, and so is a file with tables but no Derbent schema version, which is another program's.
 func OpenExisting(ctx context.Context, path string) (*sql.DB, error) {
+	return openReadOnly(ctx, path, "mode=ro&_pragma=busy_timeout(5000)")
+}
+
+// Check reports whether Open would take the existing database at path, making the checks OpenExisting
+// makes, and leaves no trace: SQLite opens the file immutable, so it takes no lock and adds no -shm or
+// -wal file beside it.
+// ponytail: immutable reads the main file only, so a schema change still in a live database's -wal is
+// not seen; the gate's own Open still refuses it.
+func Check(ctx context.Context, path string) error {
+	db, err := openReadOnly(ctx, path, "mode=ro&immutable=1")
+	if err != nil {
+		return err
+	}
+	if err = db.Close(); err != nil {
+		return fmt.Errorf("close database %s: %w", path, err)
+	}
+	return nil
+}
+
+// openReadOnly opens the existing database at path with the URI parameters params, and refuses another
+// program's file or a schema newer than this binary knows.
+func openReadOnly(ctx context.Context, path, params string) (*sql.DB, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
-	db, err := sql.Open("sqlite", fileURI(path)+"?mode=ro&_pragma=busy_timeout(5000)")
+	db, err := sql.Open("sqlite", fileURI(path)+"?"+params)
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}

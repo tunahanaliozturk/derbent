@@ -4,6 +4,7 @@ package setup
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -159,9 +160,28 @@ type Entry struct {
 	Args    []string // the arguments to Command
 	Shell   bool     // Command is a line a shell reads
 	Timeout int      // a hook's timeout in seconds; 0 when it sets none
-	EnvVars []string // Codex only: the variables the MCP entry passes on to the server
+	Matcher string   // a hook's matcher, which picks the tools it runs for; empty when it sets none
+	EnvVars []string // Codex only: the variables the MCP entry passes on to the server or sets for it
 	File    string   // the file the entry came from
 }
+
+// GatesEveryTool reports whether the hook runs for every tool: its matcher is none, "", "*" or ".*",
+// which each CLI with matchers reads as every tool.
+func (e Entry) GatesEveryTool() bool {
+	return e.Matcher == "" || e.Matcher == "*" || e.Matcher == ".*"
+}
+
+// EveryToolMatcher is the matcher init writes for cli, which matches every tool.
+func EveryToolMatcher(cli string) string {
+	if cli == "claude" {
+		return "*"
+	}
+	return ".*"
+}
+
+// ErrNarrowHook is the error Plan returns when the only derbent gate hooks cli has match some tools,
+// not every one: init adds no second hook, and the user widens the one there.
+var ErrNarrowHook = errors.New("the derbent gate hook matches only some tools")
 
 // Words is the entry's command line as words: a shell line split the way sh, cmd.exe and PowerShell
 // agree on, without PowerShell's call operator in front, or else the program and its arguments.
@@ -247,7 +267,8 @@ func split(line string) []string {
 }
 
 // MCPEntries reads every MCP server entry cli has at user scope and, for Claude Code, at the local
-// scope of dir. A missing file holds none; a file that does not parse is an error that names it.
+// scope of dir, listed after the user-scope ones: of two entries with one name, Claude Code uses the
+// later. A missing file holds none; a file that does not parse is an error that names it.
 func MCPEntries(cli string, p Paths, dir string) ([]Entry, error) {
 	if cli == "codex" {
 		c, err := readCodex(p.MCP)
@@ -257,7 +278,8 @@ func MCPEntries(cli string, p Paths, dir string) ([]Entry, error) {
 		var out []Entry
 		for _, name := range slices.Sorted(maps.Keys(c.MCPServers)) {
 			s := c.MCPServers[name]
-			out = append(out, Entry{Name: name, Command: s.Command, Args: s.Args, EnvVars: envVarNames(s.EnvVars), File: p.MCP})
+			vars := append(envVarNames(s.EnvVars), slices.Sorted(maps.Keys(s.Env))...)
+			out = append(out, Entry{Name: name, Command: s.Command, Args: s.Args, EnvVars: vars, File: p.MCP})
 		}
 		return out, nil
 	}
@@ -293,9 +315,14 @@ func Hooks(cli string, p Paths) ([]Entry, error) {
 		}
 		for _, group := range c.Hooks.PreToolUse {
 			for _, h := range group.Hooks {
-				if h.Type == "" || h.Type == "command" {
-					out = append(out, Entry{Command: h.Command, Shell: true, Timeout: h.Timeout, File: p.Hook})
+				if h.Type != "" && h.Type != "command" {
+					continue
 				}
+				command := h.Command
+				if w := cmp.Or(h.CommandWindows, h.CommandWindowsCamel); w != "" && runtime.GOOS == "windows" {
+					command = w // the line Codex runs instead of command on Windows
+				}
+				out = append(out, Entry{Command: command, Shell: true, Timeout: h.Timeout, Matcher: group.Matcher, File: p.Hook})
 			}
 		}
 	case "claude":
@@ -370,6 +397,7 @@ func jsonHooks(file string, groups func(root map[string]any) []map[string]any) (
 	}
 	var out []Entry
 	for _, g := range groups(root) {
+		matcher, _ := g["matcher"].(string)
 		for _, h := range objects(g["hooks"]) {
 			if t, _ := h["type"].(string); t != "" && t != "command" {
 				continue
@@ -379,7 +407,7 @@ func jsonHooks(file string, groups func(root map[string]any) []map[string]any) (
 				command = w // Codex's hooks.json: the line Codex runs instead of command on Windows
 			}
 			args, execForm := h["args"]
-			out = append(out, Entry{Command: command, Args: stringList(args), Shell: !execForm, Timeout: seconds(h["timeout"]), File: file})
+			out = append(out, Entry{Command: command, Args: stringList(args), Shell: !execForm, Timeout: seconds(h["timeout"]), Matcher: matcher, File: file})
 		}
 	}
 	return out, nil
@@ -427,19 +455,24 @@ func copilotHook(file string, h map[string]any) Entry {
 	return Entry{Command: line, Shell: true, Timeout: timeout, File: file}
 }
 
-// codexConfig is the part of Codex's config.toml setup reads.
+// codexConfig is the part of Codex's config.toml setup reads. A hook's Windows command is
+// command_windows or commandWindows (developers.openai.com/codex/hooks).
 type codexConfig struct {
 	MCPServers map[string]struct {
-		Command string   `toml:"command"`
-		Args    []string `toml:"args"`
-		EnvVars []any    `toml:"env_vars"`
+		Command string         `toml:"command"`
+		Args    []string       `toml:"args"`
+		EnvVars []any          `toml:"env_vars"`
+		Env     map[string]any `toml:"env"`
 	} `toml:"mcp_servers"`
 	Hooks struct {
 		PreToolUse []struct {
-			Hooks []struct {
-				Type    string `toml:"type"`
-				Command string `toml:"command"`
-				Timeout int    `toml:"timeout"`
+			Matcher string `toml:"matcher"`
+			Hooks   []struct {
+				Type                string `toml:"type"`
+				Command             string `toml:"command"`
+				CommandWindows      string `toml:"command_windows"`
+				CommandWindowsCamel string `toml:"commandWindows"`
+				Timeout             int    `toml:"timeout"`
 			} `toml:"hooks"`
 		} `toml:"PreToolUse"`
 	} `toml:"hooks"`

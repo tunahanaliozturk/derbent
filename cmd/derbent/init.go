@@ -91,6 +91,9 @@ func runInit(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 			var p setup.Paths
 			if p, pl.err = setup.PathsOf(cli); pl.err == nil {
 				pl.changes, pl.done, pl.err = setup.Plan(cli, p, bin)
+				if errors.Is(pl.err, setup.ErrNarrowHook) {
+					pl.skip, pl.err = pl.err.Error(), nil // widening the user's hook is the user's call
+				}
 				for _, file := range setup.Unchecked(cli, p) {
 					pl.notes = append(pl.notes, "could not read "+file+" as JSON, so it was not checked for a derbent gate hook: if it holds one, remove one of the two")
 				}

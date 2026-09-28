@@ -153,6 +153,61 @@ func TestOpenRefusesAnotherProgramsDatabase(t *testing.T) {
 	}
 }
 
+// Check refuses what Open refuses, and leaves a database as it was: the file byte for byte, and no -wal
+// or -shm file beside one that had none, which OpenExisting's read-only open would leave.
+func TestCheckRefusesWhatOpenRefusesAndWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Check(t.Context(), path); err != nil {
+		t.Fatalf("a current database: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("Check changed the database: err %v", err)
+	}
+	if entries, readErr := os.ReadDir(dir); readErr != nil || len(entries) != 1 {
+		t.Fatalf("Check left files beside the database: %v, err %v", entries, readErr)
+	}
+
+	newer, err := store.Open(t.Context(), filepath.Join(dir, "newer.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = newer.ExecContext(t.Context(), `PRAGMA user_version = 99`)
+	newer.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := sql.Open("sqlite", filepath.Join(dir, "other.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = other.ExecContext(t.Context(), `CREATE TABLE notes (body TEXT)`)
+	other.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not a database, just some text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"newer.db": "newer than this binary knows", "other.db": "not a Derbent database", "notes.txt": "not a database", "none.db": "none.db",
+	} {
+		if err = store.Check(t.Context(), filepath.Join(dir, name)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", name, err, want)
+		}
+	}
+}
+
 // Deciding an approval writes, but a mistyped path must fail and name itself rather than create an
 // empty database where nothing is ever pending.
 func TestOpenExistingWritableNeedsTheFile(t *testing.T) {

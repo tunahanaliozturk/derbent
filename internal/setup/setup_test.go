@@ -3,6 +3,7 @@ package setup
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -356,5 +357,66 @@ func TestVersionBefore(t *testing.T) {
 		if got := VersionBefore(tc.v, "2.1.139"); got != tc.want {
 			t.Errorf("VersionBefore(%s, 2.1.139) = %v, want %v", tc.v, got, tc.want)
 		}
+	}
+}
+
+// A hook carries its group's matcher, and only none, "", "*" or ".*" gates every tool. Codex's
+// config.toml takes the Windows command as command_windows or commandWindows (developers.openai.com/codex/hooks).
+func TestHooksCarryTheMatcherAndCodexsWindowsCommand(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.toml")
+	const text = `[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "echo hi"
+command_windows = "derbent gate --agent codex"
+
+[[hooks.PreToolUse]]
+
+[[hooks.PreToolUse.hooks]]
+command = "echo hi"
+commandWindows = "derbent gate --agent codex"
+`
+	if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hooks, err := Hooks("codex", Paths{MCP: file, Hook: file})
+	if err != nil || len(hooks) != 2 {
+		t.Fatalf("hooks %+v, err %v", hooks, err)
+	}
+	onWindows := runtime.GOOS == "windows"
+	if hooks[0].Matcher != "^Bash$" || hooks[0].GatesEveryTool() || hooks[1].Matcher != "" || !hooks[1].GatesEveryTool() ||
+		hooks[0].RunsGate() != onWindows || hooks[1].RunsGate() != onWindows {
+		t.Errorf("hooks %+v; want the matchers carried, and the gate on Windows only", hooks)
+	}
+	for _, m := range []string{"", "*", ".*"} {
+		if !(Entry{Matcher: m}).GatesEveryTool() {
+			t.Errorf("matcher %q does not gate every tool", m)
+		}
+	}
+}
+
+// A derbent gate hook that matches only some tools is not set up, and init adds no second hook beside
+// it: Plan says to widen it.
+func TestPlanRefusesAHookThatGatesOnlySomeTools(t *testing.T) {
+	dir := t.TempDir()
+	p := Paths{MCP: filepath.Join(dir, ".claude.json"), Hook: filepath.Join(dir, "settings.json")}
+	narrow := `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "derbent", "args": ["gate", "--agent", "claude"]}]}]}}`
+	if err := os.WriteFile(p.Hook, []byte(narrow), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changes, _, err := Plan("claude", p, "/usr/local/bin/derbent")
+	if !errors.Is(err, ErrNarrowHook) || len(changes) != 0 || !strings.Contains(err.Error(), `set its matcher to "*"`) {
+		t.Fatalf("changes %d, err %v; want ErrNarrowHook saying to widen it", len(changes), err)
+	}
+	wide := strings.Replace(narrow, `[{"matcher": "Bash"`, `[{"matcher": "*", "hooks": [{"command": "derbent", "args": ["gate", "--agent", "claude"]}]}, {"matcher": "Bash"`, 1)
+	if err = os.WriteFile(p.Hook, []byte(wide), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var done []string
+	if _, done, err = Plan("claude", p, "/usr/local/bin/derbent"); err != nil || !slices.Contains(done, "hook") {
+		t.Fatalf("done %v, err %v; want the hook that gates every tool counted", done, err)
 	}
 }

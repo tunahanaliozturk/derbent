@@ -33,8 +33,9 @@ type Change struct {
 
 // Plan returns the changes that set cli up with bin, the absolute path of the derbent binary with
 // forward slashes, and names the parts already set up: the MCP entry, when cli has one named derbent,
-// and the hook, when a hook already runs derbent gate. It changes nothing. Each file edit is tried
-// against the file as it is, so a file that does not parse, or would not with the change, fails here.
+// and the hook, when a hook already runs derbent gate for every tool. Where the only gate hooks match
+// some tools, it returns ErrNarrowHook, naming one. It changes nothing. Each file edit is tried against
+// the file as it is, so a file that does not parse, or would not with the change, fails here.
 func Plan(cli string, p Paths, bin string) (changes []Change, done []string, err error) {
 	entries, err := MCPEntries(cli, p, "")
 	if err != nil {
@@ -49,10 +50,15 @@ func Plan(cli string, p Paths, bin string) (changes []Change, done []string, err
 	if err != nil {
 		return nil, nil, err
 	}
-	if slices.ContainsFunc(hooks, Entry.RunsGate) {
-		done = append(done, "hook")
-	} else {
+	gates := slices.DeleteFunc(hooks, func(h Entry) bool { return !h.RunsGate() })
+	switch {
+	case len(gates) == 0:
 		changes = append(changes, hookChange(cli, p, bin))
+	case !slices.ContainsFunc(gates, Entry.GatesEveryTool):
+		return nil, nil, fmt.Errorf("%w: the one in %s matches %q, so the other tools are not gated; set its matcher to %q and run derbent init again",
+			ErrNarrowHook, gates[0].File, gates[0].Matcher, EveryToolMatcher(cli))
+	default:
+		done = append(done, "hook")
 	}
 	for _, c := range changes {
 		if c.edit == nil {

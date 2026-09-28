@@ -639,6 +639,26 @@ func TestInitSkipsAClaudeCodeTooOldForExecForm(t *testing.T) {
 	}
 }
 
+// A derbent gate hook whose matcher lets only some tools through gates only those. init adds no second
+// hook beside it, changes nothing for the CLI, and says to widen the matcher.
+func TestInitSaysToWidenAHookThatGatesSomeTools(t *testing.T) {
+	home, log := scratchHome(t)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	const mine = `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "derbent", "args": ["gate", "--agent", "claude"]}]}]}}`
+	writeFile(t, settings, mine)
+	out, err := initCmd(t, "", "--yes", "--cli", "claude")
+	if err != nil || !strings.Contains(out, `claude: skipped: the derbent gate hook matches only some tools: the one in `+settings+` matches "Bash"`) ||
+		!strings.Contains(out, `set its matcher to "*"`) {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if readString(t, settings) != mine || len(backupsOf(t, settings)) != 0 {
+		t.Error("settings.json was changed or copied")
+	}
+	if _, statErr := os.Stat(log); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("a CLI command ran: %s", readString(t, log))
+	}
+}
+
 // When a change fails after others for the same CLI were made, init names what was made and where the
 // copy of each file is, so the user can finish or undo it.
 func TestInitSaysWhatWasMadeWhenAChangeFails(t *testing.T) {
