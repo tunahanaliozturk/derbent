@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -139,5 +140,33 @@ func TestServersArePinnedUnlessTheySayNot(t *testing.T) {
 	}
 	if len(cfg.Servers) != 2 || !cfg.Servers[0].Pin || cfg.Servers[1].Pin {
 		t.Fatalf("servers = %+v, want a pinned and b not", cfg.Servers)
+	}
+}
+
+// EnvNames lists the variables a config's servers take from the environment, sorted and once each,
+// without resolving them: derbent doctor checks that Codex passes each one to the gate.
+func TestEnvNamesListsEveryReferenceOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	const text = `
+[servers.github]
+command = ["github-mcp-server", "stdio"]
+env     = { TOKEN = "${env:GITHUB_TOKEN}", BOTH = "${env:B}-${env:A}" }
+
+[servers.docs]
+url     = "https://docs.example.com/mcp"
+headers = { Authorization = "Bearer ${env:DOCS_TOKEN}", X = "${env:A}" }
+
+[[rule]]
+action = "allow"
+`
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	names, err := config.EnvNames(path)
+	if err != nil || !slices.Equal(names, []string{"A", "B", "DOCS_TOKEN", "GITHUB_TOKEN"}) {
+		t.Fatalf("EnvNames = %v, %v", names, err)
+	}
+	if _, err = config.EnvNames(filepath.Join(t.TempDir(), "none.toml")); err == nil || !strings.Contains(err.Error(), "none.toml") {
+		t.Fatalf("a missing file: err = %v, want one naming it", err)
 	}
 }

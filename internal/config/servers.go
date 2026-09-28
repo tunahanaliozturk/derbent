@@ -2,12 +2,15 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"os"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 )
 
 // Server is one downstream MCP server from the config, with every ${env:NAME} reference resolved.
@@ -88,6 +91,29 @@ func servers(files map[string]serverFile, skipUnset bool) ([]Server, []string, e
 	}
 	slices.SortFunc(out, func(a, b Server) int { return strings.Compare(a.Name, b.Name) })
 	return out, secrets, nil
+}
+
+// EnvNames lists, sorted and once each, the variables that ${env:NAME} names in the env and headers of
+// the servers in the config file at path, without resolving them.
+func EnvNames(path string) ([]string, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // the path is the user's own config file
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	var f file
+	if _, err = toml.Decode(strings.TrimPrefix(string(data), "\uFEFF"), &f); err != nil {
+		return nil, fmt.Errorf("config %s: %w", path, err)
+	}
+	var names []string
+	for _, s := range f.Servers {
+		for _, v := range slices.Concat(slices.Collect(maps.Values(s.Env)), slices.Collect(maps.Values(s.Headers))) {
+			for _, m := range envRef.FindAllStringSubmatch(v, -1) {
+				names = append(names, m[1])
+			}
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names), nil
 }
 
 // expand replaces every ${env:NAME} in value and adds each resolved value to secrets. A variable that
