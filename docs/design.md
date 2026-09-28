@@ -63,7 +63,9 @@ authentication: any process running as the user could claim any name (see Securi
 **Project** is the git root of the directory the gate was started in, that directory itself when it is
 not inside a git repository, or `--project <path>`. A linked worktree counts as the repository it was
 added from, so agents working in separate worktrees of one repository share notes; a submodule is a
-project of its own.
+project of its own. The directory is resolved as git for Windows resolves it: symbolic links, and on
+Windows junctions, `subst` drives and short names, lead to the directory they name. A directory that does
+not exist yet is resolved through its nearest parent that does, so a link above it is still followed.
 
 ## Config
 
@@ -772,8 +774,9 @@ derbent/
 - Go 1.27.1, verified on go.dev on 2026-09-26. `go.mod` carries `go 1.27` and `toolchain go1.27.1`.
 - Direct dependencies, as `go.mod` pins them: the MCP Go SDK v1.8.0 (Apache-2.0, with older parts still
   MIT while the project relicenses), `modernc.org/sqlite` v1.59.0 (BSD-3-Clause), `BurntSushi/toml`
-  v1.6.0 (MIT), Bubble Tea v2.0.10, Lip Gloss v2.0.6 and `charmbracelet/x/ansi` v0.11.8 (MIT), and
-  goleak v1.3.0 (MIT) for the tests.
+  v1.6.0 (MIT), Bubble Tea v2.0.10, Lip Gloss v2.0.6 and `charmbracelet/x/ansi` v0.11.8 (MIT),
+  `golang.org/x/sys` v0.47.0 (BSD-3-Clause) for the Windows call that names a directory past its
+  junctions, and goleak v1.3.0 (MIT) for the tests.
 - `gofumpt` and `golangci-lint` v2 as build gates, with at least `errcheck`, `govet`, `staticcheck`,
   `noctx`, `errorlint`, `gosec`, `exhaustive`, `sqlclosecheck` and `rowserrcheck`.
 - `go mod tidy` leaves `go.mod` and `go.sum` unchanged, and `go test ./... -race -count=1` passes with
