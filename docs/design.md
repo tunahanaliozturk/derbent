@@ -465,11 +465,14 @@ cause. `derbent init` writes them, `derbent doctor` checks them, and a preset re
 a first config.
 
 - **Presets.** `watch`, `balanced` and `strict` are commented TOML files embedded in the binary. `watch`
-  allows and records every call. `balanced` allows reading, and asks about pushing, force flags, deleting
-  files, piping a download into a shell, infrastructure commands, writes to `.env` files and `~/.ssh`,
-  and every GitHub tool but twelve known reads. `strict` allows reading and asks about everything else.
-  Both name every CLI's built-in tools and argument keys (see Built-in tools), and say that their shell
-  patterns match text anywhere in the command and can be fooled. A preset is a file written once, not a
+  is one rule that allows and records every call, and names no tool. `balanced` allows reading, and asks
+  about pushing, `--force`, deleting files, running a downloaded script, infrastructure commands, writing
+  a `.env` file with a file tool or a shell redirect, `~/.ssh` in a file path or a shell command, text
+  typed into a running Copilot CLI shell, and every tool of a GitHub server behind Derbent but twelve
+  known reads. It names each CLI's read-only, shell and file tools and the argument keys they use (see
+  Built-in tools), and its comments say what its patterns catch, what they miss and where they catch
+  too much. `strict` allows each CLI's read-only tools, named per CLI, and the same twelve GitHub reads,
+  and asks about everything else, so it needs no argument keys. A preset is a file written once, not a
   mode: Derbent never changes it after writing it, and the user owns it (ADR 0016).
   `derbent init --preset <name>` writes it to the default config path only when no file is there, and
   `--print` prints it and writes nothing.
