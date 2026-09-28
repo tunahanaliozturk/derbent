@@ -470,12 +470,13 @@ a first config.
   files, running a downloaded script, the terraform, tofu, pulumi, kubectl and helm subcommands its
   infrastructure section lists, writing a `.env` file with a file tool or a shell redirect, `~/.ssh` in
   a file path or a shell command, text typed into a running Copilot CLI shell, and every tool of a
-  GitHub server behind Derbent but twelve known reads. It names each CLI's read-only, shell and file tools and the argument keys they
-  use (see Built-in tools), and its comments say what its patterns catch, what they miss and where they
-  catch too much. Its shell rules match text, so a command in a form they do not list, such as
-  `"git" push`, gets through; the preset says so at the top. `strict` allows Derbent's memory tools, each
-  CLI's read-only tools, named per CLI, and the same twelve GitHub reads, and asks about everything else,
-  every shell command included, so it needs no argument keys. A preset is a file written once, not a
+  GitHub server behind Derbent but twelve known reads. It names each CLI's read-only, shell and file
+  tools and the argument keys they use (see Built-in tools), and its comments say what its patterns
+  catch, what they miss and where they catch too much. Its shell rules match text, so a command in a form
+  they do not list, such as `"git" push`, gets through; the preset says so at the top. `strict` allows
+  Derbent's memory tools, each CLI's built-in tools that only read, keep notes and plans or ask the user,
+  named per CLI, and the same twelve GitHub reads, and asks about everything else, every shell command
+  included, so it needs no argument keys. A preset is a file written once, not a
   mode: Derbent never changes it after writing it, and the user owns it (ADR 0016).
   `derbent init --preset <name>` writes it to the default config path only when no file is there, and
   `--print` prints it and writes nothing.
@@ -526,11 +527,13 @@ a first config.
   checks that each program the entry and the hooks start is on `PATH` or is a regular file, executable
   outside Windows; that the hook's timeout, as set or the CLI's default (600 seconds for Claude Code and
   Codex, 30 for Copilot CLI and Antigravity CLI), is above `[approvals] timeout` in the config the hook
-  loads, its own `--config` or the default one; that both use the same `--agent`; that `--cli` is given
-  when the agent is not the CLI's name; for a Claude Code hook in exec form, that `claude --version` is
-  2.1.139 or later; and for Codex, that every `${env:NAME}` in the config its MCP entry loads is in the
-  entry's `env_vars` or `env`.
-- For Derbent, doctor checks that the config exists and loads as the hook loads it, and that the database
+  loads, its own `--config` or else the default config, whatever doctor's `--config` names; that both use
+  the same `--agent`; that `--cli` is given when the agent is not the CLI's name; for a Claude Code hook
+  in exec form, that `claude --version` is 2.1.139 or later; and for Codex, that every `${env:NAME}` in
+  the config its MCP entry loads, chosen the same way, is in the entry's `env_vars` or `env`.
+- For Derbent, doctor checks that its config, the default one or the one its `--config` names, exists and
+  loads as the hook loads it. With `--config`, the default config is checked as well once a hook, or
+  Codex's MCP entry, without a `--config` of its own is found to load it. It checks that the database
   can be written and is one Derbent can use: `store.Check` makes the checks the gate makes when it opens
   the file, so another program's file or a newer schema is a problem. A database with a `-wal` beside it
   is live, or was left so, and is opened read-only, reading the `-wal`, so pages a writer has not yet
@@ -538,10 +541,10 @@ a first config.
   no file. Where the database does not exist yet, doctor creates one file in the nearest directory on its
   path and removes it at once, to check that the database can be created there; that is the only write
   it makes. It times three starts of each hook binary with `version` and reports the middle one as a
-  note, never a problem, with what it costs when it is over 500 ms. What it cannot check is a note too:
-  the Codex trust step, a file it only looks in that does not parse, a Claude Code version it cannot read
-  or a `claude` not on `PATH`. Each line is `ok`, `problem` with its fix, or `note`, escaped, and the
-  exit status is 1 when there is a problem.
+  note, with what it costs when it is over 500 ms; a start that fails or takes over 30 seconds is a
+  problem. What it cannot check is a note too: the Codex trust step, a file it only looks in that does
+  not parse, a Claude Code version it cannot read or a `claude` not on `PATH`. Each line is `ok`,
+  `problem` with its fix, or `note`, escaped, and the exit status is 1 when there is a problem.
 
 ## Terminal UI
 
@@ -690,9 +693,10 @@ migrates it inside `BEGIN IMMEDIATE`.
   gates only some tools are skipped with the reason, and that a failed change names what was already
   made. doctor passes a setup init made, with the hook's start time as a note, and names each of 24
   planted problems, alone, with its fix; the two that need Unix file modes run only on Linux and macOS.
-  Store tests show `store.Check` refusing a newer schema, another program's SQLite file and a text file,
-  leaving a database byte for byte with no file beside it, and passing 200 checks of a database another
-  connection is writing and checkpointing.
+  With `doctor --config` naming another file, a hook and Codex's MCP entry without a `--config` of their
+  own are checked against the default config, which they load. Store tests show `store.Check` refusing
+  a newer schema, another program's SQLite file and a text file, leaving a database byte for byte with no
+  file beside it, and passing 200 checks of a database another connection is writing and checkpointing.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
@@ -857,13 +861,15 @@ and Copilot CLI read their MCP entries from it.
 `derbent init --cli claude,copilot,antigravity --preset balanced --yes` set up Claude Code 2.1.283 and
 Copilot CLI 1.0.88 through their own `mcp add` and Antigravity CLI through its files, and wrote the
 balanced preset. `derbent doctor` reported no problem and exited with status 0, with the hook's start at
-103 ms, the middle of three runs. The owner's own Claude Code, Copilot CLI and Codex files were
-unchanged. A real `claude -p` session on the owner's subscription, with no API key, loading only the
-hook settings and the MCP entry init wrote, had `git push origin main` held by the balanced preset's
-rule 48 (`*git *push*` on `command`) and denied with `derbent deny`: Claude Code blocked the call and
-gave the model Derbent's reason, `derbent: the user denied native__Bash`, and the receipt says
-`native__Bash deny user:1 refused`. Codex and Antigravity CLI were not installed, so Codex is covered by
-tests with a fake and no Antigravity CLI session ran.
+103 ms, the middle of three runs. Before-and-after hashes of the owner's Claude Code `settings.json`,
+Copilot CLI `mcp-config.json` and Codex `config.toml` and `hooks.json` matched, and the owner's
+`~/.claude.json` got no Derbent entry. A real `claude -p` session, run with the owner's real home and
+only `APPDATA` and `LOCALAPPDATA` pointing at the scratch home, on the owner's subscription with no API
+key, loading only the hook settings and the MCP entry init wrote, had `git push origin main` held by the
+balanced preset's rule 48 (`*git *push*` on `command`) and denied with `derbent deny`: Claude Code
+blocked the call and gave the model Derbent's reason, `derbent: the user denied native__Bash`, and the
+receipt says `native__Bash deny user:1 refused`. Codex and Antigravity CLI were not installed, so Codex
+is covered by tests with a fake and no Antigravity CLI session ran.
 
 ## Later
 
@@ -933,9 +939,11 @@ Not in v1, in rough order of value:
 - Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call
   took 83.03 ms at p50, 46.91 ms of it for starting the binary; on Linux, 7.381 ms
   (`docs/benchmark-results/`).
-- An endpoint scanner can make every start of an unsigned binary slow: on one managed Windows 11 machine
-  with Microsoft Defender for Endpoint, `derbent version` took 1.8 seconds at p50. Each built-in tool call
-  then waits that long for the hook. `derbent doctor` times the hook's start on the user's own machine.
+- An endpoint scanner may slow the start of an unsigned binary. One measurement on a managed Windows 11
+  machine with Microsoft Defender for Endpoint put `derbent version` (15 MB, unsigned, run from the temp
+  directory) at 1.8 seconds at p50, while a 1.2 MB unsigned binary and signed programs started in tens of
+  milliseconds. In setup's exit check, `derbent doctor` measured 103 ms for the hook binary's start. Why
+  the two differ is not known yet. `derbent doctor` times the start on the user's own machine.
 - init and doctor follow each CLI's file layout and `mcp add` syntax as documented on 2026-09-28. A CLI
   release that moves them breaks init for that CLI until Derbent follows; doctor names what it cannot
   find.

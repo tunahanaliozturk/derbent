@@ -240,11 +240,13 @@ the config path when no file is there, and `--print` prints it instead:
 - `balanced` allows reading, and asks before pushing, `--force`, `git reset --hard`, deleting files
   (`git clean -f` and `xargs rm` too), running a download (`curl ... | sh`, `$(curl ...)`), the listed
   subcommands of terraform, tofu, pulumi, kubectl and helm, such as `terraform apply` and
-  `kubectl delete`, writing a `.env` file, `~/.ssh` in a path or a command, and every tool of a GitHub
-  server behind Derbent that is not a known read. Its shell rules match text, so a command in a form
-  they do not list, such as `"git" push`, gets through until Derbent parses shell commands; the file's
-  own comments say what each pattern catches and misses.
-- `strict` allows reading and Derbent's memory tools, and asks about everything else, every shell
+  `kubectl delete`, writing a `.env` file with a file tool or a shell redirect, `~/.ssh` in a path or a
+  command, and every tool of a GitHub server behind Derbent that is not a known read. Its shell rules
+  match text, so a command in a form they do not list, such as `"git" push`, gets through until Derbent
+  parses shell commands; the file's own comments say what each pattern catches and misses.
+- `strict` allows reading, the built-in tools that keep notes and plans or ask you a question (such as
+  Claude Code's `TodoWrite`, `ExitPlanMode` and `AskUserQuestion`), Derbent's memory tools and the
+  twelve known read tools of a GitHub server behind Derbent, and asks about everything else, every shell
   command included.
 
 Derbent writes the preset once and never changes it; it is yours to edit
