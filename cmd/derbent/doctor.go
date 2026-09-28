@@ -10,12 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/setup"
+	"github.com/tunahanaliozturk/derbent/internal/store"
 	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
@@ -23,6 +25,9 @@ var errDoctorFound = errors.New("doctor: found a problem")
 
 // slowStart is the hook start above which doctor says what it costs (docs/backlog.md item 1).
 const slowStart = 500 * time.Millisecond
+
+// hookStartLimit is how long one start of the hook's binary may take before doctor stops it.
+var hookStartLimit = 30 * time.Second
 
 // report writes doctor's lines: ok, problem with its fix, or note, each escaped, since most values come
 // from files other programs and agents can write.
@@ -43,6 +48,14 @@ func (r *report) note(format string, args ...any) { r.line("note", format, args.
 func (r *report) problem(fix, format string, args ...any) {
 	r.problems++
 	r.line("problem", "%s; fix: %s", fmt.Sprintf(format, args...), fix)
+}
+
+// derbentConfig is a config doctor checked: its path, the approval timeout the hooks must stay above,
+// and the ${env:NAME} variables Codex has to pass on.
+type derbentConfig struct {
+	path      string
+	approvals time.Duration
+	envNames  []string
 }
 
 // runDoctor reads each CLI's config and Derbent's own, and names what is wrong with the fix. It writes
@@ -67,18 +80,17 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return fmt.Errorf("find working directory: %w", err)
 	}
 	r := &report{w: stdout}
-	approvals, envNames := checkConfig(r, *configPath)
-	checkDatabase(r)
+	global := checkConfig(r, "derbent", "the config", *configPath)
+	checkDatabase(ctx, r)
 	if len(clis) == 0 {
 		r.note("no CLI found: claude, codex and copilot are not on PATH, and ~/.gemini/config does not exist; name the CLIs to check with --cli")
 	}
 	var bins []string
 	for _, cli := range clis {
-		if cli == "claude" {
-			checkClaudeVersion(ctx, r)
-		}
-		if bin := checkCLI(r, cli, dir, approvals, envNames); bin != "" && !slices.Contains(bins, bin) {
-			bins = append(bins, bin)
+		for _, bin := range checkCLI(ctx, r, cli, dir, global) {
+			if !slices.Contains(bins, bin) {
+				bins = append(bins, bin)
+			}
 		}
 	}
 	for _, bin := range bins {
@@ -90,29 +102,34 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	return nil
 }
 
-// checkConfig checks Derbent's own config, loaded as the hook loads it, and returns the approval timeout
-// the hooks must stay above and the ${env:NAME} variables Codex has to pass on.
-func checkConfig(r *report, named string) (time.Duration, []string) {
+// checkConfig checks the config at named, or with named "" the default file, loaded as the hook loads
+// it, and returns what the hooks and Codex's MCP entry are checked against. who and what name it in each
+// line: "derbent" and "the config", or a CLI and the flag that names the file.
+func checkConfig(r *report, who, what, named string) derbentConfig {
 	cfg, path, missing, err := loadConfig(named, config.LoadForHook)
+	checked := derbentConfig{path: path, approvals: config.DefaultApprovalTimeout}
 	switch {
 	case missing:
-		r.problem("derbent init --preset balanced, or watch or strict", "derbent: no config at %s, so every call is allowed", path)
-		return config.DefaultApprovalTimeout, nil
+		r.problem("derbent init --preset balanced, or watch or strict", "%s: no config at %s, so every call is allowed", who, path)
+		return checked
+	case errors.Is(err, fs.ErrNotExist):
+		r.problem("create it, or name your config", "%s: %s names %s, which does not exist", who, what, path)
+		return checked
 	case err != nil:
-		r.problem("edit the file; derbent config check shows the same error", "derbent: the config does not load: %v", err)
-		return config.DefaultApprovalTimeout, nil
+		r.problem("edit the file; derbent config check --config <file> shows the same error", "%s: %s does not load: %v", who, what, err)
+		return checked
 	}
-	r.ok("derbent: config %s: %d rules, approvals time out after %s", path, cfg.Rules.Len(), cfg.ApprovalTimeout)
-	names, err := config.EnvNames(path)
-	if err != nil {
-		r.problem("edit the file", "derbent: %v", err)
+	r.ok("%s: %s %s: %d rules, approvals time out after %s", who, what, path, cfg.Rules.Len(), cfg.ApprovalTimeout)
+	checked.approvals = cfg.ApprovalTimeout
+	if checked.envNames, err = config.EnvNames(path); err != nil {
+		r.problem("edit the file", "%s: %v", who, err)
 	}
-	return cfg.ApprovalTimeout, names
+	return checked
 }
 
-// checkDatabase checks, without writing, that the database can be written, or created where it does not
-// exist yet.
-func checkDatabase(r *report) {
+// checkDatabase checks, without leaving a trace, that the database can be written and is one Derbent
+// can use, or that it can be created where it does not exist yet.
+func checkDatabase(ctx context.Context, r *report) {
 	path, err := databasePath("")
 	if err != nil {
 		r.problem("set LOCALAPPDATA on Windows, or HOME elsewhere", "derbent: %v", err)
@@ -122,6 +139,10 @@ func checkDatabase(r *report) {
 	switch {
 	case err == nil:
 		f.Close()
+		if err = store.Check(ctx, path); err != nil {
+			r.problem("move the file aside if it is not Derbent's, or upgrade derbent if its schema is newer", "derbent: database %s cannot be used: %v", path, err)
+			return
+		}
 		r.ok("derbent: database %s can be written", path)
 		return
 	case !errors.Is(err, fs.ErrNotExist):
@@ -132,7 +153,7 @@ func checkDatabase(r *report) {
 		info, statErr := os.Stat(dir)
 		switch {
 		case statErr == nil && info.IsDir():
-			r.ok("derbent: database %s does not exist yet; the first call creates it", path)
+			checkCanCreate(r, dir, path)
 			return
 		case statErr == nil || !errors.Is(statErr, fs.ErrNotExist):
 			r.problem("remove or rename it", "derbent: %s is in the way of the database %s", dir, path)
@@ -142,6 +163,22 @@ func checkDatabase(r *report) {
 			return
 		}
 	}
+}
+
+// checkCanCreate checks that the user can create the database path, or the directories on its way, in
+// dir, the nearest directory on its path that exists: it creates a file there and removes it at once.
+func checkCanCreate(r *report, dir, path string) {
+	f, err := os.CreateTemp(dir, ".derbent-doctor-*")
+	if err != nil {
+		r.problem("give your user write access to "+dir, "derbent: cannot create the database %s: %v", path, err)
+		return
+	}
+	f.Close()
+	if err = os.Remove(f.Name()); err != nil {
+		r.problem("remove it", "derbent: could not remove %s, which doctor made to check that %s can be written: %v", f.Name(), dir, err)
+		return
+	}
+	r.ok("derbent: database %s does not exist yet; the first call creates it", path)
 }
 
 // checkClaudeVersion checks that the claude on PATH passes a hook its args, as the exec-form hook init
@@ -164,43 +201,101 @@ func checkClaudeVersion(ctx context.Context, r *report) {
 	}
 }
 
-// checkCLI checks one CLI's hook and MCP entry against each other and against Derbent's config, and
-// returns the binary the hook starts, for timing, or "" when there is none to time.
-func checkCLI(r *report, cli, dir string, approvals time.Duration, envNames []string) string {
+// checkCLI checks one CLI's hooks and MCP entries against each other and against Derbent's config, and
+// returns the binaries its gate hooks start, for timing.
+func checkCLI(ctx context.Context, r *report, cli, dir string, global derbentConfig) []string {
 	p, err := setup.PathsOf(cli)
 	if err != nil {
 		r.problem("set HOME, or USERPROFILE on Windows", "%s: %v", cli, err)
-		return ""
+		return nil
 	}
 	entries, err := setup.MCPEntries(cli, p, dir)
 	if err != nil {
 		r.problem("fix the file, or restore it from its .derbent-backup copy", "%s: %v", cli, err)
-		return ""
+		return nil
 	}
 	hooks, err := setup.Hooks(cli, p)
 	if err != nil {
 		r.problem("fix the file, or restore it from its .derbent-backup copy", "%s: %v", cli, err)
-		return ""
+		return nil
 	}
 	for _, file := range setup.Unchecked(cli, p) {
 		r.note("%s: %s does not parse as JSON, so doctor did not check it for a derbent gate hook; if it holds one, the gate may run twice or be reported missing", cli, file)
 	}
-	fix := "derbent init --cli " + cli
 
-	var hook setup.Entry
+	gates := slices.DeleteFunc(hooks, func(h setup.Entry) bool { return !h.RunsGate() })
 	server := "derbent"
-	if at := slices.IndexFunc(hooks, setup.Entry.RunsGate); at >= 0 {
-		hook = hooks[at]
-		r.ok("%s: the hook in %s runs %s", cli, hook.File, strings.Join(hook.Words(), " "))
-		if s, ok := hook.Flag("--server"); ok {
+	switch len(gates) {
+	case 0:
+		r.problem("derbent init --cli "+cli, "%s: no pre-tool hook runs derbent gate, so its built-in tools are not gated", cli)
+	case 1:
+	default:
+		files := make([]string, len(gates))
+		for i, h := range gates {
+			files[i] = h.File
+		}
+		r.problem("keep one of them", "%s: %d hooks run derbent gate, in %s, so every call is decided twice", cli, len(gates), strings.Join(files, ", "))
+	}
+	if len(gates) > 0 {
+		if s, ok := gates[0].Flag("--server"); ok {
 			server = s
 		}
-	} else {
-		r.problem(fix, "%s: no pre-tool hook runs derbent gate, so its built-in tools are not gated", cli)
+	}
+	entry := checkEntries(r, cli, entries, server, len(gates) > 0)
+
+	for _, e := range append([]setup.Entry{entry}, gates...) {
+		if e.Command == "" {
+			continue
+		}
+		if why := cannotStart(e.Program()); why != "" {
+			r.problem("run derbent init again after removing the entry, or correct the path in "+e.File, "%s: %s names %s, %s", cli, e.File, e.Program(), why)
+		}
+	}
+	if cli == "claude" && slices.ContainsFunc(gates, func(h setup.Entry) bool { return !h.Shell }) {
+		checkClaudeVersion(ctx, r) // an older Claude Code starts an exec-form hook without its args
+	}
+	if cli == "codex" && len(gates) > 0 {
+		r.note("codex: Codex runs a new hook only after you trust it in /hooks")
 	}
 
+	var bins []string
+	for _, h := range gates {
+		checkHook(r, cli, h, entry, global)
+		if cannotStart(h.Program()) == "" {
+			bins = append(bins, h.Program())
+		}
+	}
+	if cli == "codex" && entry.Command != "" {
+		cfg := global
+		if named, ok := entry.Flag("--config"); ok {
+			cfg = checkConfig(r, cli, "the MCP entry's --config", named)
+		}
+		var missing []string
+		for _, name := range cfg.envNames {
+			if !slices.Contains(entry.EnvVars, name) {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			r.problem(`add env_vars = ["`+strings.Join(missing, `", "`)+`"] to [mcp_servers.`+entry.Name+"] in "+entry.File,
+				"codex: Derbent's config %s uses ${env:%s}, which Codex does not pass to the gate, so the gate does not start", cfg.path, strings.Join(missing, "}, ${env:"))
+		}
+	}
+	return bins
+}
+
+// checkEntries finds the MCP entry of cli that runs derbent mcp and returns it, or an empty entry when
+// there is none to check the hooks against. It is the entry named server, the later of two where Claude
+// Code has one at user and one at local scope, since Claude Code uses the local one. With a gate hook,
+// any other entry that runs derbent mcp is a problem: the hook skips only the tools of server.
+func checkEntries(r *report, cli string, entries []setup.Entry, server string, hooked bool) setup.Entry {
 	var entry setup.Entry
-	at := slices.IndexFunc(entries, func(e setup.Entry) bool { return e.Name == server })
+	at := -1
+	for i, e := range entries {
+		if e.Name == server {
+			at = i
+		}
+	}
 	other := slices.IndexFunc(entries, setup.Entry.RunsMCP)
 	switch {
 	case at >= 0 && entries[at].RunsMCP():
@@ -208,73 +303,84 @@ func checkCLI(r *report, cli, dir string, approvals time.Duration, envNames []st
 		r.ok("%s: the MCP entry %s runs %s", cli, entry.Name, strings.Join(entry.Words(), " "))
 	case at >= 0:
 		r.problem("point it at derbent mcp --agent "+cli+", or give it another name", "%s: the MCP entry %s runs %s, not derbent mcp", cli, server, strings.Join(entries[at].Words(), " "))
-	case other >= 0 && hook.Command != "":
-		r.problem("rename the entry to "+server+", or add --server "+entries[other].Name+" to the hook",
-			"%s: the MCP entry %s runs derbent mcp, but the hook skips only the entry named %s, so each call to Derbent's own tools is decided and recorded twice", cli, entries[other].Name, server)
-	case other >= 0:
+	case other >= 0 && !hooked:
 		entry = entries[other]
 		r.ok("%s: the MCP entry %s runs %s", cli, entry.Name, strings.Join(entry.Words(), " "))
-	default:
-		r.problem(fix, "%s: no MCP entry runs derbent mcp", cli)
+	case other < 0:
+		r.problem("derbent init --cli "+cli, "%s: no MCP entry runs derbent mcp", cli)
 	}
-
-	for _, e := range []setup.Entry{entry, hook} {
-		if e.Command != "" && !startable(e.Program()) {
-			r.problem("run derbent init again after removing the entry, or correct the path in "+e.File, "%s: %s names %s, which does not exist", cli, e.File, e.Program())
+	if !hooked {
+		return entry
+	}
+	for _, e := range entries {
+		if e.Name == server || !e.RunsMCP() {
+			continue
 		}
+		fix := "remove the entry " + e.Name
+		if entry.Command == "" {
+			fix = "rename the entry to " + server + ", or add --server " + e.Name + " to the hook"
+		}
+		r.problem(fix, "%s: the MCP entry %s runs derbent mcp, but the hook skips only the entry named %s, so each call to Derbent's own tools is decided and recorded twice", cli, e.Name, server)
 	}
-	if hook.Command == "" {
-		return ""
-	}
+	return entry
+}
 
-	timeout := hook.Timeout
+// checkHook checks one gate hook of cli: that it runs for every tool, that its timeout is above the
+// approval timeout of the config it loads, its --config or the global one, and that its agent matches
+// the MCP entry's and the CLI's hook protocol.
+func checkHook(r *report, cli string, h, entry setup.Entry, global derbentConfig) {
+	r.ok("%s: the hook in %s runs %s", cli, h.File, strings.Join(h.Words(), " "))
+	if !h.GatesEveryTool() {
+		r.problem(fmt.Sprintf("set its matcher to %q", setup.EveryToolMatcher(cli)), "%s: the hook in %s matches only %q, so the other tools are not gated", cli, h.File, h.Matcher)
+	}
+	cfg := global
+	if named, ok := h.Flag("--config"); ok {
+		cfg = checkConfig(r, cli, "the hook's --config", named)
+	}
+	timeout := h.Timeout
 	if timeout == 0 {
 		timeout = setup.DefaultTimeout[cli]
 	}
-	if limit := time.Duration(timeout) * time.Second; limit <= approvals {
-		r.problem(fmt.Sprintf("set the hook's timeout above %s, such as %d seconds", approvals, max(setup.HookTimeout, int(approvals.Seconds())+60)),
-			"%s: the hook's timeout, %s, is not above [approvals] timeout, %s: the CLI gives up on the hook while it waits for your approval, and the call goes on", cli, limit, approvals)
+	if limit := time.Duration(timeout) * time.Second; limit <= cfg.approvals {
+		r.problem(fmt.Sprintf("set the hook's timeout above %s, such as %d seconds", cfg.approvals, max(setup.HookTimeout, int(cfg.approvals.Seconds())+60)),
+			"%s: the hook's timeout, %s, is not above [approvals] timeout, %s, in %s: the CLI gives up on the hook while it waits for your approval, and the call goes on", cli, limit, cfg.approvals, cfg.path)
 	} else {
-		r.ok("%s: the hook's timeout, %s, is above [approvals] timeout, %s", cli, limit, approvals)
+		r.ok("%s: the hook's timeout, %s, is above [approvals] timeout, %s, in %s", cli, limit, cfg.approvals, cfg.path)
 	}
 
-	agent, _ := hook.Flag("--agent")
+	agent, _ := h.Flag("--agent")
 	if mcpAgent, _ := entry.Flag("--agent"); entry.Command != "" && mcpAgent != agent {
 		r.problem("use the same --agent in both", "%s: the hook says --agent %s and the MCP entry --agent %s, so the rules and grants see two agents", cli, agent, mcpAgent)
 	}
-	switch protocol, hasCLI := hook.Flag("--cli"); {
+	switch protocol, hasCLI := h.Flag("--cli"); {
 	case agent == "":
 		r.problem("add --agent "+cli+" to the hook", "%s: the hook passes no --agent, so it denies every call", cli)
 	case agent != cli && (!hasCLI || protocol != cli):
 		r.problem("add --cli "+cli+" to the hook", "%s: the hook's --agent %s is not the CLI's name, so it needs --cli %s to speak the CLI's hook protocol", cli, agent, cli)
 	}
-
-	if cli == "codex" && entry.Command != "" {
-		var missing []string
-		for _, name := range envNames {
-			if !slices.Contains(entry.EnvVars, name) {
-				missing = append(missing, name)
-			}
-		}
-		if len(missing) > 0 {
-			r.problem(`add env_vars = ["`+strings.Join(missing, `", "`)+`"] to [mcp_servers.`+entry.Name+"] in "+entry.File,
-				"codex: Derbent's config uses ${env:%s}, which Codex does not pass to the gate, so the gate does not start", strings.Join(missing, "}, ${env:"))
-		}
-	}
-	if !startable(hook.Program()) {
-		return ""
-	}
-	return hook.Program()
 }
 
-// startable reports whether program can be started: a path that exists, or a bare name on PATH.
-func startable(program string) bool {
-	if strings.ContainsAny(program, `/\`) {
-		_, err := os.Stat(program)
-		return err == nil
+// cannotStart says why program cannot be started, or "" when it can: a path must name a regular file,
+// executable outside Windows, and a bare name must be on PATH.
+func cannotStart(program string) string {
+	if !strings.ContainsAny(program, `/\`) {
+		if _, err := exec.LookPath(program); err != nil {
+			return "which is not on PATH"
+		}
+		return ""
 	}
-	_, err := exec.LookPath(program)
-	return err == nil
+	info, err := os.Stat(program)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "which does not exist"
+	case err != nil:
+		return "which cannot be read: " + err.Error()
+	case !info.Mode().IsRegular():
+		return "which is not a file"
+	case runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0:
+		return "which is not executable"
+	}
+	return ""
 }
 
 // timeHookStart starts bin with version three times and notes the middle time: every built-in tool
@@ -283,12 +389,17 @@ func startable(program string) bool {
 func timeHookStart(ctx context.Context, r *report, bin string) {
 	times := make([]time.Duration, 0, 3)
 	for range 3 {
-		runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		runCtx, cancel := context.WithTimeout(ctx, hookStartLimit)
 		start := time.Now()
 		err := exec.CommandContext(runCtx, bin, "version").Run() //nolint:gosec // the binary the user's hook runs
 		took := time.Since(start)
+		timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded)
 		cancel()
-		if err != nil {
+		switch {
+		case err != nil && timedOut:
+			r.problem("check that "+bin+" starts, or run derbent init again", "derbent: %s version did not finish within %s", bin, hookStartLimit)
+			return
+		case err != nil:
 			r.problem("check that "+bin+" starts, or run derbent init again", "derbent: %s version did not run: %v", bin, err)
 			return
 		}
