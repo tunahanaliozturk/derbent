@@ -60,6 +60,8 @@ The first release.
   `native__<tool>`.
 - The hook loads the config without failing on an unset `${env:NAME}`, since it starts no servers and
   needs none of their secrets.
+- The hook skips a UTF-8 byte order mark at the start of its input, which a .NET program sends through
+  `Process.StandardInput` when the console input encoding is UTF-8, instead of denying every call.
 - Release binaries for Windows, Linux and macOS on amd64 and arm64, with `SHA256SUMS`. Each binary is
   built twice and published only when both builds are identical, and a clean checkout of the tag rebuilds
   the same bytes with Go 1.27.1 (see the README's Check a release).
