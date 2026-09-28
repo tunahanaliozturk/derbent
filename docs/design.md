@@ -319,19 +319,25 @@ agent reads and follows. The gate pins each downstream tool (ADR 0013).
 - `derbent pins` lists the pins with their state, `pinned` or `changed`, when each was pinned and when the
   change was seen, as rows or JSON lines. `derbent pins show <server>__<tool>` prints the pinned and the
   new definition as indented JSON with their hashes, the lines that differ and the command that accepts
-  that change, with the `--db` it was given, all escaped. The lines that differ are lined up on a longest
-  common subsequence, so a line that only moved, such as a description swapped from one property to
-  another, shows where it left and where it arrived; definitions too long to line up within 16 MiB are to
-  be compared in full. `derbent pins accept <server>__<tool> <sha256>` takes the new definition's whole
+  that change, with the `--db` it was given, all escaped. The `--db` is written so it pastes into bash,
+  PowerShell and cmd alike: as it is when it holds only letters, digits and `_ . / : -`, in double quotes
+  when it also holds spaces or single backslashes, and as `<path>` to fill in, with a line that says so,
+  when it holds any of ``" $ ` % !``, a control character, two backslashes in a row or a trailing one,
+  which one of the three would run, expand or change inside double quotes. The lines that differ are
+  lined up on a longest common subsequence, so a line that only moved, such as a description swapped from one property to another,
+  shows where it left and where it arrived; definitions too long to line up within 16 MiB are to be
+  compared in full. `derbent pins accept <server>__<tool> <sha256>` takes the new definition's whole
   hash, all 64 hex digits as `pins show` prints them, makes that definition the pin and prints its hash.
-  A prefix is refused, since a hostile server can find two
-  definitions whose hashes share a short one. When the change on record has another hash, because the
-  server changed the tool again after the review, it refuses and says to run `derbent pins show` again,
-  so what is accepted is always what was read.
+  A prefix is refused, since a hostile server can find two definitions whose hashes share a short one.
+  When the change on record has another hash, because the server changed the tool again after the
+  review, it refuses and says to run `derbent pins show` again, so what is accepted is always what was
+  read.
 - A running gate looks at its withheld tools every two seconds and serves one again once its definition
   is the pin, which the agent learns through `list_changed`. For a changed tool the watcher only reads
   the pin, and writes its own definition as the change only when none is recorded, after the user
-  accepted another, so it never replaces the recorded change and takes no write lock. A gate that lists
+  accepted another, so it never replaces the recorded change and takes no write lock. For a tool withheld
+  because its first pin check failed, the watcher checks again, pinning the tool if it has no pin, and
+  likewise records its definition only when no change is recorded and never drops one. A gate that lists
   the server's tools again, at its start, on a reconnect or after `list_changed`, does record its
   definition, and can replace a change the user is reviewing; the accept of the reviewed hash is then
   refused.

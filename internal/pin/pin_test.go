@@ -261,3 +261,34 @@ func TestConcurrentChecksPinEachToolOnce(t *testing.T) {
 		t.Fatalf("pins = %d, %v; want 3", len(list), err)
 	}
 }
+
+// A gate whose first pin check failed checks its withheld tools again from its watcher, which promises
+// never to replace the change the user is reviewing: it pins a new tool and records a change only when
+// none is recorded, as Recheck does.
+func TestCheckWithheldNeverReplacesARecordedChange(t *testing.T) {
+	s, _ := open(t)
+	for _, desc := range []string{"v1", "v3"} {
+		if _, err := s.Check(t.Context(), "github", []*mcp.Tool{tool("get_me", desc)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reviewed, err := s.Get(t.Context(), "github", "get_me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, desc := range []string{"v2", "v1"} {
+		changed, checkErr := s.CheckWithheld(t.Context(), "github", []*mcp.Tool{tool("get_me", desc)})
+		if checkErr != nil || changed["get_me"] != (desc != "v1") {
+			t.Fatalf("CheckWithheld(%s) = %v, %v", desc, changed, checkErr)
+		}
+		if p, getErr := s.Get(t.Context(), "github", "get_me"); getErr != nil || p != reviewed {
+			t.Fatalf("after CheckWithheld(%s) pin = %+v, %v; want the v3 change under review left alone", desc, p, getErr)
+		}
+	}
+	if _, err = s.CheckWithheld(t.Context(), "github", []*mcp.Tool{tool("new_one", "n1")}); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := s.Get(t.Context(), "github", "new_one"); err != nil || p.State() != pin.Pinned {
+		t.Fatalf("new tool = %+v, %v; want it pinned on first use", p, err)
+	}
+}

@@ -73,7 +73,7 @@ func (g *Gate) SyncTools(ctx context.Context, server string, tools []*mcp.Tool) 
 	}
 	// Pins are checked before the lock is taken: the check writes to the database, and a call that only
 	// needs to know which tools are served should not wait for it.
-	changed, checkErr := g.checkPins(ctx, server, servable)
+	changed, checkErr := g.checkPins(ctx, server, servable, false)
 	if checkErr != nil {
 		slog.Warn("derbent: tools withheld because their pins could not be checked", "server", server, "err", checkErr)
 	}
@@ -120,10 +120,14 @@ func (g *Gate) SyncTools(ctx context.Context, server string, tools []*mcp.Tool) 
 }
 
 // checkPins pins the server's tools on first sight and reports which changed since (ADR 0013). A gate
-// without pins, or a server with pin = false, pins nothing and reports nothing changed.
-func (g *Gate) checkPins(ctx context.Context, server string, tools []*mcp.Tool) (map[string]bool, error) {
-	if g.Pins == nil || g.Unpinned[server] {
+// without pins, or a server with pin = false, pins nothing and reports nothing changed. withheld is set
+// by the watcher for tools whose first check failed: it never replaces a recorded change.
+func (g *Gate) checkPins(ctx context.Context, server string, tools []*mcp.Tool, withheld bool) (map[string]bool, error) {
+	switch {
+	case g.Pins == nil || g.Unpinned[server]:
 		return nil, nil
+	case withheld:
+		return g.Pins.CheckWithheld(ctx, server, tools)
 	}
 	return g.Pins.Check(ctx, server, tools)
 }
@@ -184,7 +188,7 @@ func (g *Gate) recheckPins(ctx context.Context) {
 	}
 	g.mu.Unlock()
 	for server, tools := range unchecked {
-		changed, err := g.checkPins(ctx, server, tools)
+		changed, err := g.checkPins(ctx, server, tools, true)
 		if err != nil {
 			continue // still withheld; SyncTools said why when it withheld them
 		}
