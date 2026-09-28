@@ -362,9 +362,10 @@ file never loosens anything, and a grant is keyed on what the rules say, not on 
 - Only a regular file of at most 64 KiB is read, through a reader that stops one byte past the limit. A
   symbolic link, a directory, a FIFO, a device or a larger file is refused as invalid, with a reason that
   says which, since reading it could block the hook or fill its memory. The open does not wait for a
-  FIFO's writer and the type is checked again on what was opened, so a file swapped in after the check
-  is refused too. The `.git` file of a linked worktree, and the `commondir` file it leads to, are read
-  under the same limits, and one that fails them is taken as not a linked worktree.
+  FIFO's writer, and what was opened must be the file that was checked, so a FIFO, a device or a
+  symbolic link swapped in after the check is refused too. The `.git` file of a linked worktree, and the
+  `commondir` file it leads to, are read under the same limits, and one that fails them is taken as not
+  a linked worktree.
 - The file is read for each call's project and kept by path, size and modification time, so an edit takes
   effect on the next call on both paths.
 - Project rules decide calls and never change tool lists: a tool the project denies stays listed, and its
@@ -538,7 +539,8 @@ migrates it inside `BEGIN IMMEDIATE`.
   the UI's `g` and `r`, escape stored text in rows and JSON lines, and show on the MCP gate and on the
   hook, the latter through the real binary, that the call after a revoke asks again.
 - **Budgets.** Rule tests check which budgets apply and when each is used up, with calls inside and
-  outside the window, other tools and other agents, and the wait until the next call. A receipt test
+  outside the window, other tools and other agents, and the wait until the next call, which with two
+  budgets used up is the longer one. A receipt test
   counts the calls in a window that starts in the middle of a second. Gate tests show a budget refusing
   the call after its limit on both paths, counting calls from other gates of the same agent, refusing an
   asked call without writing an approval, and leaving a deny to its rule.
@@ -559,13 +561,21 @@ migrates it inside `BEGIN IMMEDIATE`.
   loosening one, the user's rule named on a tie, an invalid file denying every call, an edit taking effect
   on the next call, a grant keyed on both lists asking again after an edit to either, and a denied tool
   still listed. End-to-end tests run `derbent gate` under a `.derbent.toml` and approve its call from
-  another process.
+  another process. Config tests read only a regular file of at most 64 KiB, refusing a directory, a
+  larger file and a symbolic link, and on Linux and macOS a FIFO, without blocking, also one that takes
+  the file's place after the check; a unit test refuses a file other than the one checked, as a link
+  swapped in would be. They follow neither a `.git` file over 64 KiB nor a FIFO, and give a directory
+  that does not exist yet, below a symbolic link to a repository, the repository's own key and root.
+  End-to-end tests show the hook asking under a linked worktree's own `.derbent.toml` while the main
+  checkout has none, and denying under the file of a worktree of a bare repository.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
   while a writer holds them, runs `verify`, `receipts` and `pending` on the copy, and finds both files
-  unchanged. `approve`, `deny`, the UI, `derbent mcp` and `derbent gate` refuse another program's SQLite
-  file and leave it unchanged, and a store test opens one with `store.Open` and finds it refused.
+  unchanged. `pending` and `grants`, as rows and as JSON lines, read databases built from the real
+  migrations at schemas 3 to 5, from before the approvals recorded which list asked. `approve`, `deny`,
+  the UI, `derbent mcp` and `derbent gate` refuse another program's SQLite file and leave it unchanged,
+  and a store test opens one with `store.Open` and finds it refused.
 - **Escaping.** A test feeds the UI escape sequences, a clipboard write, a bell, a bidirectional
   override and invisible characters in the agent, tool and argument fields, and asserts that none reaches
   the main screen, the detail view or the memory browser raw and no line is wider than the window.

@@ -49,7 +49,8 @@ func checkoutRoot(dir string) (root string, gitFile bool, err error) {
 	root = resolve(abs)
 	for d := root; ; d = filepath.Dir(d) {
 		if fi, statErr := os.Stat(filepath.Join(d, ".git")); statErr == nil {
-			return filepath.Clean(d), !fi.IsDir(), nil
+			// d exists, so it resolves even when dir, below it, does not exist yet.
+			return filepath.Clean(resolve(d)), !fi.IsDir(), nil
 		}
 		if filepath.Dir(d) == d {
 			return filepath.Clean(root), false, nil
@@ -142,7 +143,7 @@ func (p *ProjectRules) Load() (rule.Set, error) {
 	if p.read && fi.Size() == p.size && fi.ModTime().Equal(p.mod) {
 		return p.set, p.err
 	}
-	data, err := readSmallFile(p.path)
+	data, err := readSmallFile(p.path, fi)
 	if err != nil {
 		return rule.Set{}, fmt.Errorf("project rules %s: %w; every call in this project is refused until it can be read", p.path, err)
 	}
@@ -201,22 +202,23 @@ func checkSmallFile(fi fs.FileInfo) error {
 	return nil
 }
 
-// readSmallFile reads a file that checkSmallFile accepted. A file replaced since the check is refused
-// unless it is still a regular file: the open does not wait for a FIFO's writer (O_NONBLOCK, which
-// Windows ignores), and the type is checked again on what was opened. It reads at most one byte past
-// the limit, so a file that grew since the check is refused rather than read whole.
-func readSmallFile(path string) ([]byte, error) {
+// readSmallFile reads the file at path that os.Lstat reported as checked and checkSmallFile accepted.
+// What was opened must be that same file, so a FIFO, a device or a symbolic link swapped in since the
+// check is refused rather than read: the open does not wait for a FIFO's writer (O_NONBLOCK, which
+// Windows ignores), and a link's target is another file. It reads at most one byte past the limit, so a
+// file that grew since the check is refused rather than read whole.
+func readSmallFile(path string, checked fs.FileInfo) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // a rules or .git file that checkSmallFile accepted
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	fi, err := f.Stat()
+	opened, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
-	if !fi.Mode().IsRegular() {
-		return nil, errors.New("it is not a regular file")
+	if !os.SameFile(checked, opened) {
+		return nil, errors.New("the file changed while it was being read")
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxSmallFile+1))
 	if err != nil {
@@ -237,7 +239,7 @@ func lstatAndReadSmallFile(path string) ([]byte, error) {
 	if err = checkSmallFile(fi); err != nil {
 		return nil, err
 	}
-	return readSmallFile(path)
+	return readSmallFile(path, fi)
 }
 
 // resolve expands symbolic links and Windows short names, and keeps the path as it is when that fails.

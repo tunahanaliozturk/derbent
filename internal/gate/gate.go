@@ -257,8 +257,8 @@ func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isO
 		}
 		return settled{by: v.by, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, v.rule)}
 	}
-	// A deny stays a deny. Otherwise a used-up budget refuses the call without asking the user, so an
-	// agent stuck in a loop never floods the approval queue (ADR 0012).
+	// A deny stays a deny. Otherwise a used-up budget refuses the call without asking the user: once the
+	// calls an agent stuck in a loop had let through use it up, its further calls stop here (ADR 0012).
 	if s, over := g.overBudget(ctx, name); over {
 		return s
 	}
