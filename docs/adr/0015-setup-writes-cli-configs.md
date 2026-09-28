@@ -18,13 +18,18 @@ user, is often edited by hand, and in Claude Code's case is rewritten by the CLI
   CLI's `mcp_config.json`, for which there is no command. It adds the hook by editing the file each CLI
   reads user hooks from. Where a CLI documents a variable that moves its files, init follows it.
 - It never replaces or removes an entry. An MCP entry named `derbent`, or a hook that runs
-  `derbent gate` in any form, counts as set up and is left alone.
+  `derbent gate` in any form and in any user-level file the CLI reads hooks from (Codex's `hooks.json`
+  as well as `config.toml`, Antigravity CLI's `settings.json` as well as `hooks.json`), counts as set up
+  and is left alone.
 - It shows every change, asks once, and copies each file that exists before its first change. JSON is
   decoded and written back; Codex's TOML is appended to as text, never re-encoded, and only when the file
   and the result both parse. A file that does not parse is left as it is.
 - The binary is written as the running binary's absolute path, never a bare `derbent`, in the form each
   field is read: exec form for Claude Code, `& "<path>"` in PowerShell, a double-quoted word elsewhere
-  when the path needs one. A path that some shell would read even inside double quotes is refused.
+  when the path needs one. A path that some shell would read even inside double quotes is refused, and
+  so is one holding `&`, `^`, `|`, `<` or `>`, which cmd.exe reads in the unquoted argument Go passes to a
+  CLI installed as a `.cmd` shim.
+- A Claude Code older than the exec form is not set up: init says to upgrade it instead.
 - `derbent doctor` reads the same files, checks what init writes and the mistakes init cannot prevent,
   and writes nothing.
 
@@ -35,4 +40,7 @@ user, is often edited by hand, and in Claude Code's case is rewritten by the CLI
   original.
 - init follows each CLI's file layout and `mcp add` syntax, which change between releases. They were
   checked against each CLI's documentation on 2026-09-28, and doctor names what no longer matches.
-- Claude Code's exec-form hook needs Claude Code 2.1.139 or later.
+- Claude Code's exec-form hook needs Claude Code 2.1.139 or later; an older one would start derbent
+  with no arguments. init reads `claude --version` and skips an older Claude Code, and goes on with a
+  note when the version cannot be read.
+- Codex skips a new hook until the user trusts it in `/hooks`; init says so.

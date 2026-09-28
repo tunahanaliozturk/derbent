@@ -17,6 +17,8 @@ import (
 	"unicode"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
 // Change is one change init makes: a file it edits, or the CLI's own command it runs.
@@ -150,14 +152,18 @@ func NewFile(file, text string) Change {
 	}}
 }
 
-// Apply makes the change. A command runs with the CLI's output passed on to stdout and stderr. A file
-// is read again, edited and written back; a missing file is created, with its directory, readable by
-// the user only, and an existing one keeps its permissions.
+// Apply makes the change. A command runs with the CLI's output passed on to stdout and stderr once it
+// ends, each line escaped. A file is read again, edited and written back; a missing file is created,
+// with its directory, readable by the user only, and an existing one keeps its permissions.
 func (c Change) Apply(ctx context.Context, stdout, stderr io.Writer) error {
 	if c.Run != nil {
 		cmd := exec.CommandContext(ctx, c.Run[0], c.Run[1:]...) //nolint:gosec // the CLI's own mcp add, shown to the user before it runs
-		cmd.Stdout, cmd.Stderr = stdout, stderr
-		if err := cmd.Run(); err != nil {
+		var out, errOut bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errOut
+		err := cmd.Run()
+		writeEscaped(stdout, out.String())
+		writeEscaped(stderr, errOut.String())
+		if err != nil {
 			return fmt.Errorf("%s: %w", strings.Join(c.Run[:3], " "), err)
 		}
 		return nil
@@ -177,6 +183,18 @@ func (c Change) Apply(ctx context.Context, stdout, stderr io.Writer) error {
 		return fmt.Errorf("write %s: %w", c.File, err)
 	}
 	return nil
+}
+
+// writeEscaped writes a CLI's output line by line, each line escaped, so the CLI cannot move the cursor
+// or hide text on the user's terminal.
+func writeEscaped(w io.Writer, out string) {
+	out = strings.TrimRight(out, "\r\n")
+	if out == "" {
+		return
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fmt.Fprintln(w, visible.Escape(strings.TrimSuffix(line, "\r")))
+	}
 }
 
 // Backup copies file, when it exists, to BackupName(file, now), created new and readable by the user
@@ -230,11 +248,12 @@ func AppendTOML(file string, old []byte, text string) ([]byte, error) {
 }
 
 // ShellWord is bin as one word of a command line: as it is when it holds only letters, digits and
-// / . _ - : + ~ @ , =, which no shell reads specially, and otherwise in double quotes, which sh, bash,
-// cmd.exe and PowerShell all read as one word. CheckBinary refuses what double quotes cannot hold.
+// / . _ - : + ~ @, which no shell reads specially, and otherwise in double quotes, which sh, bash,
+// cmd.exe and PowerShell all read as one word. cmd.exe, which runs Codex's hooks on Windows, also splits
+// words at , and =, so those are quoted too. CheckBinary refuses what double quotes cannot hold.
 func ShellWord(bin string) string {
 	special := strings.IndexFunc(bin, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("/._-:+~@,=", r)
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("/._-:+~@", r)
 	})
 	if special < 0 && bin != "" {
 		return bin
@@ -243,11 +262,14 @@ func ShellWord(bin string) string {
 }
 
 // CheckBinary refuses a binary path that some shell reads even inside double quotes: one that holds ",
-// $, `, %, ! or a control character.
+// $, `, %, ! or a control character. It also refuses &, ^, |, < and >: a CLI installed as a .cmd shim,
+// as npm installs them, runs through cmd.exe, and Go quotes an argument for it only when the argument
+// holds a space, so cmd.exe would end the command at & or drop a ^, and the CLI would register a path
+// that does not exist.
 func CheckBinary(bin string) error {
 	for _, r := range bin {
-		if strings.ContainsRune("\"$`%!", r) || unicode.IsControl(r) {
-			return fmt.Errorf("the derbent binary's path %q holds %q, which a shell reads even inside quotes: move the binary to a plain path and run derbent init again", bin, r)
+		if strings.ContainsRune("\"$`%!&^|<>", r) || unicode.IsControl(r) {
+			return fmt.Errorf("the derbent binary's path %q holds %q, which a shell reads specially: move the binary to a plain path and run derbent init again", bin, r)
 		}
 	}
 	return nil

@@ -106,6 +106,8 @@ func TestShellWordAndCheckBinary(t *testing.T) {
 		"C:/Program Files/Derbent/derbent.exe": `"C:/Program Files/Derbent/derbent.exe"`,
 		"C:/Program Files (x86)/derbent.exe":   `"C:/Program Files (x86)/derbent.exe"`,
 		"C:/Users/O'Brien/derbent.exe":         `"C:/Users/O'Brien/derbent.exe"`,
+		"C:/Users/ada/a,b/derbent.exe":         `"C:/Users/ada/a,b/derbent.exe"`, // cmd.exe splits words at , and =
+		"C:/Users/ada/a=b/derbent.exe":         `"C:/Users/ada/a=b/derbent.exe"`,
 	} {
 		if got := ShellWord(in); got != want {
 			t.Errorf("ShellWord(%q) = %q, want %q", in, got, want)
@@ -114,7 +116,12 @@ func TestShellWordAndCheckBinary(t *testing.T) {
 			t.Errorf("CheckBinary(%q) = %v, want nil", in, err)
 		}
 	}
-	for _, bad := range []string{`C:/a"b/derbent.exe`, "/home/$USER/derbent", "C:/100%/derbent.exe", "/tmp/wow!/derbent", "/tmp/`x`/derbent", "/tmp/a\nb/derbent"} {
+	// The last five break the command line Go hands cmd.exe for a CLI installed as a .cmd shim, which it
+	// quotes only when an argument holds a space.
+	for _, bad := range []string{
+		`C:/a"b/derbent.exe`, "/home/$USER/derbent", "C:/100%/derbent.exe", "/tmp/wow!/derbent", "/tmp/`x`/derbent", "/tmp/a\nb/derbent",
+		"C:/Users/R&D/bin/derbent.exe", "C:/a^b/derbent.exe", "/tmp/a|b/derbent", "/tmp/a<b/derbent", "/tmp/a>b/derbent",
+	} {
 		if err := CheckBinary(bad); err == nil {
 			t.Errorf("CheckBinary(%q) = nil, want it refused", bad)
 		}
@@ -277,5 +284,47 @@ func TestClaudeLocalScopeIsKeyedByTheDirectory(t *testing.T) {
 	}
 	if !slices.Equal(names, []string{"derbent", "gate"}) {
 		t.Fatalf("entries = %v, want derbent and gate", names)
+	}
+}
+
+// Hooks also reads the other user-level files the CLI takes hooks from: Codex's hooks.json beside
+// config.toml, and Antigravity CLI's settings.json, whose hooks may be named or listed by event.
+func TestHooksReadTheCLIsOtherUserFiles(t *testing.T) {
+	dir := t.TempDir()
+	codex := Paths{MCP: filepath.Join(dir, "codex", "config.toml"), Hook: filepath.Join(dir, "codex", "config.toml")}
+	write := func(file, text string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(dir, "codex", "hooks.json"), `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "derbent gate --agent codex"}]}]}}`)
+	ag := Paths{Hook: filepath.Join(dir, "gemini", "config", "hooks.json")}
+	settings := filepath.Join(dir, "gemini", "antigravity-cli", "settings.json")
+	for _, text := range []string{
+		`{"model": "x", "hooks": {"mine": {"PreToolUse": [{"hooks": [{"command": "derbent gate --agent antigravity"}]}]}}}`,
+		`{"hooks": {"PreToolUse": [{"hooks": [{"command": "derbent gate --agent antigravity"}]}]}}`,
+	} {
+		write(settings, text)
+		for cli, p := range map[string]Paths{"codex": codex, "antigravity": ag} {
+			hooks, err := Hooks(cli, p)
+			if err != nil || len(hooks) != 1 || !hooks[0].RunsGate() {
+				t.Errorf("%s with %s: hooks %+v, err %v; want the gate", cli, text, hooks, err)
+			}
+		}
+	}
+}
+
+func TestVersionBefore(t *testing.T) {
+	for _, tc := range []struct {
+		v    string
+		want bool
+	}{{"2.1.138", true}, {"2.0.999", true}, {"1.9.200", true}, {"2.1.139", false}, {"2.1.283", false}, {"2.2.0", false}, {"10.0.0", false}} {
+		if got := VersionBefore(tc.v, "2.1.139"); got != tc.want {
+			t.Errorf("VersionBefore(%s, 2.1.139) = %v, want %v", tc.v, got, tc.want)
+		}
 	}
 }
