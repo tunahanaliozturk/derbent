@@ -68,6 +68,24 @@ The first release.
 - Benchmarks of what the gate adds to an MCP call and what a hook call costs, with results from GitHub's
   Linux and Windows runners in
   [docs/benchmark-results](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/benchmark-results/README.md).
+- `derbent init` sets Claude Code, Codex, GitHub Copilot CLI and Antigravity CLI up with Derbent's MCP
+  entry and pre-tool hook: through each CLI's own `mcp add` where it has one, and by editing the hook
+  files, with the binary's absolute path. It shows every change, asks once, copies each file first, and
+  never replaces an entry you have, a `derbent gate` hook in Codex's `hooks.json` or Antigravity CLI's
+  `settings.json` included; a gate hook that matches only some tools is left for you to widen, with no
+  second hook added. It skips a Claude Code older than 2.1.139, which the exec-form hook needs, refuses a
+  binary path that a shell would read specially, and when a change fails, names the changes already
+  made and their copies. `--dry-run` shows the changes and makes none
+  ([ADR 0015](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0015-setup-writes-cli-configs.md)).
+- Rule presets: `derbent init --preset watch|balanced|strict` writes a commented first config when you
+  have none, and `--print` shows one. Derbent never changes it afterwards
+  ([ADR 0016](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0016-presets-are-files.md)).
+- `derbent doctor` checks each CLI's hooks and MCP entries against each other and against Derbent's
+  config: every `derbent gate` hook (two in one CLI is a problem) and its matcher, names, `--agent`,
+  `--cli`, `--server`, a hook's own `--config`, the programs they start, hook timeouts, Codex's
+  `env_vars`, Claude Code's local-scope entry and, for an exec-form hook, its version. It checks the
+  config, and that the database is Derbent's, no newer than the binary, and can be written or created.
+  It times the hook's start, names each problem with its fix, and changes no file.
 
 ### Security
 

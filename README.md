@@ -64,6 +64,31 @@ Then compare `dist/SHA256SUMS` with the `SHA256SUMS` published with the release.
 
 ## Quick start
 
+```bash
+derbent init --preset balanced
+derbent doctor
+```
+
+`derbent init` finds Claude Code, Codex, GitHub Copilot CLI and Antigravity CLI and gives each the two
+entries it needs: Derbent as an MCP server, and `derbent gate` as its pre-tool hook, both with `--agent`
+set to the CLI's name. It shows every change and asks once before making any, and copies each file it
+changes to `<file>.derbent-backup-<time>` first. It never replaces an entry you already have: an MCP
+entry named `derbent`, or a hook that runs `derbent gate`, stays as it is, and when your `derbent gate`
+hook matches only some tools, such as `Bash`, init changes nothing for that CLI and says to widen the
+matcher. `--cli claude,codex` picks the CLIs, `--dry-run` only shows the changes, and `--yes` skips the
+question. `--preset balanced` also writes a first config when you have none (see [Rules](#rules)).
+`derbent doctor` then reads each CLI's entries, Derbent's config and its database, names each problem
+with its fix, exits with status 1 when it found one, and leaves every file as it was
+([ADR 0015](docs/adr/0015-setup-writes-cli-configs.md)).
+
+The entries point at the absolute path of the `derbent` you ran. init refuses a path that holds a
+character some shell reads specially, such as `$`, `%` or `&`, and if you move the binary later, correct
+the path in each entry, or remove the entries and run init again; `derbent doctor` names a path that is
+gone. Claude Code's hook is written in exec form, which needs Claude Code 2.1.139 or later: init skips an
+older one and says to upgrade it. Codex asks you once, in `/hooks`, to trust a new hook before it runs it.
+
+### By hand
+
 Each CLI needs two entries: Derbent as an MCP server, and `derbent gate` as its pre-tool hook. `--agent`
 is the name your rules match, so give both entries the same one. Agent names are lower-case letters,
 digits, dashes and underscores.
@@ -71,7 +96,7 @@ digits, dashes and underscores.
 **Claude Code**
 
 ```bash
-claude mcp add derbent -- derbent mcp --agent claude
+claude mcp add --scope user derbent -- derbent mcp --agent claude
 ```
 
 and in `~/.claude/settings.json`:
@@ -207,6 +232,23 @@ never an `allow`.
 
 The file is read strictly: an unknown key is an error that names the key, and a syntax error names its
 line. A `derbent mcp` gate reads the file when its CLI starts it; the hook reads it on every call.
+
+Three presets give a first config instead of a blank page. `derbent init --preset <name>` writes one to
+the config path when no file is there, and `--print` prints it instead:
+
+- `watch` allows and records every call, for the first days, to see what your agents do.
+- `balanced` allows reading, and asks before pushing, `--force`, `git reset --hard`, deleting files
+  (`git clean -f` and `xargs rm` too), running a download (`curl ... | sh`, `$(curl ...)`), the listed
+  subcommands of terraform, tofu, pulumi, kubectl and helm, such as `terraform apply` and
+  `kubectl delete`, writing a `.env` file, `~/.ssh` in a path or a command, and every tool of a GitHub
+  server behind Derbent that is not a known read. Its shell
+  rules match text, so a command in a form they do not list, such as `"git" push`, gets through until
+  Derbent parses shell commands; the file's own comments say what each pattern catches and misses.
+- `strict` allows reading and Derbent's memory tools, and asks about everything else, every shell
+  command included.
+
+Derbent writes the preset once and never changes it; it is yours to edit
+([ADR 0016](docs/adr/0016-presets-are-files.md)).
 
 ## Project rules
 
@@ -551,6 +593,8 @@ each claim is tested. Every decision someone could reasonably have made differen
 | [0012](docs/adr/0012-budgets.md) | Budgets count receipts, every matching budget applies, and a used-up budget refuses without asking. |
 | [0013](docs/adr/0013-tool-pins.md) | Downstream tools are pinned on first use, and a changed tool is withheld until you accept it. |
 | [0014](docs/adr/0014-project-rules.md) | Project rules can only tighten your rules and never change tool listings. |
+| [0015](docs/adr/0015-setup-writes-cli-configs.md) | Setup adds MCP entries through each CLI's own `mcp add` and edits hook files, never replacing an entry, with copies first. |
+| [0016](docs/adr/0016-presets-are-files.md) | Presets are files written once and owned by you, never a mode Derbent keeps. |
 
 Changes are listed in the [changelog](CHANGELOG.md). To build, test or send a change, see
 [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
