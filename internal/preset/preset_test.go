@@ -204,6 +204,30 @@ func TestPresetsDecideTheSampleCalls(t *testing.T) {
 		{"native__run_command", map[string]any{"CommandLine": "git checkout main -- src/"}, allow, ask, ask},
 		{"native__Bash", map[string]any{"command": "git reset -q --hard"}, allow, ask, ask},
 		{"native__Bash", map[string]any{"command": "git checkout main"}, allow, allow, ask},
+
+		// A kubectl or helm subcommand must stand as a word, so reads whose resource or flag holds one
+		// stay allowed; options before it, and delete or uninstall at the end after xargs, still ask.
+		{"native__Bash", map[string]any{"command": "kubectl get daemonset -A"}, allow, allow, ask},
+		{"native__run_command", map[string]any{"CommandLine": "kubectl get statefulset -n db"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "kubectl describe statefulset postgres"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "kubectl get replicaset -l app=web"}, allow, allow, ask},
+		{"native__run_command", map[string]any{"CommandLine": "kubectl logs -n kube-system deploy/cluster-autoscaler"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "kubectl get scaledobjects -A"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "kubectl describe horizontalpodautoscaler web"}, allow, allow, ask},
+		{"native__run_command", map[string]any{"CommandLine": "kubectl get pods -n credit"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "kubectl logs deploy/dispatcher"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "kubectl logs deploy/delete-worker"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "helm template cm jetstack/cert-manager --set installCRDs=true"}, allow, allow, ask},
+		{"native__run_command", map[string]any{"CommandLine": "cd deploy/helm && npm install"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "pulumi preview --suppress-outputs"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "cd infra/pulumi && npm run setup"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "pip install pulumi --upgrade"}, allow, allow, ask},
+		{"native__Bash", map[string]any{"command": "kubectl -n prod scale deploy web --replicas=0"}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "helm -n x install web ./chart"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "kubectl get pods -o name | xargs kubectl delete"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "helm list -q | xargs helm uninstall"}, allow, ask, ask},
+		{"native__Bash", map[string]any{"command": "pulumi up"}, allow, ask, ask},
+		{"native__run_command", map[string]any{"CommandLine": "pulumi destroy"}, allow, ask, ask},
 	} {
 		for name, want := range map[string]rule.Action{"watch": tc.watch, "balanced": tc.balanced, "strict": tc.strict} {
 			if got := sets[name].Decide("claude", tc.tool, tc.args).Action; got != want {

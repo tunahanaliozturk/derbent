@@ -620,21 +620,26 @@ action = "ask"
 # Infrastructure. These subcommands ask, also with options before them (`kubectl -n prod delete`):
 #   terraform  apply, destroy (and every other terraform command, through `*rm *` above)
 #   tofu       apply, destroy, import, taint
-#   pulumi     up, destroy, refresh, import
+#   pulumi     up (and update), destroy, refresh, import
 #   kubectl    apply, delete, create, replace, patch, edit, scale, set, drain, rollout restart,
 #              rollout undo
 #   helm       install, upgrade, rollback, uninstall, delete, del
-# The terraform rules still catch `terraform.exe apply`, and keep apply and destroy asking if you
-# narrow the delete rule. Reads such as `kubectl get`, `kubectl describe`, `kubectl logs`,
-# `helm list` and `helm template` are allowed; they are not named in an allow rule, because a
-# pattern allow above these asks would let `kubectl get x && kubectl delete y` through. Not caught:
-# every subcommand the list leaves out, such as `kubectl cordon`, `kubectl label`,
-# `kubectl annotate`, `kubectl expose`, `helm repo remove` or `helm push`. These also ask about more
-# than they name: `*terraform*apply*` about `git apply` in a terraform/ directory; `*pulumi*up*` about
-# any pulumi command with "up" in it, such as `pulumi preview --suppress-outputs`, about anything
-# after a path that holds "pulumi", such as `cd infra/pulumi && npm run setup`, and about
-# `pip install pulumi --upgrade`; `*kubectl *create*` about `kubectl create --dry-run=client`; and
-# `*helm *del *` about a helm command with a word that ends in "del" before a space.
+# A kubectl or helm subcommand must stand as a word, with a space before and after it
+# (`*kubectl* scale *`), so `kubectl get statefulset`, `kubectl get scaledobjects` and
+# `helm template --set installCRDs=true` stay allowed; delete, uninstall and del also ask as the last
+# word, as in `xargs kubectl delete`. A tofu or pulumi subcommand needs a space before it only, so a
+# bare `pulumi up` asks. The terraform rules still catch `terraform.exe apply`, and keep apply and
+# destroy asking if you narrow the delete rule. Reads such as `kubectl get`, `kubectl describe`,
+# `kubectl logs`, `helm list` and `helm template` are allowed; they are not named in an allow rule,
+# because a pattern allow above these asks would let `kubectl get x && kubectl delete y` through.
+# Not caught: every subcommand the list leaves out, such as `kubectl cordon`, `kubectl label`,
+# `kubectl annotate`, `kubectl expose`, `helm repo remove` or `helm push`; a subcommand split by an
+# option, as in `kubectl rollout -n prod restart deploy/web`; and one of the others as the last word.
+# These also ask about more than they name: the subcommand as a word anywhere after the program
+# name, as in `helm diff upgrade web ./chart`, `kubectl create --dry-run=client`, or a later
+# ` install ` after a path that holds "helm" (`cd deploy/helm && npm install express`);
+# `*terraform*apply*` about `git apply` in a terraform/ directory; and `*pulumi* up*` about a later
+# word that starts with "up" after "pulumi" (`cd infra/pulumi && npm update`).
 [[rule]]
 tool   = "native__*"
 args   = { command = "*terraform*apply*" }
@@ -657,252 +662,292 @@ action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*tofu*apply*" }
+args   = { command = "*tofu* apply*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*tofu*apply*" }
+args   = { CommandLine = "*tofu* apply*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*tofu*destroy*" }
+args   = { command = "*tofu* destroy*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*tofu*destroy*" }
+args   = { CommandLine = "*tofu* destroy*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*pulumi*up*" }
+args   = { command = "*tofu* import*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*pulumi*up*" }
+args   = { CommandLine = "*tofu* import*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*pulumi*destroy*" }
+args   = { command = "*tofu* taint*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*pulumi*destroy*" }
+args   = { CommandLine = "*tofu* taint*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *delete*" }
+args   = { command = "*pulumi* up*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *delete*" }
+args   = { CommandLine = "*pulumi* up*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *apply*" }
+args   = { command = "*pulumi* destroy*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *apply*" }
+args   = { CommandLine = "*pulumi* destroy*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*helm *uninstall*" }
+args   = { command = "*pulumi* refresh*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*helm *uninstall*" }
+args   = { CommandLine = "*pulumi* refresh*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*helm *delete*" }
+args   = { command = "*pulumi* import*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*helm *delete*" }
+args   = { CommandLine = "*pulumi* import*" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*helm *del *" }
+args   = { command = "*kubectl* apply *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*helm *del *" }
+args   = { CommandLine = "*kubectl* apply *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*helm *install*" }
+args   = { command = "*kubectl* delete *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*helm *install*" }
+args   = { CommandLine = "*kubectl* delete *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*helm *upgrade*" }
+args   = { command = "*kubectl* delete" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*helm *upgrade*" }
+args   = { CommandLine = "*kubectl* delete" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*helm *rollback*" }
+args   = { command = "*kubectl* create *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*helm *rollback*" }
+args   = { CommandLine = "*kubectl* create *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *create*" }
+args   = { command = "*kubectl* replace *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *create*" }
+args   = { CommandLine = "*kubectl* replace *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *replace*" }
+args   = { command = "*kubectl* patch *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *replace*" }
+args   = { CommandLine = "*kubectl* patch *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *patch*" }
+args   = { command = "*kubectl* edit *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *patch*" }
+args   = { CommandLine = "*kubectl* edit *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *edit*" }
+args   = { command = "*kubectl* scale *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *edit*" }
+args   = { CommandLine = "*kubectl* scale *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *scale*" }
+args   = { command = "*kubectl* set *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *scale*" }
+args   = { CommandLine = "*kubectl* set *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *set *" }
+args   = { command = "*kubectl* drain *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *set *" }
+args   = { CommandLine = "*kubectl* drain *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *drain*" }
+args   = { command = "*kubectl* rollout restart *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *drain*" }
+args   = { CommandLine = "*kubectl* rollout restart *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *rollout restart*" }
+args   = { command = "*kubectl* rollout undo *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *rollout restart*" }
+args   = { CommandLine = "*kubectl* rollout undo *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*kubectl *rollout undo*" }
+args   = { command = "*helm* install *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*kubectl *rollout undo*" }
+args   = { CommandLine = "*helm* install *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*pulumi*refresh*" }
+args   = { command = "*helm* upgrade *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*pulumi*refresh*" }
+args   = { CommandLine = "*helm* upgrade *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*pulumi*import*" }
+args   = { command = "*helm* rollback *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*pulumi*import*" }
+args   = { CommandLine = "*helm* rollback *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*tofu*import*" }
+args   = { command = "*helm* uninstall *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*tofu*import*" }
+args   = { CommandLine = "*helm* uninstall *" }
 action = "ask"
 
 [[rule]]
 tool   = "native__*"
-args   = { command = "*tofu*taint*" }
+args   = { command = "*helm* uninstall" }
 action = "ask"
 
 [[rule]]
 tool   = "native__run_command"
-args   = { CommandLine = "*tofu*taint*" }
+args   = { CommandLine = "*helm* uninstall" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm* delete *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm* delete *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm* delete" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm* delete" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm* del *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm* del *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm* del" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm* del" }
 action = "ask"
 
 # --- The GitHub MCP server, when it sits behind Derbent as [servers.github]: twelve read tools known
