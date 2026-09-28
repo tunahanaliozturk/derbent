@@ -345,3 +345,35 @@ func TestProjectKeyResolvesALinkAboveAMissingDirectory(t *testing.T) {
 		t.Errorf("CheckoutRoot %q, want %q (%v)", got, want, rerr)
 	}
 }
+
+// TOML matches keys to fields ignoring case and keeps one of two spellings at random, so a rule with both
+// action and ACTION would decide differently from call to call. A rules file takes each key only as
+// written.
+func TestProjectRulesTakeKeysOnlyAsWritten(t *testing.T) {
+	for name, text := range map[string]string{
+		"action twice": "[[rule]]\naction = \"deny\"\nACTION = \"allow\"\n",
+		"rule twice":   "[[rule]]\naction = \"deny\"\n[[Rule]]\naction = \"ask\"\n",
+		"Action alone": "[[rule]]\nAction = \"deny\"\n",
+	} {
+		if _, err := config.ParseProjectRules("p.toml", text); err == nil || !strings.Contains(err.Error(), "only [[rule]] tables") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	set, err := config.ParseProjectRules("p.toml", "[[rule]]\ntool = \"x\"\nargs = { Path = \"a*\", path = \"b*\" }\naction = \"deny\"\n")
+	if err != nil {
+		t.Fatalf("argument names that differ in case: %v", err)
+	}
+	if d := set.Decide("claude", "x", map[string]any{"Path": "a1", "path": "b1"}); d.Rule != 1 {
+		t.Fatalf("args Path and path = %+v, want both matched as written", d)
+	}
+}
+
+// The reason a broken rules file gives reaches the agent and the CLI, so what the file wrote in it is
+// escaped like any other text from a repository.
+func TestAProjectRulesErrorIsEscaped(t *testing.T) {
+	const override = rune(0x202e) // right-to-left override
+	_, err := config.ParseProjectRules("p.toml", "\"a"+string(override)+"b\" = 1\n")
+	if err == nil || strings.ContainsRune(err.Error(), override) || !strings.Contains(err.Error(), "a\\"+"u202eb") {
+		t.Fatalf("err = %q, want the override escaped", err)
+	}
+}

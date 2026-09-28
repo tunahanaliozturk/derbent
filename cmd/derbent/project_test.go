@@ -24,7 +24,8 @@ func writeProjectFile(t *testing.T, dir, rules string) {
 }
 
 // The milestone's evidence for project rules through the real binary: a .derbent.toml makes a call ask
-// that the user's rules allow, pending and approve name the project rule, and the approval lets it run.
+// that the user's rules allow, pending and approve name the project rule, and the approval lets it run
+// with no decision, as the user's rules alone would give, so the CLI's own permission settings apply.
 func TestAProjectRuleAsksThroughTheHookAndItsApprovalNamesIt(t *testing.T) {
 	dir := t.TempDir()
 	writeAllowConfig(t, dir)
@@ -49,8 +50,8 @@ func TestAProjectRuleAsksThroughTheHookAndItsApprovalNamesIt(t *testing.T) {
 	}
 	select {
 	case out := <-done:
-		if !strings.Contains(out, `"permissionDecision":"allow"`) {
-			t.Fatalf("approved call answered %q", out)
+		if out != "" {
+			t.Fatalf("approved call answered %q, want nothing", out)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("the approved hook call did not return")

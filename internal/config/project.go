@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/tunahanaliozturk/derbent/internal/rule"
+	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
 // CheckoutRoot returns the root of the checkout that contains dir: the nearest directory at or above
@@ -80,22 +82,32 @@ const ProjectRulesFile = ".derbent.toml"
 // from a directory an agent may control.
 const maxSmallFile = 64 << 10
 
+// ruleKeys are the keys a project's [[rule]] table may hold.
+var ruleKeys = []string{"agent", "tool", "args", "action"}
+
 // ParseProjectRules decodes a project's rules file, which may hold [[rule]] tables and nothing else.
 // name only appears in error messages.
 func ParseProjectRules(name, text string) (rule.Set, error) {
 	var f struct {
 		Rules []rule.Spec `toml:"rule"`
 	}
+	// The reason reaches the agent and the CLI, so text the file wrote is escaped.
 	md, err := toml.Decode(text, &f)
 	if err != nil {
-		return rule.Set{}, fmt.Errorf("project rules %s: %w", name, err)
+		return rule.Set{}, fmt.Errorf("project rules %s: %s", name, visible.Escape(err.Error()))
 	}
-	if undecoded := md.Undecoded(); len(undecoded) > 0 {
-		keys := make([]string, len(undecoded))
-		for i, k := range undecoded {
-			keys[i] = k.String()
+	// A key is taken only as written. toml also fills a field from a key that differs from it only in
+	// case, and of action and ACTION keeps one at random. Under args any name goes: args is a map, which
+	// keeps names as written.
+	var found []string
+	for _, k := range md.Keys() {
+		if k[0] != "rule" || len(k) > 1 && !slices.Contains(ruleKeys, k[1]) {
+			found = append(found, visible.Escape(k.String()))
 		}
-		return rule.Set{}, fmt.Errorf("project rules %s: only [[rule]] tables are allowed, found %s", name, strings.Join(keys, ", "))
+	}
+	if len(found) > 0 {
+		return rule.Set{}, fmt.Errorf("project rules %s: only [[rule]] tables are allowed, with the keys agent, tool, args and action, found %s",
+			name, strings.Join(found, ", "))
 	}
 	set, err := rule.CompileProject(f.Rules)
 	if err != nil {

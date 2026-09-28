@@ -185,7 +185,7 @@ func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest
 // settled is how the gate answered a call before it runs.
 type settled struct {
 	allow bool
-	user  bool   // the call is allowed because the user approved it, now or earlier in the session
+	user  bool   // the user approved the call, now or earlier in the session, and the user's rules alone would not have allowed it
 	by    string // what decided: rule:<n>, project:<n>, budget:<n>, pin, gate, user:<id>, grant:<id>, timeout:<id> or withdrawn:<id>
 	text  string // what the agent is told when the call is refused
 	err   error  // set when the agent gave up while the call waited
@@ -201,6 +201,9 @@ type verdict struct {
 	rule    int
 	project bool   // the project's rules set the action
 	key     string // what a session grant for the call is keyed on; "" when no grant may cover it
+	// userAllows is set when the user's rules alone allow the call. An approval of a call only the
+	// project asked about then answers as those rules would, so the project never loosens them.
+	userAllows bool
 }
 
 // judge decides a call with the user's rules and then the project's (ADR 0014). The stricter action
@@ -214,7 +217,7 @@ func (g *Gate) judge(name string, args map[string]any) (verdict, error) {
 		return verdict{action: rule.Allow, by: "rule:0"}, nil
 	}
 	d := g.Rules.Decide(g.Agent, name, args)
-	v := verdict{action: d.Action, by: "rule:" + strconv.Itoa(d.Rule), rule: d.Rule, key: g.Rules.Key(d.Rule)}
+	v := verdict{action: d.Action, by: "rule:" + strconv.Itoa(d.Rule), rule: d.Rule, key: g.Rules.Key(d.Rule), userAllows: d.Action == rule.Allow}
 	unread := d.Unread
 	if g.ProjectRules != nil {
 		set, err := g.ProjectRules.Load()
@@ -308,7 +311,7 @@ func (g *Gate) ask(ctx context.Context, name, redacted string, v verdict) settle
 		return settled{by: v.by, text: name + " needs the user's approval, which could not be checked: " + err.Error()}
 	}
 	if granted {
-		return settled{allow: true, user: true, by: "grant:" + strconv.FormatInt(id, 10)}
+		return settled{allow: true, user: !v.userAllows, by: "grant:" + strconv.FormatInt(id, 10)}
 	}
 	// A gate told to stop asks nothing more: the call never waits, so the gate itself refuses it.
 	stopping := settled{by: "gate", text: name + " was refused because the gate is stopping; it did not run"}
@@ -341,7 +344,7 @@ func (g *Gate) ask(ctx context.Context, name, redacted string, v verdict) settle
 	case err != nil:
 		return settled{by: v.by, text: name + " needs the user's approval, which could not be asked for: " + err.Error()}
 	case out.Approved:
-		return settled{allow: true, user: true, by: "user:" + ref}
+		return settled{allow: true, user: !v.userAllows, by: "user:" + ref}
 	case out.By == approval.ByTimeout:
 		return settled{by: "timeout:" + ref, text: fmt.Sprintf("%s needs the user's approval and none came within %s, so it was denied. "+
 			"Try again and ask the user to approve it in the derbent UI while it waits.", name, g.ApprovalTimeout)}

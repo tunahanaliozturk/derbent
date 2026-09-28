@@ -63,6 +63,9 @@ func hookDecidedBy(t *testing.T, e *env) []string {
 	return by
 }
 
+// Once the user approves a call that only the project asked about, the hook answers as the user's rules
+// alone would, with no decision, so the CLI's own permission settings still apply: an explicit allow
+// would skip them, which is looser than the user's rules without the project.
 func TestAProjectRuleCanMakeACallAsk(t *testing.T) {
 	e := newEnv(t)
 	g := projectGate(t, e, projectDir(t, askGitStatus))
@@ -77,8 +80,8 @@ func TestAProjectRuleCanMakeACallAsk(t *testing.T) {
 	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveOnce); err != nil {
 		t.Fatal(err)
 	}
-	if ans := awaitHook(t, done); ans.Verdict != gate.Allowed {
-		t.Fatalf("answer = %+v", ans)
+	if ans := awaitHook(t, done); ans.Verdict != gate.NoDecision {
+		t.Fatalf("answer = %+v, want no decision, as the user's allow rule gives", ans)
 	}
 	if by := hookDecidedBy(t, e); !slices.Equal(by, []string{"rule:1", fmt.Sprintf("user:%d", p.ID)}) {
 		t.Fatalf("decided_by = %v", by)
@@ -190,7 +193,7 @@ func TestAProjectGrantIsKeyedOnBothRuleLists(t *testing.T) {
 	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveSession); err != nil {
 		t.Fatal(err)
 	}
-	if ans := awaitHook(t, done); ans.Verdict != gate.Allowed {
+	if ans := awaitHook(t, done); ans.Verdict != gate.NoDecision {
 		t.Fatalf("first call = %+v", ans)
 	}
 	hook := func(command string, specs ...rule.Spec) gate.HookAnswer {
@@ -202,7 +205,7 @@ func TestAProjectGrantIsKeyedOnBothRuleLists(t *testing.T) {
 	asked := func(ans gate.HookAnswer) bool {
 		return ans.Verdict == gate.Denied && strings.Contains(ans.Reason, "none came within")
 	}
-	if ans := hook("git status --short", allow); ans.Verdict != gate.Allowed {
+	if ans := hook("git status --short", allow); ans.Verdict != gate.NoDecision {
 		t.Fatalf("under the same rules = %+v, want the grant to hold", ans)
 	}
 	writeProjectRules(t, dir, "[[rule]]\ntool = \"native__Read\"\naction = \"ask\"\n\n"+askGitStatus)
@@ -210,11 +213,31 @@ func TestAProjectGrantIsKeyedOnBothRuleLists(t *testing.T) {
 		t.Fatalf("with a project rule added above = %+v, want it asked about again", ans)
 	}
 	writeProjectRules(t, dir, askGitStatus)
-	if ans := hook("git status", allow); ans.Verdict != gate.Allowed {
+	if ans := hook("git status", allow); ans.Verdict != gate.NoDecision {
 		t.Fatalf("with the project edit undone = %+v, want the grant again", ans)
 	}
 	if ans := hook("git status", rule.Spec{Tool: "native__Read", Action: rule.Ask}, allow); !asked(ans) {
 		t.Fatalf("with a user rule added above = %+v, want it asked about again", ans)
+	}
+	if by := hookDecidedBy(t, e); by[0] != fmt.Sprintf("user:%d", p.ID) || by[1] != fmt.Sprintf("grant:%d", p.ID) {
+		t.Fatalf("decided_by = %v, want the approval and the grant named", by)
+	}
+}
+
+// When the user's own rules ask too, an approval answers allow, as it does without a project file.
+func TestAnApprovalTheUsersRulesAskedForAnswersAllow(t *testing.T) {
+	e := newEnv(t)
+	g := projectGate(t, e, projectDir(t, askGitStatus), rule.Spec{Tool: "native__Bash", Action: rule.Ask}, rule.Spec{Action: rule.Allow})
+	done := hookAsync(t, g, `{"command":"git status"}`)
+	p := waitPending(t, e.approvals)
+	if p.ProjectRule {
+		t.Fatalf("pending = %+v, want the user's rule named on the tie", p)
+	}
+	if err := e.approvals.Decide(t.Context(), p.ID, approval.ApproveOnce); err != nil {
+		t.Fatal(err)
+	}
+	if ans := awaitHook(t, done); ans.Verdict != gate.Allowed {
+		t.Fatalf("answer = %+v, want allow", ans)
 	}
 }
 
