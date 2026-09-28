@@ -27,10 +27,12 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
-// TestMain lets the end-to-end tests start this test binary as the derbent command, or as a small
-// MCP server standing in for a user's downstream server.
+// TestMain lets the end-to-end tests start this test binary as the derbent command, as a small MCP
+// server standing in for a user's downstream server, or as a fake claude, codex or copilot command.
 func TestMain(m *testing.M) {
 	switch {
+	case fakeCLIName() != "":
+		os.Exit(runFakeCLI(fakeCLIName(), os.Args[1:]))
 	case os.Getenv("DERBENT_TEST_ECHO") == "1":
 		serveEcho()
 	case os.Getenv("DERBENT_TEST_HANG") == "1":
