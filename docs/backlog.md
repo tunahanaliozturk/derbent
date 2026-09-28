@@ -61,7 +61,7 @@ and a signed one of 99 MB starts in about 50 ms. The p90 near 11 seconds looks l
 running into its timeout, 10 seconds by default; that is a guess and has not been checked.
 
 The hook starts one process per built-in tool call, so on such a machine every shell command and file
-edit can wait between 1.4 and 11 seconds. GitHub's Windows runner took 46.87 ms for the same start (README,
+edit can wait between 1.4 and 11 seconds. GitHub's Windows runner took 46.91 ms for the same start (README,
 Overhead), so CI does not show this.
 
 - Run the same measurement on a Windows machine with only the default Defender, to learn whether managed
@@ -148,10 +148,12 @@ Rules name tools, and a new server brings new names. A `class` condition would m
 
 ### 8. Secrets on the way out
 
-A value from `${env:...}` or a match of a `[receipts] redact` pattern is masked in the receipt, but the
-call still carries it to the tool. The same matchers could feed the decision: a condition such as
-`secret = true` would match a call whose arguments hold one, so an `ask` or a `deny` stops an agent that
-pastes a token into an issue body. It reuses `internal/redact`.
+A value from `${env:...}` of at least eight characters, or a match of a `[receipts] redact` pattern, is
+masked in the receipt, but the call still carries it to the tool. The same matchers could feed the
+decision: a condition such as `secret = true` would match a call whose arguments hold one, so an `ask` or
+a `deny` stops an agent that pastes a token into an issue body. It reuses `internal/redact`, and with it
+the eight-character floor, below which a value would match ordinary text; a shorter secret needs a
+`redact` pattern to be caught.
 
 ### 9. Taint for the rest of a session
 
@@ -160,8 +162,11 @@ data out is the dangerous combination. A condition such as `after = "native__Web
 once the same session has a receipt for a matching tool, so pushing, posting or fetching asks from then
 on. It reads receipts by agent, session and time the way budgets do (ADR 0012), so every gate process and
 the hook share it. The MCP gate and the hook have different session ids (see Built-in tools in
-design.md), so taint crosses from one path to the other only by agent and time. With item 7, `after`
-could name a class: `after = { class = "network" }`.
+design.md), so a session can only taint itself on one path: a web page read through an MCP tool would not
+make a later shell command ask. Falling back to agent and time would cross that gap, but would also taint
+every other session running under the same agent label at the time. Which of the two to take, or a key
+both paths share for one CLI session, is open. With item 7, `after` could name a class:
+`after = { class = "network" }`.
 
 ## Response
 
@@ -249,7 +254,7 @@ Rewrites were considered on 2026-09-28 and not taken; ADR 0010 stands.
 
 - **Rust.** The one cost that looked like Go's, the Windows hook start, is the scanner (item 1). A Rust
   hook with SQLite, TOML and regular expressions would likely still be larger than 1.2 MB, the largest
-  unsigned size measured without the cost. On Linux the hook adds about 2 ms to starting the binary
+  unsigned size measured without the cost. On Linux the hook adds about 3 ms to starting the binary
   (README, Overhead). Go is memory safe, and the parts that decide safety are rules and fail-closed paths
   that a rewrite would have to prove again.
 - **TypeScript and Python.** A signed interpreter starts fast on the managed machine (item 1), but that is
