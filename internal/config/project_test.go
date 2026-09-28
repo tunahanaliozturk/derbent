@@ -319,3 +319,29 @@ func TestProjectRootReadsOnlyASmallGitFile(t *testing.T) {
 		t.Fatalf("a .git file over 64 KiB: key %q, want the directory itself", got)
 	}
 }
+
+// A directory that does not exist yet, below a symbolic link to a repository, gets the key and the
+// checkout root that the repository's real path gives, so its notes and receipts are not filed under a
+// second key.
+func TestProjectKeyResolvesALinkAboveAMissingDirectory(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "shop")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Skipf("cannot create a symbolic link here: %v", err)
+	}
+	missing := filepath.Join(link, "not", "yet")
+	if got, want := mustKey(t, missing), mustKey(t, repo); got != want {
+		t.Errorf("key %q, want %q", got, want)
+	}
+	got, err := config.CheckoutRoot(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, rerr := config.CheckoutRoot(repo); rerr != nil || got != want {
+		t.Errorf("CheckoutRoot %q, want %q (%v)", got, want, rerr)
+	}
+}

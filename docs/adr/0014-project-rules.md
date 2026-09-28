@@ -23,10 +23,11 @@ anyone who can open a pull request, or any agent that can write a file, turn off
   names the file and the error. A missing file changes nothing.
 - Only a regular file of at most 64 KiB is read. A symbolic link, anything else that is not a regular
   file, such as a directory, a FIFO or a device, and a larger file are refused as invalid, with a reason
-  that says which. The open does not wait for a FIFO's writer, the type is checked again on what was
-  opened, and the read stops one byte past the limit, so a file replaced or grown after the check is
-  refused too. The `.git` file that marks a linked worktree, and the `commondir` file it leads to, are
-  read under the same limits, and one that fails them is taken as not a linked worktree.
+  that says which. The open does not wait for a FIFO's writer, what was opened must be the file that was
+  checked, and the read stops one byte past the limit, so a file replaced or grown after the check is
+  refused too, a symbolic link to another file included. The `.git` file that marks a linked worktree,
+  and the `commondir` file it leads to, are read under the same limits, and one that fails them is taken
+  as not a linked worktree.
 - The file is read for each call and kept by path, size and modification time. It is looked up under the
   checkout's root in its own case: the nearest directory holding `.git`, which for a linked worktree is
   the worktree's own root, or the project directory itself outside git.
