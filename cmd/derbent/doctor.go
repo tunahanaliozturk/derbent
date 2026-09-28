@@ -66,7 +66,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	cliList := flags.String("cli", "", "comma-separated CLIs to check: "+strings.Join(setup.CLIs, ", ")+" (default: each one found)")
-	configPath := flags.String("config", "", "config file (default: config.toml in the user config directory)")
+	configPath := flags.String("config", "", "the config to check for Derbent itself (default: config.toml in the user config directory); a hook or MCP entry without its own --config is checked against the default")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -82,14 +82,27 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return fmt.Errorf("find working directory: %w", err)
 	}
 	r := &report{w: stdout}
-	global := checkConfig(r, "derbent", "the config", *configPath)
+	own := checkConfig(r, "derbent", "the config", *configPath)
+	// defaults is the default config, which a hook or MCP entry without --config of its own loads,
+	// whatever --config names here; when --config names another file, it is checked once, when needed.
+	defaults := func() derbentConfig { return own }
+	if *configPath != "" {
+		var loaded *derbentConfig
+		defaults = func() derbentConfig {
+			if loaded == nil {
+				c := checkConfig(r, "derbent", "the default config", "")
+				loaded = &c
+			}
+			return *loaded
+		}
+	}
 	checkDatabase(ctx, r)
 	if len(clis) == 0 {
 		r.note("no CLI found: claude, codex and copilot are not on PATH, and ~/.gemini/config does not exist; name the CLIs to check with --cli")
 	}
 	var bins []string
 	for _, cli := range clis {
-		for _, bin := range checkCLI(ctx, r, cli, dir, global) {
+		for _, bin := range checkCLI(ctx, r, cli, dir, defaults) {
 			if !slices.Contains(bins, bin) {
 				bins = append(bins, bin)
 			}
@@ -203,9 +216,9 @@ func checkClaudeVersion(ctx context.Context, r *report) {
 	}
 }
 
-// checkCLI checks one CLI's hooks and MCP entries against each other and against Derbent's config, and
-// returns the binaries its gate hooks start, for timing.
-func checkCLI(ctx context.Context, r *report, cli, dir string, global derbentConfig) []string {
+// checkCLI checks one CLI's hooks and MCP entries against each other and against the config each loads,
+// and returns the binaries its gate hooks start, for timing.
+func checkCLI(ctx context.Context, r *report, cli, dir string, defaults func() derbentConfig) []string {
 	p, err := setup.PathsOf(cli)
 	if err != nil {
 		r.problem("set HOME, or USERPROFILE on Windows", "%s: %v", cli, err)
@@ -262,16 +275,13 @@ func checkCLI(ctx context.Context, r *report, cli, dir string, global derbentCon
 
 	var bins []string
 	for _, h := range gates {
-		checkHook(r, cli, h, entry, global)
+		checkHook(r, cli, h, entry, defaults)
 		if cannotStart(h.Program()) == "" {
 			bins = append(bins, h.Program())
 		}
 	}
 	if cli == "codex" && entry.Command != "" {
-		cfg := global
-		if named, ok := entry.Flag("--config"); ok {
-			cfg = checkConfig(r, cli, "the MCP entry's --config", named)
-		}
+		cfg := configOf(r, cli, "the MCP entry's --config", entry, defaults)
 		var missing []string
 		for _, name := range cfg.envNames {
 			if !slices.Contains(entry.EnvVars, name) {
@@ -327,18 +337,24 @@ func checkEntries(r *report, cli string, entries []setup.Entry, server string, h
 	return entry
 }
 
+// configOf is the config e loads: the file its --config names, checked and reported as what, or else
+// the default config.
+func configOf(r *report, cli, what string, e setup.Entry, defaults func() derbentConfig) derbentConfig {
+	if named, ok := e.Flag("--config"); ok {
+		return checkConfig(r, cli, what, named)
+	}
+	return defaults()
+}
+
 // checkHook checks one gate hook of cli: that it runs for every tool, that its timeout is above the
-// approval timeout of the config it loads, its --config or the global one, and that its agent matches
+// approval timeout of the config it loads, its --config or the default one, and that its agent matches
 // the MCP entry's and the CLI's hook protocol.
-func checkHook(r *report, cli string, h, entry setup.Entry, global derbentConfig) {
+func checkHook(r *report, cli string, h, entry setup.Entry, defaults func() derbentConfig) {
 	r.ok("%s: the hook in %s runs %s", cli, h.File, strings.Join(h.Words(), " "))
 	if !h.GatesEveryTool() {
 		r.problem(fmt.Sprintf("set its matcher to %q", setup.EveryToolMatcher(cli)), "%s: the hook in %s matches only %q, so the other tools are not gated", cli, h.File, h.Matcher)
 	}
-	cfg := global
-	if named, ok := h.Flag("--config"); ok {
-		cfg = checkConfig(r, cli, "the hook's --config", named)
-	}
+	cfg := configOf(r, cli, "the hook's --config", h, defaults)
 	timeout := h.Timeout
 	if timeout == 0 {
 		timeout = setup.DefaultTimeout[cli]

@@ -357,6 +357,37 @@ func TestDoctorPassesWhatIsNotAProblem(t *testing.T) {
 	}
 }
 
+// doctor --config names the config doctor reports on for Derbent itself. A hook or MCP entry without a
+// --config of its own loads the default config, so each is checked against that one: a 30-second hook
+// passes a named config's 20-second approvals, but not the default's 50 seconds, and a variable the
+// default config uses must reach Codex's gate although the named config uses none.
+func TestDoctorChecksWhatHasNoConfigAgainstTheDefault(t *testing.T) {
+	home := cleanSetup(t)
+	replaceIn(t, filepath.Join(home, ".copilot", "hooks", "derbent.json"), `"timeoutSec": 120`, `"timeoutSec": 30`)
+	addServerWithEnv(t)
+	named := filepath.Join(home, "named.toml")
+	writeFile(t, named, "[approvals]\ntimeout = \"20s\"\n\n[[rule]]\naction = \"allow\"\n")
+	out, err := doctorCmd(t, "--config", named)
+	if !errors.Is(err, errDoctorFound) {
+		t.Fatalf("err = %v, want errDoctorFound\n%s", err, out)
+	}
+	found := problems(out)
+	for _, want := range []string{
+		"copilot: the hook's timeout, 30s, is not above [approvals] timeout, 50s, in " + defaultConfig(t),
+		"codex: Derbent's config " + defaultConfig(t) + " uses ${env:DERBENT_TEST_TOKEN}",
+	} {
+		if !slices.ContainsFunc(found, func(p string) bool { return strings.Contains(p, want) }) {
+			t.Errorf("doctor printed:\n%s\nwant a problem with %q", out, want)
+		}
+	}
+	if len(found) != 2 {
+		t.Errorf("doctor printed:\n%s\nwant exactly two problems", out)
+	}
+	if !strings.Contains(out, "ok      derbent: the config "+named+": 1 rules, approvals time out after 20s") {
+		t.Errorf("doctor printed:\n%s\nwant the named config reported for Derbent", out)
+	}
+}
+
 // What doctor cannot check is a note, not a problem: a Claude Code version it cannot read, claude not on
 // PATH, and a hook file init only looks in that does not parse as JSON.
 func TestDoctorNotesWhatItCannotCheck(t *testing.T) {
