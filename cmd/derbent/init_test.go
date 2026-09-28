@@ -627,6 +627,11 @@ func TestInitSkipsAClaudeCodeTooOldForExecForm(t *testing.T) {
 	if _, statErr := os.Stat(log); !errors.Is(statErr, fs.ErrNotExist) {
 		t.Errorf("a CLI command ran: %s", readString(t, log))
 	}
+	t.Setenv("DERBENT_TEST_FAKE_CLAUDE_VERSION", "2.1.139-beta.1 (Claude Code)") // a pre-release comes before its release
+	out, err = initCmd(t, "", "--yes", "--cli", "claude")
+	if err != nil || !strings.Contains(out, "claude: skipped: Claude Code 2.1.139-beta.1 is older than 2.1.139") {
+		t.Fatalf("pre-release Claude Code: %v\n%s", err, out)
+	}
 	t.Setenv("DERBENT_TEST_FAKE_CLAUDE_VERSION", "claude, some build")
 	out, err = initCmd(t, "", "--yes", "--cli", "claude")
 	if err != nil || !strings.Contains(out, "claude: note: could not read Claude Code's version") || !strings.Contains(out, "claude: set up") {
@@ -653,13 +658,59 @@ func TestInitSaysWhatWasMadeWhenAChangeFails(t *testing.T) {
 	if !errors.Is(err, errInitFailed) {
 		t.Fatalf("err = %v, want errInitFailed\n%s", err, out)
 	}
-	copies := backupsOf(t, registry)
-	if len(copies) != 1 {
-		t.Fatalf(".claude.json copies = %v, want one", copies)
+	copies, settingsCopies := backupsOf(t, registry), backupsOf(t, settings)
+	if len(copies) != 1 || len(settingsCopies) != 1 {
+		t.Fatalf(".claude.json copies %v, settings.json copies %v; want one each", copies, settingsCopies)
 	}
-	for _, want := range []string{"claude: failed: write " + settings, "already made: ran claude mcp add, which writes " + registry + " (copied first to " + copies[0] + ")"} {
+	for _, want := range []string{
+		"claude: failed: write " + settings,
+		"the copy of " + settings + " made before this change: " + settingsCopies[0],
+		"already made: ran claude mcp add, which writes " + registry + " (copied first to " + copies[0] + ")",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("init printed:\n%s\nwant %q", out, want)
 		}
+	}
+}
+
+// With claude not on PATH its version cannot be checked, so init says what the hook it writes needs.
+func TestInitNotesTheVersionTheHookNeedsWhenClaudeIsNotOnPATH(t *testing.T) {
+	home, _ := scratchHome(t)
+	if err := os.Remove(filepath.Join(home, "bin", "claude"+exeSuffix())); err != nil {
+		t.Fatal(err)
+	}
+	out, err := initCmd(t, "", "--yes", "--cli", "claude")
+	if err != nil || !strings.Contains(out, "claude: note: claude is not on PATH, so its version was not checked; the hook init writes needs Claude Code 2.1.139 or later") {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if !strings.Contains(readString(t, filepath.Join(home, ".claude", "settings.json")), "gate") {
+		t.Error("the hook was not written")
+	}
+}
+
+// A file init only looks in for an existing hook, and never writes, may not parse: Antigravity CLI takes
+// comments in its settings.json. init goes on, leaves the file alone and says it could not check it.
+func TestInitGoesOnPastAHookFileItOnlyReads(t *testing.T) {
+	home, _ := scratchHome(t)
+	settings := filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
+	const mine = "{\n  // my settings\n  \"model\": \"x\"\n}\n"
+	writeFile(t, settings, mine)
+	out, err := initCmd(t, "", "--yes", "--cli", "antigravity")
+	if err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"antigravity: note: could not read " + settings + " as JSON, so it was not checked for a derbent gate hook: if it holds one, remove one of the two",
+		"antigravity: set up\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("init printed:\n%s\nwant %q", out, want)
+		}
+	}
+	if !strings.Contains(readString(t, filepath.Join(home, ".gemini", "config", "hooks.json")), "gate --agent antigravity") {
+		t.Error("the hook was not written")
+	}
+	if readString(t, settings) != mine || len(backupsOf(t, settings)) != 0 {
+		t.Error("settings.json was changed or copied")
 	}
 }

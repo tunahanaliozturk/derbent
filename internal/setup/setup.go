@@ -111,7 +111,9 @@ func Select(list string) ([]string, error) {
 // starts the command with no arguments, so Derbent's hook would decide nothing.
 const MinClaudeVersion = "2.1.139"
 
-var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+`)
+// versionPattern is a version as Claude Code prints it, with a pre-release suffix such as -beta.1 if
+// there is one.
+var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?`)
 
 // ClaudeVersion runs claude --version, for ten seconds at most, and returns the version it prints.
 func ClaudeVersion(ctx context.Context) (string, error) {
@@ -130,17 +132,24 @@ func ClaudeVersion(ctx context.Context) (string, error) {
 	return v, nil
 }
 
-// VersionBefore reports whether the dotted version v is older than version than.
+// VersionBefore reports whether the dotted version v is older than version than. A pre-release, such
+// as 2.1.139-beta, is older than its release, 2.1.139.
 func VersionBefore(v, than string) bool {
-	parse := func(s string) []int {
+	parse := func(s string) ([]int, bool) {
+		core, pre, _ := strings.Cut(s, "-")
 		var n []int
-		for _, part := range strings.Split(s, ".") {
+		for _, part := range strings.Split(core, ".") {
 			i, _ := strconv.Atoi(part)
 			n = append(n, i)
 		}
-		return n
+		return n, pre != ""
 	}
-	return slices.Compare(parse(v), parse(than)) < 0
+	a, aPre := parse(v)
+	b, bPre := parse(than)
+	if c := slices.Compare(a, b); c != 0 {
+		return c < 0
+	}
+	return aPre && !bPre // ponytail: two pre-releases of one release count as equal
 }
 
 // Entry is one MCP server entry, or one pre-tool command hook, as a CLI's config holds it.
@@ -271,16 +280,17 @@ func MCPEntries(cli string, p Paths, dir string) ([]Entry, error) {
 
 // Hooks reads every pre-tool command hook cli has at user scope: in the file init writes, and in the
 // other user-level file the CLI reads hooks from, Codex's hooks.json beside config.toml and Antigravity
-// CLI's ~/.gemini/antigravity-cli/settings.json. A missing file holds none; a file that does not parse
-// is an error that names it.
+// CLI's ~/.gemini/antigravity-cli/settings.json. A missing file holds none. A file init edits that does
+// not parse is an error that names it; the other file, which init only looks in, is skipped, and
+// Unchecked names it.
 func Hooks(cli string, p Paths) ([]Entry, error) {
+	var out []Entry
 	switch cli {
 	case "codex":
 		c, err := readCodex(p.Hook)
 		if err != nil {
 			return nil, err
 		}
-		var out []Entry
 		for _, group := range c.Hooks.PreToolUse {
 			for _, h := range group.Hooks {
 				if h.Type == "" || h.Type == "command" {
@@ -288,11 +298,6 @@ func Hooks(cli string, p Paths) ([]Entry, error) {
 				}
 			}
 		}
-		more, err := jsonHooks(filepath.Join(filepath.Dir(p.Hook), "hooks.json"), eventGroups)
-		if err != nil {
-			return nil, err
-		}
-		return append(out, more...), nil
 	case "claude":
 		return jsonHooks(p.Hook, eventGroups)
 	case "copilot":
@@ -300,7 +305,6 @@ func Hooks(cli string, p Paths) ([]Entry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list %s: %w", p.HookDir, err)
 		}
-		var out []Entry
 		for _, file := range files {
 			root, readErr := readJSON(file)
 			if readErr != nil {
@@ -314,22 +318,48 @@ func Hooks(cli string, p Paths) ([]Entry, error) {
 			}
 		}
 		return out, nil
+	default: // Antigravity CLI
+		hooks, err := jsonHooks(p.Hook, namedGroups)
+		if err != nil {
+			return nil, err
+		}
+		out = hooks
 	}
-	out, err := jsonHooks(p.Hook, namedGroups)
-	if err != nil {
-		return nil, err
+	if file, groups := lookupFile(cli, p); file != "" {
+		if more, err := jsonHooks(file, groups); err == nil { // else Unchecked names it
+			out = append(out, more...)
+		}
 	}
-	// settings.json keeps the same map of hook names under "hooks". The docs show no example of it, so a
-	// PreToolUse list right under "hooks" is read as well.
-	settings := filepath.Join(filepath.Dir(filepath.Dir(p.Hook)), "antigravity-cli", "settings.json")
-	more, err := jsonHooks(settings, func(root map[string]any) []map[string]any {
-		hooks, _ := root["hooks"].(map[string]any)
-		return append(namedGroups(hooks), objects(hooks["PreToolUse"])...)
-	})
-	if err != nil {
-		return nil, err
+	return out, nil
+}
+
+// lookupFile is the other user-level file cli reads hooks from, which init only looks in for an
+// existing gate hook and never writes, and the function that finds its PreToolUse groups: Codex's
+// hooks.json beside config.toml, and Antigravity CLI's ~/.gemini/antigravity-cli/settings.json, which
+// keeps the same map of hook names under "hooks". Antigravity's docs show no example of settings.json,
+// so a PreToolUse list right under "hooks" is read as well. It is "" for the other CLIs.
+func lookupFile(cli string, p Paths) (string, func(root map[string]any) []map[string]any) {
+	switch cli {
+	case "codex":
+		return filepath.Join(filepath.Dir(p.Hook), "hooks.json"), eventGroups
+	case "antigravity":
+		return filepath.Join(filepath.Dir(filepath.Dir(p.Hook)), "antigravity-cli", "settings.json"), func(root map[string]any) []map[string]any {
+			hooks, _ := root["hooks"].(map[string]any)
+			return append(namedGroups(hooks), objects(hooks["PreToolUse"])...)
+		}
 	}
-	return append(out, more...), nil
+	return "", nil
+}
+
+// Unchecked lists the files Hooks skipped because they cannot be read as JSON: cli's file that init
+// only looks in, which may hold comments the CLI accepts. A gate hook in it is not seen.
+func Unchecked(cli string, p Paths) []string {
+	if file, _ := lookupFile(cli, p); file != "" {
+		if _, err := readJSON(file); err != nil {
+			return []string{file}
+		}
+	}
+	return nil
 }
 
 // jsonHooks reads the command hooks in a JSON file's PreToolUse groups, which groups finds in the file.
@@ -345,6 +375,9 @@ func jsonHooks(file string, groups func(root map[string]any) []map[string]any) (
 				continue
 			}
 			command, _ := h["command"].(string)
+			if w, ok := h["commandWindows"].(string); ok && runtime.GOOS == "windows" {
+				command = w // Codex's hooks.json: the line Codex runs instead of command on Windows
+			}
 			args, execForm := h["args"]
 			out = append(out, Entry{Command: command, Args: stringList(args), Shell: !execForm, Timeout: seconds(h["timeout"]), File: file})
 		}

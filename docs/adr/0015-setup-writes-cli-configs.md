@@ -20,7 +20,8 @@ user, is often edited by hand, and in Claude Code's case is rewritten by the CLI
 - It never replaces or removes an entry. An MCP entry named `derbent`, or a hook that runs
   `derbent gate` in any form and in any user-level file the CLI reads hooks from (Codex's `hooks.json`
   as well as `config.toml`, Antigravity CLI's `settings.json` as well as `hooks.json`), counts as set up
-  and is left alone.
+  and is left alone. A file init only looks in, and never writes, may hold comments the CLI accepts:
+  when it does not parse, init goes on and says it could not check it.
 - It shows every change, asks once, and copies each file that exists before its first change. JSON is
   decoded and written back; Codex's TOML is appended to as text, never re-encoded, and only when the file
   and the result both parse. A file that does not parse is left as it is.
@@ -41,6 +42,6 @@ user, is often edited by hand, and in Claude Code's case is rewritten by the CLI
 - init follows each CLI's file layout and `mcp add` syntax, which change between releases. They were
   checked against each CLI's documentation on 2026-09-28, and doctor names what no longer matches.
 - Claude Code's exec-form hook needs Claude Code 2.1.139 or later; an older one would start derbent
-  with no arguments. init reads `claude --version` and skips an older Claude Code, and goes on with a
-  note when the version cannot be read.
+  with no arguments. init reads `claude --version` and skips an older Claude Code, a pre-release of
+  2.1.139 included, and goes on with a note when the version cannot be read or `claude` is not on PATH.
 - Codex skips a new hook until the user trusts it in `/hooks`; init says so.
