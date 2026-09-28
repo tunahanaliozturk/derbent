@@ -40,9 +40,18 @@ func fakeCLIName() string {
 }
 
 // runFakeCLI stands in for `<cli> mcp add [--scope user] <name> -- <command> <args...>`. It appends its
-// arguments to the log, one line per run, and writes the entry where the real CLI does, so a later init
-// or doctor finds it.
+// arguments to the log, one line per run, writes the entry where the real CLI does, so a later init or
+// doctor finds it, and says so with an escape sequence in the line, as a hostile CLI could. As
+// `claude --version` it prints DERBENT_TEST_FAKE_CLAUDE_VERSION, or a recent version, and logs nothing.
 func runFakeCLI(cli string, args []string) int {
+	if cli == "claude" && slices.Equal(args, []string{"--version"}) {
+		v := os.Getenv("DERBENT_TEST_FAKE_CLAUDE_VERSION")
+		if v == "" {
+			v = "2.1.283 (Claude Code)"
+		}
+		fmt.Println(v)
+		return 0
+	}
 	logFile, err := os.OpenFile(os.Getenv("DERBENT_TEST_FAKE_CLI_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 3
@@ -76,6 +85,7 @@ func runFakeCLI(cli string, args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	fmt.Printf("Added MCP server %s\x1b[2J\n", name)
 	return 0
 }
 
@@ -363,12 +373,16 @@ func TestInitSetsUpEveryCLI(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"claude: set up\n", "codex: set up\n", "copilot: set up\n", "antigravity: set up\n",
+		"claude: set up\n", "codex: set up; Codex runs the new hook only after you trust it in /hooks\n", "copilot: set up\n", "antigravity: set up\n",
 		"every call is allowed until one exists", "derbent init --preset watch", "run derbent doctor to check",
+		"Added MCP server derbent\\u001b[2J\n", // the CLI's own output, escaped
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("init printed:\n%s\nwant %q", out, want)
 		}
+	}
+	if strings.Contains(out, "\x1b") {
+		t.Errorf("init passed a CLI's escape sequence to the terminal:\n%q", out)
 	}
 }
 
@@ -569,5 +583,83 @@ func TestInitNamesWhatItCannotSetUp(t *testing.T) {
 	}
 	if out, err := initCmd(t, "", "--yes"); err != nil || !strings.Contains(out, "No CLI found") {
 		t.Fatalf("no CLI: %v\n%s", err, out)
+	}
+}
+
+// A derbent gate hook in another file the CLI reads user hooks from counts as set up: Codex's
+// hooks.json, and Antigravity CLI's settings.json. init adds no second one.
+func TestInitSeesAHookInTheCLIsOtherFiles(t *testing.T) {
+	home, _ := scratchHome(t)
+	writeFile(t, filepath.Join(home, ".codex", "hooks.json"),
+		`{"hooks": {"PreToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "derbent gate --agent codex"}]}]}}`)
+	writeFile(t, filepath.Join(home, ".gemini", "antigravity-cli", "settings.json"),
+		`{"hooks": {"mine": {"PreToolUse": [{"matcher": ".*", "hooks": [{"command": "derbent gate --agent antigravity"}]}]}}}`)
+	out, err := initCmd(t, "", "--yes", "--cli", "codex,antigravity")
+	if err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	for _, want := range []string{"codex: set up; already there: hook\n", "antigravity: set up; already there: hook\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("init printed:\n%s\nwant %q", out, want)
+		}
+	}
+	if strings.Contains(readString(t, filepath.Join(home, ".codex", "config.toml")), "gate") {
+		t.Error("a second Codex hook was added to config.toml")
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".gemini", "config", "hooks.json")); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Error("a second Antigravity CLI hook was added to hooks.json")
+	}
+}
+
+// Claude Code before 2.1.139 ignores a hook's args and would start derbent with none, so the hook would
+// decide nothing: init sets nothing up for it and says to upgrade. A version it cannot read is a note.
+func TestInitSkipsAClaudeCodeTooOldForExecForm(t *testing.T) {
+	home, log := scratchHome(t)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	t.Setenv("DERBENT_TEST_FAKE_CLAUDE_VERSION", "2.1.100 (Claude Code)")
+	out, err := initCmd(t, "", "--yes", "--cli", "claude")
+	if err != nil || !strings.Contains(out, "claude: skipped: Claude Code 2.1.100 is older than 2.1.139") || !strings.Contains(out, "upgrade it") {
+		t.Fatalf("old Claude Code: %v\n%s", err, out)
+	}
+	if _, statErr := os.Stat(settings); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Error("settings.json was written for an old Claude Code")
+	}
+	if _, statErr := os.Stat(log); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("a CLI command ran: %s", readString(t, log))
+	}
+	t.Setenv("DERBENT_TEST_FAKE_CLAUDE_VERSION", "claude, some build")
+	out, err = initCmd(t, "", "--yes", "--cli", "claude")
+	if err != nil || !strings.Contains(out, "claude: note: could not read Claude Code's version") || !strings.Contains(out, "claude: set up") {
+		t.Fatalf("unreadable version: %v\n%s", err, out)
+	}
+}
+
+// When a change fails after others for the same CLI were made, init names what was made and where the
+// copy of each file is, so the user can finish or undo it.
+func TestInitSaysWhatWasMadeWhenAChangeFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes a read-only file")
+	}
+	home, _ := scratchHome(t)
+	registry := filepath.Join(home, ".claude.json")
+	writeFile(t, registry, `{"numStartups": 3}`)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	writeFile(t, settings, `{}`)
+	if err := os.Chmod(settings, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(settings, 0o600) })
+	out, err := initCmd(t, "", "--yes", "--cli", "claude")
+	if !errors.Is(err, errInitFailed) {
+		t.Fatalf("err = %v, want errInitFailed\n%s", err, out)
+	}
+	copies := backupsOf(t, registry)
+	if len(copies) != 1 {
+		t.Fatalf(".claude.json copies = %v, want one", copies)
+	}
+	for _, want := range []string{"claude: failed: write " + settings, "already made: ran claude mcp add, which writes " + registry + " (copied first to " + copies[0] + ")"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("init printed:\n%s\nwant %q", out, want)
+		}
 	}
 }

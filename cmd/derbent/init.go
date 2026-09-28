@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +27,8 @@ type initPlan struct {
 	cli     string
 	changes []setup.Change
 	done    []string // the parts already set up
+	skip    string   // why nothing is set up for the CLI, when init chose not to
+	note    string   // something the user should know before the changes are made
 	err     error
 }
 
@@ -77,9 +81,14 @@ func runInit(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	plans := make([]initPlan, 0, len(clis))
 	for _, cli := range clis {
 		pl := initPlan{cli: cli}
-		var p setup.Paths
-		if p, pl.err = setup.PathsOf(cli); pl.err == nil {
-			pl.changes, pl.done, pl.err = setup.Plan(cli, p, bin)
+		if cli == "claude" {
+			pl.skip, pl.note = claudeCheck(ctx)
+		}
+		if pl.skip == "" {
+			var p setup.Paths
+			if p, pl.err = setup.PathsOf(cli); pl.err == nil {
+				pl.changes, pl.done, pl.err = setup.Plan(cli, p, bin)
+			}
 		}
 		plans = append(plans, pl)
 	}
@@ -99,6 +108,11 @@ func runInit(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	for _, c := range own {
 		printChange(stdout, c, now, *presetName)
 	}
+	for _, pl := range plans {
+		if pl.note != "" {
+			fmt.Fprintf(stdout, "%s: note: %s\n", pl.cli, visible.Escape(pl.note))
+		}
+	}
 	if len(clis) == 0 {
 		fmt.Fprintln(stdout, "No CLI found: claude, codex and copilot are not on PATH, and ~/.gemini/config does not exist. Name the CLIs to set up with --cli.")
 	}
@@ -115,7 +129,7 @@ func runInit(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		fmt.Fprintln(stdout)
 	}
 
-	backedUp := map[string]bool{}
+	backedUp := map[string]string{}
 	failed := false
 	for i := range plans {
 		pl := &plans[i]
@@ -151,6 +165,8 @@ func initStatus(pl initPlan, confirmed, dryRun bool) string {
 	switch {
 	case pl.err != nil:
 		return "failed: " + pl.err.Error()
+	case pl.skip != "":
+		return "skipped: " + pl.skip
 	case len(pl.changes) == 0:
 		return "already set up"
 	case dryRun:
@@ -166,6 +182,9 @@ func initStatus(pl initPlan, confirmed, dryRun bool) string {
 	}
 	if len(pl.done) > 0 {
 		s += "; already there: " + strings.Join(pl.done, ", ")
+	}
+	if pl.cli == "codex" && slices.ContainsFunc(pl.changes, func(c setup.Change) bool { return c.Run == nil }) {
+		s += "; Codex runs the new hook only after you trust it in /hooks"
 	}
 	return s
 }
@@ -201,27 +220,64 @@ func printChange(w io.Writer, c setup.Change, now time.Time, presetName string) 
 }
 
 // applyChanges makes changes in order, copying each file that exists before its first change in this
-// run. A command the user has to run is skipped.
-func applyChanges(ctx context.Context, changes []setup.Change, now time.Time, backedUp map[string]bool, stdout, stderr io.Writer) error {
+// run; backedUp maps each file copied to its copy, "" when there was no file. A command the user has to
+// run is skipped. When a change fails, the error names the changes already made and their copies, so
+// the user can finish or undo them.
+func applyChanges(ctx context.Context, changes []setup.Change, now time.Time, backedUp map[string]string, stdout, stderr io.Writer) error {
+	var made []string
 	for _, c := range changes {
 		if c.Manual {
 			continue
 		}
-		if !backedUp[c.File] {
-			if _, err := setup.Backup(c.File, now); err != nil {
-				return err
+		if _, copied := backedUp[c.File]; !copied {
+			backup, err := setup.Backup(c.File, now)
+			if err != nil {
+				return alreadyMade(err, made)
 			}
-			backedUp[c.File] = true
+			backedUp[c.File] = backup
 		}
 		if err := c.Apply(ctx, stdout, stderr); err != nil {
-			return err
+			return alreadyMade(err, made)
+		}
+		what := "edited " + c.File
+		if c.Run != nil {
+			what = "ran " + strings.Join(c.Run[:3], " ") + ", which writes " + c.File
+		}
+		if backup := backedUp[c.File]; backup != "" {
+			made = append(made, what+" (copied first to "+backup+")")
+		} else {
+			made = append(made, what+" (no copy: the file did not exist)")
 		}
 	}
 	return nil
 }
 
+// alreadyMade adds the changes made before err to it.
+func alreadyMade(err error, made []string) error {
+	if len(made) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w; already made: %s", err, strings.Join(made, "; "))
+}
+
+// claudeCheck returns why Claude Code is skipped, when the claude on PATH is older than the exec-form
+// hook needs, or a note when its version cannot be read. A claude that is not on PATH is not checked.
+func claudeCheck(ctx context.Context) (skip, note string) {
+	if _, err := exec.LookPath("claude"); err != nil {
+		return "", ""
+	}
+	v, err := setup.ClaudeVersion(ctx)
+	switch {
+	case err != nil:
+		return "", "could not read Claude Code's version (" + err.Error() + "); the hook init writes needs " + setup.MinClaudeVersion + " or later"
+	case setup.VersionBefore(v, setup.MinClaudeVersion):
+		return "Claude Code " + v + " is older than " + setup.MinClaudeVersion + ", the first that passes a hook its args, so the hook would decide nothing: upgrade it (claude update) and run derbent init again", ""
+	}
+	return "", ""
+}
+
 // derbentBinary is the running binary's absolute path, symbolic links resolved, with forward slashes, as
-// init writes it into the CLIs' configs. A path some shell would read inside quotes is refused.
+// init writes it into the CLIs' configs. A path some shell would read specially is refused (CheckBinary).
 func derbentBinary() (string, error) {
 	exe, err := os.Executable()
 	if err == nil {

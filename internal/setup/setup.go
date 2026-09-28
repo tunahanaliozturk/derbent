@@ -4,6 +4,7 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,9 +14,12 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -101,6 +105,42 @@ func Select(list string) ([]string, error) {
 		}
 	}
 	return slices.DeleteFunc(slices.Clone(CLIs), func(c string) bool { return !slices.Contains(named, c) }), nil
+}
+
+// MinClaudeVersion is the first Claude Code release that reads a hook's args (exec form). An older one
+// starts the command with no arguments, so Derbent's hook would decide nothing.
+const MinClaudeVersion = "2.1.139"
+
+var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+`)
+
+// ClaudeVersion runs claude --version, for ten seconds at most, and returns the version it prints.
+func ClaudeVersion(ctx context.Context) (string, error) {
+	runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, "claude", "--version")
+	cmd.WaitDelay = time.Second // a .cmd shim's child may hold the pipe after the shim is killed
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("claude --version: %w", err)
+	}
+	v := versionPattern.FindString(string(out))
+	if v == "" {
+		return "", errors.New("claude --version printed no version number")
+	}
+	return v, nil
+}
+
+// VersionBefore reports whether the dotted version v is older than version than.
+func VersionBefore(v, than string) bool {
+	parse := func(s string) []int {
+		var n []int
+		for _, part := range strings.Split(s, ".") {
+			i, _ := strconv.Atoi(part)
+			n = append(n, i)
+		}
+		return n
+	}
+	return slices.Compare(parse(v), parse(than)) < 0
 }
 
 // Entry is one MCP server entry, or one pre-tool command hook, as a CLI's config holds it.
@@ -229,8 +269,10 @@ func MCPEntries(cli string, p Paths, dir string) ([]Entry, error) {
 	return out, nil
 }
 
-// Hooks reads every pre-tool command hook cli has at user scope. A missing file holds none; a file that
-// does not parse is an error that names it.
+// Hooks reads every pre-tool command hook cli has at user scope: in the file init writes, and in the
+// other user-level file the CLI reads hooks from, Codex's hooks.json beside config.toml and Antigravity
+// CLI's ~/.gemini/antigravity-cli/settings.json. A missing file holds none; a file that does not parse
+// is an error that names it.
 func Hooks(cli string, p Paths) ([]Entry, error) {
 	switch cli {
 	case "codex":
@@ -246,7 +288,13 @@ func Hooks(cli string, p Paths) ([]Entry, error) {
 				}
 			}
 		}
-		return out, nil
+		more, err := jsonHooks(filepath.Join(filepath.Dir(p.Hook), "hooks.json"), eventGroups)
+		if err != nil {
+			return nil, err
+		}
+		return append(out, more...), nil
+	case "claude":
+		return jsonHooks(p.Hook, eventGroups)
 	case "copilot":
 		files, err := filepath.Glob(filepath.Join(p.HookDir, "*.json"))
 		if err != nil {
@@ -267,35 +315,62 @@ func Hooks(cli string, p Paths) ([]Entry, error) {
 		}
 		return out, nil
 	}
-	root, err := readJSON(p.Hook)
+	out, err := jsonHooks(p.Hook, namedGroups)
 	if err != nil {
 		return nil, err
 	}
-	var groups []map[string]any
-	if cli == "claude" {
+	// settings.json keeps the same map of hook names under "hooks". The docs show no example of it, so a
+	// PreToolUse list right under "hooks" is read as well.
+	settings := filepath.Join(filepath.Dir(filepath.Dir(p.Hook)), "antigravity-cli", "settings.json")
+	more, err := jsonHooks(settings, func(root map[string]any) []map[string]any {
 		hooks, _ := root["hooks"].(map[string]any)
-		groups = objects(hooks["PreToolUse"])
-	} else { // Antigravity CLI: a map of hook names to their events
-		for _, name := range slices.Sorted(maps.Keys(root)) {
-			def, _ := root[name].(map[string]any)
-			if enabled, ok := def["enabled"].(bool); ok && !enabled {
-				continue
-			}
-			groups = append(groups, objects(def["PreToolUse"])...)
-		}
+		return append(namedGroups(hooks), objects(hooks["PreToolUse"])...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(out, more...), nil
+}
+
+// jsonHooks reads the command hooks in a JSON file's PreToolUse groups, which groups finds in the file.
+func jsonHooks(file string, groups func(root map[string]any) []map[string]any) ([]Entry, error) {
+	root, err := readJSON(file)
+	if err != nil {
+		return nil, err
 	}
 	var out []Entry
-	for _, g := range groups {
+	for _, g := range groups(root) {
 		for _, h := range objects(g["hooks"]) {
 			if t, _ := h["type"].(string); t != "" && t != "command" {
 				continue
 			}
 			command, _ := h["command"].(string)
 			args, execForm := h["args"]
-			out = append(out, Entry{Command: command, Args: stringList(args), Shell: !execForm, Timeout: seconds(h["timeout"]), File: p.Hook})
+			out = append(out, Entry{Command: command, Args: stringList(args), Shell: !execForm, Timeout: seconds(h["timeout"]), File: file})
 		}
 	}
 	return out, nil
+}
+
+// eventGroups finds the PreToolUse groups of Claude Code's settings.json and Codex's hooks.json: hooks,
+// then the event.
+func eventGroups(root map[string]any) []map[string]any {
+	hooks, _ := root["hooks"].(map[string]any)
+	return objects(hooks["PreToolUse"])
+}
+
+// namedGroups finds the PreToolUse groups in Antigravity CLI's map of hook names to their events,
+// leaving out a hook that is turned off.
+func namedGroups(m map[string]any) []map[string]any {
+	var groups []map[string]any
+	for _, name := range slices.Sorted(maps.Keys(m)) {
+		def, _ := m[name].(map[string]any)
+		if enabled, ok := def["enabled"].(bool); ok && !enabled {
+			continue
+		}
+		groups = append(groups, objects(def["PreToolUse"])...)
+	}
+	return groups
 }
 
 // copilotHook reads one Copilot CLI hook: exec and args, or the shell line this system runs
