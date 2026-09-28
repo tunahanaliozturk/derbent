@@ -1184,6 +1184,10 @@ Not in v1, in rough order of value:
   affect its grants (ADR 0011).
 - A budget is approximate under concurrency: calls in flight at the same moment can pass it by at most
   their number.
+- Budgets count by the time in each receipt. After the clock is set back, receipts written before stay
+  in the future and keep a used-up budget closed until the clock passes them and one more window; the
+  agent is told that wait. Dropping them would let the agent through, and moving them to the present on
+  each check would keep them there without ever letting them age.
 - Pins trust the first definition a gate sees. A tool that is hostile from its first listing is pinned as
   it is; `derbent config check` shows a new server's tools before an agent uses them. That includes a
   tool that an update adds to a server already pinned: it is pinned and served at once, mid-session too,
