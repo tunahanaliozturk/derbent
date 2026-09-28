@@ -422,6 +422,10 @@ README's quick start shows how each hook is installed with a timeout above `appr
 coverage table says, per CLI, which tools the hook sees and which name each CLI gives Derbent's own
 tools (ADR 0006). One process runs per tool call, and for every CLI:
 
+- A UTF-8 byte order mark at the start of the hook input is skipped. A .NET program that writes the
+  input through `Process.StandardInput` sends one when the console input encoding is UTF-8, and the hook
+  would otherwise deny every call as unreadable.
+
 - A call is the gate's own only when three things hold. Its name starts with the CLI's prefix for the
   MCP entry named by `--server` (default `derbent`): `mcp__derbent__` in Claude Code and Codex,
   `derbent-` in Copilot CLI, and `mcp_derbent_` for Antigravity CLI, which is assumed until a real

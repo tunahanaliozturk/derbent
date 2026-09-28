@@ -57,9 +57,10 @@ func Names() []string {
 	return names
 }
 
-// Parse reads a call from the hook's standard input.
+// Parse reads a call from the hook's standard input. A leading UTF-8 byte order mark is skipped: a .NET
+// program writing through Process.StandardInput sends one when the console input encoding is UTF-8.
 func (p Protocol) Parse(in []byte) (Call, error) {
-	c, err := p.parse(in)
+	c, err := p.parse(bytes.TrimPrefix(in, []byte("\xef\xbb\xbf")))
 	if err != nil {
 		return Call{}, fmt.Errorf("%w: %w", ErrInput, err)
 	}

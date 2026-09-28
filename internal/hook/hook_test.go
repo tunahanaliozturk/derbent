@@ -73,6 +73,31 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// A .NET program writing hook input through Process.StandardInput sends a UTF-8 byte order mark when the
+// console input encoding is UTF-8. The call behind the mark is read as if the mark were not there.
+func TestParseSkipsAByteOrderMark(t *testing.T) {
+	for cli, file := range map[string]string{
+		"claude": "claude/bash.json", "codex": "codex/patch.json",
+		"copilot": "copilot/bash-camel.json", "antigravity": "antigravity/run.json",
+	} {
+		t.Run(cli, func(t *testing.T) {
+			p := protocol(t, cli)
+			want, err := p.Parse(golden(t, file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := p.Parse(append([]byte("\xef\xbb\xbf"), golden(t, file)...))
+			if err != nil {
+				t.Fatalf("with a byte order mark: %v", err)
+			}
+			if got.Session != want.Session || got.Dir != want.Dir || got.Tool != want.Tool {
+				t.Fatalf("call = %+v, want %+v", got, want)
+			}
+			sameJSON(t, got.Args, string(want.Args))
+		})
+	}
+}
+
 func TestParseRefusesWhatItCannotUse(t *testing.T) {
 	for _, tc := range []struct{ cli, in string }{
 		{"claude", ``},
