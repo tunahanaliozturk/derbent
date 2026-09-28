@@ -358,7 +358,9 @@ file never loosens anything, and a grant is keyed on what the rules say, not on 
   project file; on a tie it names the user's rule.
 - A file with any other key, or a rule the rule syntax refuses, is invalid, and every call in that project
   is denied on both paths, with a reason that names the file and the error and `decided_by` = `gate`. A
-  missing file changes nothing.
+  missing file changes nothing. Keys count only as written: `ACTION`, `Action` or `[[Rule]]` is another
+  key, since the TOML decoder would fill a field from any of them and keep one of two spellings at random.
+  Text from the file in the reason is escaped, since the reason reaches the agent and the CLI.
 - Only a regular file of at most 64 KiB is read, through a reader that stops one byte past the limit. A
   symbolic link, a directory, a FIFO, a device or a larger file is refused as invalid, with a reason that
   says which, since reading it could block the hook or fill its memory. The open does not wait for a
@@ -377,6 +379,10 @@ file never loosens anything, and a grant is keyed on what the rules say, not on 
   `derbent grants` say `project rule <n>` for a project rule. `derbent pending` and `derbent grants` read
   the database without migrating it, so on a database from before migration 0006 they name every rule as
   one of the user's.
+- On the hook path, a call that only the project's rules asked about, which the user's rules allow, gets
+  no decision once the user approves it, now or through an earlier `A`: that is what the user's rules alone
+  give, so the CLI's own permission settings still apply. An explicit `allow` would skip them, which is
+  looser than the user's rules without the project.
 - An agent that can edit the repository can edit or delete `.derbent.toml`. That only takes the project
   back to the user's own rules, never below them.
 
@@ -392,7 +398,8 @@ rule asks about under the same rules above it, for the rest of that Claude Code 
   The gate already decides and records them, and would otherwise ask for and record each one twice.
 - A call allowed by a rule gets no decision from the hook, so Claude Code's own permission settings
   still apply on top.
-- A call the user approved, now or through an earlier `A`, gets `allow`.
+- A call the user approved, now or through an earlier `A`, gets `allow`, unless only the project's rules
+  asked about it and the user's rules allow it: then it gets no decision (see Project rules).
 - A refused, denied or timed-out call gets `deny` with the reason, which Claude Code shows to the model.
 - The receipt's outcome is `gated` for a call that may run and `refused` for one that may not, since the
   hook runs before the tool does.

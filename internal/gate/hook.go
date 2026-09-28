@@ -16,7 +16,9 @@ const (
 	// NoDecision means a rule allowed the call: the hook says nothing, so the CLI's own permission
 	// settings still apply on top.
 	NoDecision Verdict = iota
-	// Allowed means the user approved the call, now or earlier in the same session.
+	// Allowed means the user approved the call, now or earlier in the same session, and the user's rules
+	// alone would not have allowed it. A call only the project asked about answers NoDecision once
+	// approved, as the user's rules alone would, so a project file never skips the CLI's own settings.
 	Allowed
 	// Denied means a rule, the gate or the user refused the call, or no answer came in time.
 	Denied

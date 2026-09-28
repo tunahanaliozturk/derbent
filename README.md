@@ -230,9 +230,14 @@ make a call ask or deny but never lets through what your rules refuse
 ([ADR 0014](docs/adr/0014-project-rules.md)). Receipts say `project:1` when a project rule decided, and the
 UI and `derbent pending` say `project rule 1`. An edit takes effect on the next call. A file with any other
 key, or a rule Derbent cannot read, denies every call in that project until it is fixed, and so does a
-`.derbent.toml` that is a symbolic link, is not a regular file, or is larger than 64 KiB. Project rules
-decide calls only and never change which tools an agent sees. An agent that can edit the repository can
-edit or delete the file, which only takes the project back to your own rules.
+`.derbent.toml` that is a symbolic link, is not a regular file, or is larger than 64 KiB. Keys count only
+as written, so `ACTION` or `[[Rule]]` is another key. Project rules decide calls only and never change
+which tools an agent sees. An agent that can edit the repository can edit or delete the file, which only
+takes the project back to your own rules.
+
+When you approve a built-in tool call that only the project asked about, and your own rules allow it, the
+hook answers as your rules alone would: with no decision, so the CLI's own permission settings still
+apply. A call your own rules ask about gets `allow` once you approve it, as without a project file.
 
 ## Approvals and the UI
 
@@ -335,8 +340,8 @@ command of your choice before a tool call. With `derbent gate` as that command (
 [Quick start](#quick-start)), each call is decided as tool `native__<the CLI's tool name>` under the same
 rules and approvals, gets a receipt with outcome `gated` or `refused`, and is answered in the CLI's
 format: nothing for a call a rule allows, so the CLI's own permission settings still apply, `allow` for a
-call you approved, and `deny` with the reason for anything refused
-([ADR 0006](docs/adr/0006-pre-tool-hooks.md)).
+call you approved (unless only a project rule asked about it, see [Project rules](#project-rules)), and
+`deny` with the reason for anything refused ([ADR 0006](docs/adr/0006-pre-tool-hooks.md)).
 
 Rules name a built-in tool by the CLI's own name for it, so they differ per CLI: `native__Bash` (Claude
 Code, Codex), `native__apply_patch` (Codex's file edits), `native__bash` and `native__powershell`
