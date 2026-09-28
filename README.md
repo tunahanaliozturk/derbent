@@ -241,9 +241,9 @@ the config path when no file is there, and `--print` prints it instead:
   (`git clean -f` and `xargs rm` too), running a download (`curl ... | sh`, `$(curl ...)`), the listed
   subcommands of terraform, tofu, pulumi, kubectl and helm, such as `terraform apply` and
   `kubectl delete`, writing a `.env` file, `~/.ssh` in a path or a command, and every tool of a GitHub
-  server behind Derbent that is not a known read. Its shell
-  rules match text, so a command in a form they do not list, such as `"git" push`, gets through until
-  Derbent parses shell commands; the file's own comments say what each pattern catches and misses.
+  server behind Derbent that is not a known read. Its shell rules match text, so a command in a form
+  they do not list, such as `"git" push`, gets through until Derbent parses shell commands; the file's
+  own comments say what each pattern catches and misses.
 - `strict` allows reading and Derbent's memory tools, and asks about everything else, every shell
   command included.
 

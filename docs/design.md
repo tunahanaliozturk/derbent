@@ -853,15 +853,16 @@ description was a harmless sentence, not an instruction, since the third session
 
 Setup's check ran on 2026-09-28 on the owner's Windows 11 machine against a scratch home, with `HOME`,
 `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` pointing there; a probe entry first showed that Claude Code
-and Copilot CLI read their MCP entries from it. `derbent init --cli claude,copilot,antigravity --preset
-balanced --yes` set up Claude Code 2.1.283 and Copilot CLI 1.0.88 through their own `mcp add` and
-Antigravity CLI through its files, and wrote the balanced preset. `derbent doctor` reported no problem
-and exited with status 0, with the hook's start at 103 ms, the middle of three runs. The owner's own
-Claude Code, Copilot CLI and Codex files were unchanged. A real `claude -p` session on the owner's
-subscription, with no API key, loading only the hook settings and the MCP entry init wrote, had
-`git push origin main` held by the balanced preset's rule 48 (`*git *push*` on `command`) and denied with
-`derbent deny`: Claude Code blocked the call, gave the model Derbent's reason,
-`derbent: the user denied native__Bash`, and the receipt says `native__Bash deny user:1 refused`. Codex and Antigravity CLI were not installed, so Codex is covered by
+and Copilot CLI read their MCP entries from it.
+`derbent init --cli claude,copilot,antigravity --preset balanced --yes` set up Claude Code 2.1.283 and
+Copilot CLI 1.0.88 through their own `mcp add` and Antigravity CLI through its files, and wrote the
+balanced preset. `derbent doctor` reported no problem and exited with status 0, with the hook's start at
+103 ms, the middle of three runs. The owner's own Claude Code, Copilot CLI and Codex files were
+unchanged. A real `claude -p` session on the owner's subscription, with no API key, loading only the
+hook settings and the MCP entry init wrote, had `git push origin main` held by the balanced preset's
+rule 48 (`*git *push*` on `command`) and denied with `derbent deny`: Claude Code blocked the call and
+gave the model Derbent's reason, `derbent: the user denied native__Bash`, and the receipt says
+`native__Bash deny user:1 refused`. Codex and Antigravity CLI were not installed, so Codex is covered by
 tests with a fake and no Antigravity CLI session ran.
 
 ## Later
