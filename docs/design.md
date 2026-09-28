@@ -458,6 +458,54 @@ tools (ADR 0006). One process runs per tool call, and for every CLI:
   version and takes no write lock, so a hook call does not queue behind other gates' appends before it
   decides.
 
+## Setup
+
+Setup takes two entries per CLI in two files, and several mistakes fail silently or far from their
+cause. `derbent init` writes them, `derbent doctor` checks them, and a preset replaces the blank page of
+a first config.
+
+- **Presets.** `watch`, `balanced` and `strict` are commented TOML files embedded in the binary. `watch`
+  allows and records every call. `balanced` allows reading, and asks about pushing, force flags, deleting
+  files, piping a download into a shell, infrastructure commands, writes to `.env` files and `~/.ssh`,
+  and every GitHub tool but twelve known reads. `strict` allows reading and asks about everything else.
+  Both name every CLI's built-in tools and argument keys (see Built-in tools), and say that their shell
+  patterns match text anywhere in the command and can be fooled. A preset is a file written once, not a
+  mode: Derbent never changes it after writing it, and the user owns it (ADR 0016).
+  `derbent init --preset <name>` writes it to the default config path only when no file is there, and
+  `--print` prints it and writes nothing.
+- **init.** `derbent init [--cli <list>] [--preset <name>] [--yes] [--dry-run]` sets up each CLI it finds
+  (its command on `PATH`, or for Antigravity CLI the directory `~/.gemini/config`), or the ones `--cli`
+  names. For each it adds Derbent's MCP entry through the CLI's own `mcp add` command where there is one
+  (Claude Code at user scope, Codex, Copilot CLI) and by editing `~/.gemini/config/mcp_config.json` for
+  Antigravity CLI, and the pre-tool hook by editing `~/.claude/settings.json`, `~/.codex/config.toml`,
+  `~/.copilot/hooks/derbent.json` or `~/.gemini/config/hooks.json`, with `--agent` set to the CLI's name
+  in both and a timeout of 120 seconds where the CLI's default is 30. `CLAUDE_CONFIG_DIR`, `CODEX_HOME`
+  and `COPILOT_HOME` move these files as they move the CLIs' own (ADR 0015).
+- The binary is written as the absolute path of the running `derbent`, symbolic links resolved, with
+  forward slashes: in exec form for Claude Code, whose hook shell is Git Bash or PowerShell depending on
+  what is installed; as `& "<path>"` in Copilot CLI's PowerShell field; and elsewhere in double quotes
+  when it holds a character a shell reads. A path that holds `"`, `$`, `` ` ``, `%` or `!` is refused.
+- init never replaces or removes an entry: an MCP entry named `derbent`, or a hook that runs
+  `derbent gate` in any form, leaves that part as it is. It prints every change (the file, the copy it
+  will make, the exact text added or the command it will run), escaped, and asks once unless `--yes`;
+  `--dry-run` prints and changes nothing. A file that exists is copied to
+  `<file>.derbent-backup-<UTC time>` before its first change. JSON is decoded, extended and written back
+  with two-space indentation, so key order may change. Codex's TOML is never re-encoded: the new tables
+  are appended as text once both the file and the result parse. A file that does not parse is left as it
+  is, and its CLI fails with the file and the error. New files get 0600 and new directories 0700. init
+  starts no session and talks to no model; only the CLIs' own `mcp add` commands do whatever they do.
+- **doctor.** `derbent doctor [--cli <list>] [--config path]` reads the same files and Derbent's own, and
+  writes nothing. Per CLI it checks that an MCP entry runs `derbent mcp` under the name the hook skips
+  (`derbent`, or the hook's `--server`), that a hook runs `derbent gate`, that both binaries exist, that
+  the hook's timeout, as set or the CLI's default (600 seconds for Claude Code and Codex, 30 for Copilot
+  CLI and Antigravity CLI), is above `[approvals] timeout`, that both use the same `--agent`, that
+  `--cli` is given when the agent is not the CLI's name, and for Codex that every `${env:NAME}` in
+  Derbent's config is in the entry's `env_vars`. For Derbent it checks that the config exists, parses and
+  compiles, and that the database can be written or created. It times three starts of each hook binary
+  with `version` and reports the middle one as a note, with what it costs when it is over 500 ms. Each
+  line is `ok`, `problem` with its fix, or `note`, escaped, and the exit status is 1 when there is a
+  problem.
+
 ## Terminal UI
 
 Bubble Tea. Calls waiting for the user sit at the top, one line each, with the highlighted call's
@@ -645,6 +693,7 @@ derbent/
 ├── internal/downstream/          MCP clients for stdio and HTTP servers, restarts
 ├── internal/memory/              memory over FTS5
 ├── internal/pin/                 tool pins: canonical definitions and the pins table
+├── internal/preset/              the rule presets derbent init writes
 ├── internal/receipt/             appending, verify, listing
 ├── internal/redact/              masking secrets in stored arguments
 ├── internal/approval/            pending approvals, polling, session grants
@@ -699,6 +748,7 @@ derbent/
 | 0012 | Budgets count receipts, every matching budget applies, and a used-up budget refuses without asking. |
 | 0013 | Downstream tools are pinned on first use, and a changed tool is withheld until the user accepts it. |
 | 0014 | Project rules in `.derbent.toml` can only tighten the user's rules and never change tool listings. |
+| 0016 | Presets are files written once and owned by the user, never a mode Derbent keeps. |
 
 ## Milestones
 

@@ -1,0 +1,404 @@
+# Derbent preset: balanced
+#
+# Reading is allowed. Pushing, force flags, deleting files, piping a download into a shell,
+# infrastructure commands and writes to .env files and ~/.ssh ask you first, and so does every
+# GitHub tool that is not a known read. Everything else is allowed, and every call is recorded
+# (derbent receipts).
+#
+# Derbent wrote this file once and never changes it (ADR 0016): it is yours to edit. Rules are tried
+# from the top and the first match wins, so a rule wins over every rule below it. The last rule must
+# have no condition. `derbent config check` validates the file after an edit.
+#
+# Shell rules are text patterns, not a shell parser. `*git push*` matches "git push" anywhere in the
+# command, so `cd repo && git push` asks too. They can be fooled, by a variable, an alias, a script
+# or other spacing, so they guard against mistakes, not against an agent set on getting past them.
+# They are also stricter than they look where they catch too much: `*rm *` catches `git rm`,
+# `npm rm` and every word that ends in "rm" before a space, such as "platform x". Patterns are
+# case-sensitive.
+#
+# Each CLI names its built-in tools and their arguments its own way, so the rules cover all four:
+#   Claude Code      native__Bash, native__PowerShell, native__Monitor (command)
+#                    native__Write, native__Edit (file_path)
+#   Codex            native__Bash (command), native__apply_patch (command: the whole patch)
+#   Copilot CLI      native__bash, native__powershell (command)
+#                    native__create, native__edit (path)
+#   Antigravity CLI  native__run_command (CommandLine)
+#                    native__write_to_file, native__replace_file_content,
+#                    native__multi_replace_file_content (TargetFile)
+
+# --- Derbent's memory tools, for every agent.
+
+[[rule]]
+tool   = "memory_*"
+action = "allow"
+
+# --- Built-in tools that only read or keep notes, named exactly, so that a tool a CLI adds later is
+# not allowed by accident. Reading a .env file with them is allowed; writing one asks, below.
+
+# Claude Code
+[[rule]]
+tool   = "native__Read"
+action = "allow"
+
+[[rule]]
+tool   = "native__Glob"
+action = "allow"
+
+[[rule]]
+tool   = "native__Grep"
+action = "allow"
+
+[[rule]]
+tool   = "native__LSP"
+action = "allow"
+
+[[rule]]
+tool   = "native__ToolSearch"
+action = "allow"
+
+[[rule]]
+tool   = "native__TodoWrite"
+action = "allow"
+
+[[rule]]
+tool   = "native__TaskCreate"
+action = "allow"
+
+[[rule]]
+tool   = "native__TaskGet"
+action = "allow"
+
+[[rule]]
+tool   = "native__TaskList"
+action = "allow"
+
+[[rule]]
+tool   = "native__TaskUpdate"
+action = "allow"
+
+[[rule]]
+tool   = "native__AskUserQuestion"
+action = "allow"
+
+[[rule]]
+tool   = "native__EnterPlanMode"
+action = "allow"
+
+[[rule]]
+tool   = "native__ExitPlanMode"
+action = "allow"
+
+# Codex
+[[rule]]
+tool   = "native__update_plan"
+action = "allow"
+
+[[rule]]
+tool   = "native__view_image"
+action = "allow"
+
+# Copilot CLI
+[[rule]]
+tool   = "native__view"
+action = "allow"
+
+[[rule]]
+tool   = "native__glob"
+action = "allow"
+
+[[rule]]
+tool   = "native__grep"
+action = "allow"
+
+[[rule]]
+tool   = "native__rg"
+action = "allow"
+
+[[rule]]
+tool   = "native__read_bash"
+action = "allow"
+
+[[rule]]
+tool   = "native__read_powershell"
+action = "allow"
+
+[[rule]]
+tool   = "native__list_bash"
+action = "allow"
+
+[[rule]]
+tool   = "native__list_powershell"
+action = "allow"
+
+[[rule]]
+tool   = "native__ask_user"
+action = "allow"
+
+# Antigravity CLI
+[[rule]]
+tool   = "native__view_file"
+action = "allow"
+
+[[rule]]
+tool   = "native__list_dir"
+action = "allow"
+
+[[rule]]
+tool   = "native__find_by_name"
+action = "allow"
+
+[[rule]]
+tool   = "native__grep_search"
+action = "allow"
+
+# --- Writes to .env files and to ~/.ssh ask. A rule with an args condition matches any tool that has
+# that argument, so these name the argument each CLI's file tools use. `*.env*` also catches
+# .env.local, prod.env and .envrc, and `*.ssh*` catches ~/.ssh with either kind of slash.
+
+[[rule]]
+tool   = "native__*"
+args   = { file_path = "*.env*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { file_path = "*.ssh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { path = "*.env*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { path = "*.ssh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { TargetFile = "*.env*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { TargetFile = "*.ssh*" }
+action = "ask"
+
+# Codex sends a file edit as a patch in `command`, with each file's path inside it.
+[[rule]]
+tool   = "native__apply_patch"
+args   = { command = "*.env*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__apply_patch"
+args   = { command = "*.ssh*" }
+action = "ask"
+
+# Every other Codex patch is allowed here, before the shell rules below: its `command` is the patch,
+# and code that mentions "git push", or a word ending in "rm", would otherwise ask on every edit.
+[[rule]]
+tool   = "native__apply_patch"
+action = "allow"
+
+# --- Shell commands that are hard to undo ask. Each pattern comes twice: for the `command` of every
+# CLI's shell tool but Antigravity CLI's, and for Antigravity CLI's `CommandLine`.
+
+# Pushing.
+[[rule]]
+tool   = "native__*"
+args   = { command = "*git push*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*git push*" }
+action = "ask"
+
+# Force flags. The short -f of `git push -f` and `rm -f` is caught by the push and delete rules.
+[[rule]]
+tool   = "native__*"
+args   = { command = "*--force*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*--force*" }
+action = "ask"
+
+# Deleting files. In PowerShell, rm and del are names for Remove-Item; `del` itself is not a pattern
+# here, because "model x" holds it.
+[[rule]]
+tool   = "native__*"
+args   = { command = "*rm *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*rm *" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*Remove-Item*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*Remove-Item*" }
+action = "ask"
+
+# A download piped into a shell: curl or wget into sh or bash, or anything piped into iex
+# (Invoke-Expression) in PowerShell. `*curl*|*sh*` also catches `curl x | grep shell`.
+[[rule]]
+tool   = "native__*"
+args   = { command = "*curl*|*sh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*curl*|*sh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*wget*|*sh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*wget*|*sh*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*|*iex*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*|*iex*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*Invoke-Expression*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*Invoke-Expression*" }
+action = "ask"
+
+# Infrastructure.
+[[rule]]
+tool   = "native__*"
+args   = { command = "*terraform apply*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*terraform apply*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*terraform destroy*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*terraform destroy*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl delete*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl delete*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*kubectl apply*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*kubectl apply*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__*"
+args   = { command = "*helm uninstall*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__run_command"
+args   = { CommandLine = "*helm uninstall*" }
+action = "ask"
+
+# --- The GitHub MCP server, when it sits behind Derbent as [servers.github]: twelve read tools known
+# by name are allowed, and every other GitHub tool asks, because the server writes under many names,
+# such as issue_write and add_issue_comment. Change the prefix if your server has another name.
+
+[[rule]]
+tool   = "github__get_me"
+action = "allow"
+
+[[rule]]
+tool   = "github__get_file_contents"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_code"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_repositories"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_issues"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_pull_requests"
+action = "allow"
+
+[[rule]]
+tool   = "github__issue_read"
+action = "allow"
+
+[[rule]]
+tool   = "github__list_issues"
+action = "allow"
+
+[[rule]]
+tool   = "github__pull_request_read"
+action = "allow"
+
+[[rule]]
+tool   = "github__list_pull_requests"
+action = "allow"
+
+[[rule]]
+tool   = "github__list_commits"
+action = "allow"
+
+[[rule]]
+tool   = "github__get_commit"
+action = "allow"
+
+[[rule]]
+tool   = "github__*"
+action = "ask"
+
+# --- Everything else is allowed.
+
+[[rule]]
+action = "allow"
