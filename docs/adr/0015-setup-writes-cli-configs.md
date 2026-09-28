@@ -21,22 +21,27 @@ user, is often edited by hand, and in Claude Code's case is rewritten by the CLI
   `derbent gate` in any form and in any user-level file the CLI reads hooks from (Codex's `hooks.json`
   as well as `config.toml`, Antigravity CLI's `settings.json` as well as `hooks.json`), counts as set up
   and is left alone. A file init only looks in, and never writes, may hold comments the CLI accepts:
-  when it does not parse, init goes on and says it could not check it.
+  when it does not parse, init goes on and says it could not check it. A gate hook whose matcher covers
+  only some tools is not widened and gets no second hook beside it: init changes nothing for that CLI
+  and says to widen the matcher, which is the user's call.
 - It shows every change, asks once, and copies each file that exists before its first change. JSON is
   decoded and written back; Codex's TOML is appended to as text, never re-encoded, and only when the file
-  and the result both parse. A file that does not parse is left as it is.
+  and the result both parse. A file that does not parse is left as it is. When a change fails, init
+  names the changes already made and the copies, so the user can finish or undo them.
 - The binary is written as the running binary's absolute path, never a bare `derbent`, in the form each
   field is read: exec form for Claude Code, `& "<path>"` in PowerShell, a double-quoted word elsewhere
-  when the path needs one. A path that some shell would read even inside double quotes is refused, and
-  so is one holding `&`, `^`, `|`, `<` or `>`, which cmd.exe reads in the unquoted argument Go passes to a
-  CLI installed as a `.cmd` shim.
+  when the path needs one. A path that some shell would read even inside double quotes, or that holds a
+  control character, is refused, and so is one holding `&`, `^`, `|`, `<` or `>`, which cmd.exe reads in
+  the unquoted argument Go passes to a CLI installed as a `.cmd` shim.
 - A Claude Code older than the exec form is not set up: init says to upgrade it instead.
 - `derbent doctor` reads the same files, checks what init writes and the mistakes init cannot prevent,
-  and writes nothing.
+  and changes no file. Its one write is where the database does not exist yet: a file created in the
+  nearest directory on its path and removed at once, to check that the database can be created there.
 
 ## Consequences
 
-- A user who moves the binary runs init again; doctor names the path that is gone.
+- A user who moves the binary corrects the path in each entry, or removes the entries and runs init
+  again, since init leaves an existing entry alone; doctor names the path that is gone.
 - A JSON file's keys may come back in another order, with two-space indentation; the copy keeps the
   original.
 - init follows each CLI's file layout and `mcp add` syntax, which change between releases. They were

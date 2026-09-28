@@ -486,31 +486,62 @@ a first config.
   Antigravity CLI, and the pre-tool hook by editing `~/.claude/settings.json`, `~/.codex/config.toml`,
   `~/.copilot/hooks/derbent.json` or `~/.gemini/config/hooks.json`, with `--agent` set to the CLI's name
   in both and a timeout of 120 seconds where the CLI's default is 30. `CLAUDE_CONFIG_DIR`, `CODEX_HOME`
-  and `COPILOT_HOME` move these files as they move the CLIs' own (ADR 0015).
+  and `COPILOT_HOME` move these files as they move the CLIs' own (ADR 0015). A CLI named with `--cli`
+  whose command is not on `PATH` still gets its hook, and init prints its `mcp add` for the user to run.
 - The binary is written as the absolute path of the running `derbent`, symbolic links resolved, with
   forward slashes: in exec form for Claude Code, whose hook shell is Git Bash or PowerShell depending on
   what is installed; as `& "<path>"` in Copilot CLI's PowerShell field; and elsewhere in double quotes
-  when it holds a character a shell reads. A path that holds `"`, `$`, `` ` ``, `%` or `!` is refused.
+  when it holds a character a shell reads. A path that holds `"`, `$`, `` ` ``, `%`, `!`, `&`, `^`, `|`,
+  `<`, `>` or a control character is refused: some shell reads the first five even inside double quotes,
+  and a CLI installed as a `.cmd` shim, as npm installs them, runs through cmd.exe, which reads `&`, `^`,
+  `|`, `<` and `>` in an argument Go quotes only when it holds a space.
+- Claude Code before 2.1.139 starts an exec-form hook without its args, so the hook would decide
+  nothing. init reads `claude --version` and skips an older Claude Code, a pre-release of 2.1.139
+  included, saying to upgrade it; when the version cannot be read or `claude` is not on `PATH`, it goes
+  on with a note. For Codex it says that the new hook runs only after the user trusts it in `/hooks`.
 - init never replaces or removes an entry: an MCP entry named `derbent`, or a hook that runs
-  `derbent gate` in any form, leaves that part as it is. It prints every change (the file, the copy it
-  will make, the exact text added or the command it will run), escaped, and asks once unless `--yes`;
-  `--dry-run` prints and changes nothing. A file that exists is copied to
-  `<file>.derbent-backup-<UTC time>` before its first change. JSON is decoded, extended and written back
-  with two-space indentation, so key order may change. Codex's TOML is never re-encoded: the new tables
-  are appended as text once both the file and the result parse. A file that does not parse is left as it
-  is, and its CLI fails with the file and the error. New files get 0600 and new directories 0700. init
-  starts no session and talks to no model; only the CLIs' own `mcp add` commands do whatever they do.
-- **doctor.** `derbent doctor [--cli <list>] [--config path]` reads the same files and Derbent's own, and
-  writes nothing. Per CLI it checks that an MCP entry runs `derbent mcp` under the name the hook skips
-  (`derbent`, or the hook's `--server`), that a hook runs `derbent gate`, that both binaries exist, that
-  the hook's timeout, as set or the CLI's default (600 seconds for Claude Code and Codex, 30 for Copilot
-  CLI and Antigravity CLI), is above `[approvals] timeout`, that both use the same `--agent`, that
-  `--cli` is given when the agent is not the CLI's name, and for Codex that every `${env:NAME}` in
-  Derbent's config is in the entry's `env_vars`. For Derbent it checks that the config exists, parses and
-  compiles, and that the database can be written or created. It times three starts of each hook binary
-  with `version` and reports the middle one as a note, with what it costs when it is over 500 ms. Each
-  line is `ok`, `problem` with its fix, or `note`, escaped, and the exit status is 1 when there is a
-  problem.
+  `derbent gate` in any form, leaves that part as it is. It looks for such a hook in every user-level file
+  the CLI reads hooks from, though it writes only the one above: Codex's `hooks.json` beside
+  `config.toml`, and Antigravity CLI's `~/.gemini/antigravity-cli/settings.json` beside `hooks.json`. A
+  file it only looks in may hold comments the CLI accepts; when it does not parse as JSON, init goes on
+  and notes that it could not check it. A gate hook whose matcher covers only some tools, such as `Bash`,
+  gates only those: init adds no second hook beside it, changes nothing for that CLI, and says to widen
+  the matcher.
+- It prints every change (the file, the copy it will make, the exact text added or the command it will
+  run), escaped, and asks once unless `--yes`; `--dry-run` prints and changes nothing. A file that exists
+  is copied to `<file>.derbent-backup-<UTC time>` before its first change. When a change fails, init names
+  the copy of its file and the changes already made, each with its copy, so the user can finish or undo
+  them. JSON is decoded, extended and written back with two-space indentation, so key order may change.
+  Codex's TOML is never re-encoded: the new tables are appended as text once both the file and the
+  result parse. A file that does not parse is left as it is, and its CLI fails with the file and the
+  error. New files get 0600 and new directories 0700. init starts no session and talks to no model; only
+  the CLIs' own `mcp add` commands do whatever they do.
+- **doctor.** `derbent doctor [--cli <list>] [--config path]` reads the same files and Derbent's own. Per
+  CLI it checks every hook that runs `derbent gate`, in each user-level file the CLI reads hooks from:
+  that there is one, since without it the built-in tools are not gated, and only one, since two decide
+  every call twice, and that its matcher covers every tool. It checks that the MCP entry the hook skips
+  (`derbent`, or the hook's `--server`) runs `derbent mcp`, for Claude Code the current directory's
+  local-scope entry over the user one, as Claude Code picks it, and that no entry under another name
+  runs `derbent mcp`, since the hook would decide and record its calls to Derbent's own tools twice. It
+  checks that each program the entry and the hooks start is on `PATH` or is a regular file, executable
+  outside Windows; that the hook's timeout, as set or the CLI's default (600 seconds for Claude Code and
+  Codex, 30 for Copilot CLI and Antigravity CLI), is above `[approvals] timeout` in the config the hook
+  loads, its own `--config` or the default one; that both use the same `--agent`; that `--cli` is given
+  when the agent is not the CLI's name; for a Claude Code hook in exec form, that `claude --version` is
+  2.1.139 or later; and for Codex, that every `${env:NAME}` in the config its MCP entry loads is in the
+  entry's `env_vars` or `env`.
+- For Derbent, doctor checks that the config exists and loads as the hook loads it, and that the database
+  can be written and is one Derbent can use: `store.Check` makes the checks the gate makes when it opens
+  the file, so another program's file or a newer schema is a problem. A database with a `-wal` beside it
+  is live, or was left so, and is opened read-only, reading the `-wal`, so pages a writer has not yet
+  checkpointed are not taken for corruption; any other is opened immutable, which takes no lock and adds
+  no file. Where the database does not exist yet, doctor creates one file in the nearest directory on its
+  path and removes it at once, to check that the database can be created there; that is the only write
+  it makes. It times three starts of each hook binary with `version` and reports the middle one as a
+  note, never a problem, with what it costs when it is over 500 ms. What it cannot check is a note too:
+  the Codex trust step, a file it only looks in that does not parse, a Claude Code version it cannot read
+  or a `claude` not on `PATH`. Each line is `ok`, `problem` with its fix, or `note`, escaped, and the
+  exit status is 1 when there is a problem.
 
 ## Terminal UI
 
@@ -645,6 +676,23 @@ migrates it inside `BEGIN IMMEDIATE`.
   that does not exist yet, below a symbolic link to a repository, the repository's own key and root.
   End-to-end tests show the hook asking under a linked worktree's own `.derbent.toml` while the main
   checkout has none, and denying under the file of a worktree of a bare repository.
+- **Setup.** Preset tests load each preset through the parser `derbent config check` uses and decide one
+  list of sample calls under each, with each CLI's tool names and argument keys. Golden tests fix the
+  command and the text init adds for each CLI, for a binary path that holds a space; unit tests cover the
+  quoting and the paths refused, the TOML append that keeps every byte of the file, the hook forms counted
+  as `derbent gate`, the matchers counted as every tool, the other user-level hook files, Claude Code's
+  local scope, the version compare, and the variables that move each CLI's files. End-to-end tests run
+  init and doctor against a scratch home, with fake `claude`, `codex` and `copilot` commands, the test
+  binary re-executed, that log their arguments. They check each file's result and its copy, that a
+  second run changes nothing, that an existing entry is left alone, a hook in Codex's `hooks.json` or
+  Antigravity CLI's `settings.json` included, that a file that does not parse is left byte for byte,
+  that `--dry-run` and any answer but `y` or `yes` write nothing, that an old Claude Code and a hook that
+  gates only some tools are skipped with the reason, and that a failed change names what was already
+  made. doctor passes a setup init made, with the hook's start time as a note, and names each of 24
+  planted problems, alone, with its fix; the two that need Unix file modes run only on Linux and macOS.
+  Store tests show `store.Check` refusing a newer schema, another program's SQLite file and a text file,
+  leaving a database byte for byte with no file beside it, and passing 200 checks of a database another
+  connection is writing and checkpointing.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
@@ -871,4 +919,10 @@ Not in v1, in rough order of value:
 - Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call
   took 83.03 ms at p50, 46.91 ms of it for starting the binary; on Linux, 7.381 ms
   (`docs/benchmark-results/`).
+- An endpoint scanner can make every start of an unsigned binary slow: on one managed Windows 11 machine
+  with Microsoft Defender for Endpoint, `derbent version` took 1.8 seconds at p50. Each built-in tool call
+  then waits that long for the hook. `derbent doctor` times the hook's start on the user's own machine.
+- init and doctor follow each CLI's file layout and `mcp add` syntax as documented on 2026-09-28. A CLI
+  release that moves them breaks init for that CLI until Derbent follows; doctor names what it cannot
+  find.
 - CI runs the tests on Windows and Linux; on macOS it only builds.
