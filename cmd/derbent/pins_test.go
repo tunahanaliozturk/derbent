@@ -340,3 +340,29 @@ func TestDifferShowsWhatMoved(t *testing.T) {
 		t.Fatal("differ compared 3000 by 3000 lines; it should give up above its limit")
 	}
 }
+
+// The accept line pins show prints is pasted into bash, PowerShell or cmd, so the --db in it must mean
+// the same path in each and run nothing. A path that no one quoting can carry is left for the user to
+// fill in.
+func TestShellArgIsSafeInEveryShell(t *testing.T) {
+	back := string(rune(92)) // a backslash, written so no tool turns it into an escape
+	for path, want := range map[string]string{
+		"C:/x/p.db": "C:/x/p.db",
+		"/home/me/.local/state/derbent/derbent.db":                "/home/me/.local/state/derbent/derbent.db",
+		"C:" + back + "Users" + back + "me" + back + "derbent.db": `"C:` + back + "Users" + back + "me" + back + `derbent.db"`,
+		"/home/me/my dir/p.db":                                    `"/home/me/my dir/p.db"`,
+		"C:/x/$(echo INJECTED)/p.db":                              "",
+		"C:/x/`echo INJECTED`/p.db":                               "",
+		"C:/x/%PATH%/p.db":                                        "",
+		"/x/!!/p.db":                                              "",
+		`/x/"/p.db`:                                               "",
+		back + back + "server" + back + "share" + back + "p.db":   "",
+		"C:" + back + "x" + back:                                  "",
+		"/x/a\nb.db":                                              "",
+	} {
+		got, ok := shellArg(path)
+		if ok != (want != "") || got != want {
+			t.Errorf("shellArg(%q) = %q, %v; want %q", path, got, ok, want)
+		}
+	}
+}

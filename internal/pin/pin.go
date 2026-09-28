@@ -136,6 +136,19 @@ func scanPin(row interface{ Scan(dest ...any) error }) (Pin, error) {
 // longer lists keep their pins. One transaction covers the whole list, so gates that start at the same
 // moment pin each tool once.
 func (s *Store) Check(ctx context.Context, server string, tools []*mcp.Tool) (map[string]bool, error) {
+	return s.check(ctx, server, tools, true)
+}
+
+// CheckWithheld is Check for tools a gate withheld because their pins could not be checked, as its
+// watcher checks them again. It pins a tool that has none and reports changes as Check does, but, like
+// Recheck, records a change only when none is recorded and never drops one, so the change the user is
+// reviewing stays the change on record.
+func (s *Store) CheckWithheld(ctx context.Context, server string, tools []*mcp.Tool) (map[string]bool, error) {
+	return s.check(ctx, server, tools, false)
+}
+
+// check is Check, and with replace false CheckWithheld.
+func (s *Store) check(ctx context.Context, server string, tools []*mcp.Tool, replace bool) (map[string]bool, error) {
 	type seen struct{ name, def, sum string }
 	list := make([]seen, 0, len(tools))
 	for _, t := range tools {
@@ -155,13 +168,13 @@ func (s *Store) Check(ctx context.Context, server string, tools []*mcp.Tool) (ma
 				_, err = conn.ExecContext(ctx, `INSERT INTO pins (server, tool, sha256, definition, pinned_ms) VALUES (?, ?, ?, ?, ?)`,
 					server, t.name, t.sum, t.def, now)
 			case err != nil:
-			case p.SHA256 == t.sum && p.NewSHA256 != "":
+			case p.SHA256 == t.sum && p.NewSHA256 != "" && replace:
 				_, err = conn.ExecContext(ctx, `UPDATE pins SET new_sha256 = '', new_definition = '', changed_ms = 0
 					WHERE server = ? AND tool = ?`, server, t.name)
 			case p.SHA256 == t.sum:
 			default:
 				changed[t.name] = true
-				if p.NewSHA256 != t.sum {
+				if p.NewSHA256 != t.sum && (replace || p.NewSHA256 == "") {
 					_, err = conn.ExecContext(ctx, `UPDATE pins SET new_sha256 = ?, new_definition = ?, changed_ms = ?
 						WHERE server = ? AND tool = ?`, t.sum, t.def, now, server, t.name)
 				}

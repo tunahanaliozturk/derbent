@@ -31,8 +31,11 @@ var (
 	// wholeSHA256 is a hash as derbent pins accept takes it: all 64 hex digits, never a prefix (see
 	// pin.Store.Accept).
 	wholeSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	// plainArg is a command-line argument that bash, PowerShell and cmd all take as it is.
-	plainArg = regexp.MustCompile(`^[A-Za-z0-9_./\\:-]+$`)
+	// plainArg is a command-line argument that bash, PowerShell and cmd all take as it is. A backslash is
+	// not one: bash drops it outside quotes.
+	plainArg = regexp.MustCompile(`^[A-Za-z0-9_./:-]+$`)
+	// quotableArg holds none of the characters that bash, PowerShell or cmd act on inside double quotes.
+	quotableArg = regexp.MustCompile("^[^\"$`%!\\x00-\\x1f\\x7f]+$")
 )
 
 // runPins lists the tool pins, shows one tool's change, or accepts it: derbent pins [--json],
@@ -84,15 +87,20 @@ func runPins(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	return acceptPin(ctx, path, server, tool, given, stdout)
 }
 
-// shellArg is s as it can be pasted into bash, PowerShell or cmd: as it is when it holds only letters,
-// digits and _ . / \ : -, and in double quotes otherwise, which covers spaces.
-// ponytail: a path holding a double quote, $ or a backtick still needs quoting by hand after pasting;
-// per-shell quoting if one ever does.
-func shellArg(s string) string {
-	if plainArg.MatchString(s) {
-		return s
+// shellArg is s as it can be pasted into bash, PowerShell or cmd and mean the same in each: as it is when
+// it holds only letters, digits and _ . / : -, and in double quotes when it also holds spaces or single
+// backslashes, which all three keep inside them. It gives false for a value double quotes cannot carry
+// into all three: one holding " $ ` % ! or a control character, two backslashes in a row or one at the
+// end. Inside double quotes bash and PowerShell run $(...), bash runs backticks, cmd expands %VAR%, and
+// bash reads \\ as one backslash and \" as a quote.
+func shellArg(s string) (string, bool) {
+	switch {
+	case plainArg.MatchString(s):
+		return s, true
+	case quotableArg.MatchString(s) && !strings.Contains(s, `\\`) && !strings.HasSuffix(s, `\`):
+		return `"` + s + `"`, true
 	}
-	return `"` + s + `"`
+	return "", false
 }
 
 // listPins prints every pin with its state, as rows or JSON lines. It opens the database read-only.
@@ -170,11 +178,19 @@ func showPin(ctx context.Context, path, dbFlag, server, tool string, stdout io.W
 		} else {
 			b.WriteString("  too long to line up; compare the two definitions above in full\n")
 		}
-		db := ""
+		db, fill := "", false
 		if dbFlag != "" {
-			db = "--db " + shellArg(visible.Escape(dbFlag)) + " "
+			arg, ok := shellArg(dbFlag)
+			fill = !ok || visible.Escape(dbFlag) != dbFlag
+			if fill {
+				arg = "<path>"
+			}
+			db = "--db " + arg + " "
 		}
 		fmt.Fprintf(&b, "to accept this change: derbent pins accept %s%s %s\n", db, name, visible.Escape(p.NewSHA256))
+		if fill {
+			b.WriteString("  put the --db path you gave in place of <path>: it holds characters no quoting carries safely into every shell\n")
+		}
 	}
 	_, err = io.WriteString(stdout, b.String())
 	return err

@@ -51,7 +51,8 @@ new text under the same name and the same rules.
   definition of its tool, so it could find two whose hashes share their first 8 hex digits in about 2^16
   tries, show one for review and send the other.
 - The watcher of a gate waiting on a changed tool only reads its pin, and records its own definition as
-  the change only when none is recorded, so it never replaces the recorded change. A gate that lists the
+  the change only when none is recorded, so it never replaces the recorded change. The same holds when it
+  checks again a tool whose first pin check failed. A gate that lists the
   server's tools again, at its start, on a reconnect or after `list_changed`, does record its definition
   as the change, and two gates holding different definitions, such as `npx pkg@latest` resolved at
   different starts, can then replace each other's. An accept of the hash the user reviewed is refused
