@@ -28,7 +28,7 @@ type initPlan struct {
 	changes []setup.Change
 	done    []string // the parts already set up
 	skip    string   // why nothing is set up for the CLI, when init chose not to
-	note    string   // something the user should know before the changes are made
+	notes   []string // what the user should know before the changes are made
 	err     error
 }
 
@@ -82,12 +82,18 @@ func runInit(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	for _, cli := range clis {
 		pl := initPlan{cli: cli}
 		if cli == "claude" {
-			pl.skip, pl.note = claudeCheck(ctx)
+			var note string
+			if pl.skip, note = claudeCheck(ctx); note != "" {
+				pl.notes = append(pl.notes, note)
+			}
 		}
 		if pl.skip == "" {
 			var p setup.Paths
 			if p, pl.err = setup.PathsOf(cli); pl.err == nil {
 				pl.changes, pl.done, pl.err = setup.Plan(cli, p, bin)
+				for _, file := range setup.Unchecked(cli, p) {
+					pl.notes = append(pl.notes, "could not read "+file+" as JSON, so it was not checked for a derbent gate hook: if it holds one, remove one of the two")
+				}
 			}
 		}
 		plans = append(plans, pl)
@@ -109,8 +115,8 @@ func runInit(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		printChange(stdout, c, now, *presetName)
 	}
 	for _, pl := range plans {
-		if pl.note != "" {
-			fmt.Fprintf(stdout, "%s: note: %s\n", pl.cli, visible.Escape(pl.note))
+		for _, note := range pl.notes {
+			fmt.Fprintf(stdout, "%s: note: %s\n", pl.cli, visible.Escape(note))
 		}
 	}
 	if len(clis) == 0 {
@@ -221,8 +227,8 @@ func printChange(w io.Writer, c setup.Change, now time.Time, presetName string) 
 
 // applyChanges makes changes in order, copying each file that exists before its first change in this
 // run; backedUp maps each file copied to its copy, "" when there was no file. A command the user has to
-// run is skipped. When a change fails, the error names the changes already made and their copies, so
-// the user can finish or undo them.
+// run is skipped. When a change fails, the error names the copy of its file, the changes already made
+// and their copies, so the user can finish or undo them.
 func applyChanges(ctx context.Context, changes []setup.Change, now time.Time, backedUp map[string]string, stdout, stderr io.Writer) error {
 	var made []string
 	for _, c := range changes {
@@ -237,6 +243,9 @@ func applyChanges(ctx context.Context, changes []setup.Change, now time.Time, ba
 			backedUp[c.File] = backup
 		}
 		if err := c.Apply(ctx, stdout, stderr); err != nil {
+			if backup := backedUp[c.File]; backup != "" {
+				err = fmt.Errorf("%w; the copy of %s made before this change: %s", err, c.File, backup)
+			}
 			return alreadyMade(err, made)
 		}
 		what := "edited " + c.File
@@ -261,15 +270,16 @@ func alreadyMade(err error, made []string) error {
 }
 
 // claudeCheck returns why Claude Code is skipped, when the claude on PATH is older than the exec-form
-// hook needs, or a note when its version cannot be read. A claude that is not on PATH is not checked.
+// hook needs, or a note when its version cannot be read or claude is not on PATH.
 func claudeCheck(ctx context.Context) (skip, note string) {
+	const needs = "the hook init writes needs Claude Code " + setup.MinClaudeVersion + " or later"
 	if _, err := exec.LookPath("claude"); err != nil {
-		return "", ""
+		return "", "claude is not on PATH, so its version was not checked; " + needs
 	}
 	v, err := setup.ClaudeVersion(ctx)
 	switch {
 	case err != nil:
-		return "", "could not read Claude Code's version (" + err.Error() + "); the hook init writes needs " + setup.MinClaudeVersion + " or later"
+		return "", "could not read Claude Code's version (" + err.Error() + "); " + needs
 	case setup.VersionBefore(v, setup.MinClaudeVersion):
 		return "Claude Code " + v + " is older than " + setup.MinClaudeVersion + ", the first that passes a hook its args, so the hook would decide nothing: upgrade it (claude update) and run derbent init again", ""
 	}

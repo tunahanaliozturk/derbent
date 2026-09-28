@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -316,13 +317,42 @@ func TestHooksReadTheCLIsOtherUserFiles(t *testing.T) {
 			}
 		}
 	}
+
+	// Codex runs commandWindows instead of command on Windows.
+	write(filepath.Join(dir, "codex", "hooks.json"), `{"hooks": {"PreToolUse": [{"hooks": [{"command": "echo hi", "commandWindows": "derbent gate --agent codex"}]}]}}`)
+	if hooks, err := Hooks("codex", codex); err != nil || len(hooks) != 1 || hooks[0].RunsGate() != (runtime.GOOS == "windows") {
+		t.Errorf("commandWindows: hooks %+v, err %v; want the gate on Windows only", hooks, err)
+	}
+
+	// A file init only looks in, which the CLI may let hold comments, is skipped and reported, not an error.
+	write(settings, "{\n  // mine\n  \"hooks\": {}\n}\n")
+	if hooks, err := Hooks("antigravity", ag); err != nil || len(hooks) != 0 {
+		t.Errorf("a commented settings.json: hooks %+v, err %v; want none and no error", hooks, err)
+	}
+	if got := Unchecked("antigravity", ag); !slices.Equal(got, []string{settings}) {
+		t.Errorf("Unchecked = %v, want %s", got, settings)
+	}
+	if got := Unchecked("codex", codex); len(got) != 0 {
+		t.Errorf("Unchecked(codex) = %v, want none", got)
+	}
 }
 
 func TestVersionBefore(t *testing.T) {
 	for _, tc := range []struct {
 		v    string
 		want bool
-	}{{"2.1.138", true}, {"2.0.999", true}, {"1.9.200", true}, {"2.1.139", false}, {"2.1.283", false}, {"2.2.0", false}, {"10.0.0", false}} {
+	}{
+		{"2.1.138", true},
+		{"2.0.999", true},
+		{"1.9.200", true},
+		{"2.1.139", false},
+		{"2.1.283", false},
+		{"2.2.0", false},
+		{"10.0.0", false},
+		{"2.1.139-beta", true},
+		{"2.1.139-beta.1", true},
+		{"2.1.140-beta", false}, // a pre-release comes before its release
+	} {
 		if got := VersionBefore(tc.v, "2.1.139"); got != tc.want {
 			t.Errorf("VersionBefore(%s, 2.1.139) = %v, want %v", tc.v, got, tc.want)
 		}
