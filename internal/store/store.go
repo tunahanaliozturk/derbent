@@ -71,12 +71,18 @@ func OpenExisting(ctx context.Context, path string) (*sql.DB, error) {
 }
 
 // Check reports whether Open would take the existing database at path, making the checks OpenExisting
-// makes, and leaves no trace: SQLite opens the file immutable, so it takes no lock and adds no -shm or
-// -wal file beside it.
-// ponytail: immutable reads the main file only, so a schema change still in a live database's -wal is
-// not seen; the gate's own Open still refuses it.
+// makes, and leaves no trace. A database with a -wal file beside it is live, or was left so: it is
+// opened read-only as OpenExisting opens it, which reads the -wal, so it sees what a writer has not yet
+// checkpointed, and uses the -shm already there. Any other database is opened immutable: SQLite takes
+// no lock and adds no -shm or -wal file, and with no -wal the main file holds everything.
+// ponytail: a last writer that closes between the -wal check and the open removes the -wal and -shm,
+// which the read-only open then makes again; doctor runs by hand, so that window is left open.
 func Check(ctx context.Context, path string) error {
-	db, err := openReadOnly(ctx, path, "mode=ro&immutable=1")
+	params := "mode=ro&immutable=1"
+	if _, err := os.Stat(path + "-wal"); err == nil {
+		params = "mode=ro&_pragma=busy_timeout(5000)"
+	}
+	db, err := openReadOnly(ctx, path, params)
 	if err != nil {
 		return err
 	}

@@ -58,8 +58,10 @@ type derbentConfig struct {
 	envNames  []string
 }
 
-// runDoctor reads each CLI's config and Derbent's own, and names what is wrong with the fix. It writes
-// nothing, and returns errDoctorFound, which exits with status 1, when it found a problem.
+// runDoctor reads each CLI's config and Derbent's own, and names what is wrong with the fix, and returns
+// errDoctorFound, which exits with status 1, when it found a problem. It changes no file. Its one write:
+// where the database does not exist yet, it creates a file in the nearest directory on the database's
+// path and removes it at once, to check that the database can be created there (checkCanCreate).
 func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -127,8 +129,8 @@ func checkConfig(r *report, who, what, named string) derbentConfig {
 	return checked
 }
 
-// checkDatabase checks, without leaving a trace, that the database can be written and is one Derbent
-// can use, or that it can be created where it does not exist yet.
+// checkDatabase checks that the database can be written and is one Derbent can use, leaving it and its
+// directory as they were, or where it does not exist yet, that it can be created (checkCanCreate).
 func checkDatabase(ctx context.Context, r *report) {
 	path, err := databasePath("")
 	if err != nil {

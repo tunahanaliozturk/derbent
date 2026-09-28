@@ -208,6 +208,50 @@ func TestCheckRefusesWhatOpenRefusesAndWritesNothing(t *testing.T) {
 	}
 }
 
+// Check on a database another connection is writing and checkpointing, as a gate does while doctor
+// runs, reports no error: it must not call a live database malformed, or the user may move it away.
+func TestCheckPassesADatabaseBeingWritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	db := open(t, path)
+	insert := func(ctx context.Context) error {
+		_, err := db.ExecContext(ctx, `INSERT INTO memories (project, author, session, title, body, tags, at)
+			VALUES ('p', 'a', 's', 't', hex(randomblob(1000)), '', 'now')`)
+		return err
+	}
+	if err := insert(t.Context()); err != nil { // the -wal file exists from here on
+		t.Fatal(err)
+	}
+	ctx, stop := context.WithCancel(t.Context())
+	written := make(chan error, 1)
+	go func() {
+		var err error
+		for i := 1; err == nil && ctx.Err() == nil; i++ {
+			if err = insert(ctx); err == nil && i%4 == 0 {
+				_, err = db.ExecContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`)
+			}
+		}
+		if ctx.Err() != nil {
+			err = nil
+		}
+		written <- err
+	}()
+	failed := 0
+	for range 200 {
+		if err := store.Check(t.Context(), path); err != nil {
+			if failed++; failed <= 3 {
+				t.Errorf("Check: %v", err)
+			}
+		}
+	}
+	stop()
+	if err := <-written; err != nil {
+		t.Fatalf("the writer failed: %v", err)
+	}
+	if failed > 0 {
+		t.Errorf("%d of 200 checks failed on a database being written", failed)
+	}
+}
+
 // Deciding an approval writes, but a mistyped path must fail and name itself rather than create an
 // empty database where nothing is ever pending.
 func TestOpenExistingWritableNeedsTheFile(t *testing.T) {
