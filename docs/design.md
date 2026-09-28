@@ -700,6 +700,7 @@ derbent/
 ├── internal/memory/              memory over FTS5
 ├── internal/pin/                 tool pins: canonical definitions and the pins table
 ├── internal/preset/              the rule presets derbent init writes
+├── internal/setup/               the CLIs' config files: where they are, reading them, the changes init makes
 ├── internal/receipt/             appending, verify, listing
 ├── internal/redact/              masking secrets in stored arguments
 ├── internal/approval/            pending approvals, polling, session grants
@@ -754,6 +755,7 @@ derbent/
 | 0012 | Budgets count receipts, every matching budget applies, and a used-up budget refuses without asking. |
 | 0013 | Downstream tools are pinned on first use, and a changed tool is withheld until the user accepts it. |
 | 0014 | Project rules in `.derbent.toml` can only tighten the user's rules and never change tool listings. |
+| 0015 | Setup adds MCP entries through each CLI's own mcp add where there is one and edits hook files, never replacing an entry, with copies first and the binary's absolute path. |
 | 0016 | Presets are files written once and owned by the user, never a mode Derbent keeps. |
 
 ## Milestones

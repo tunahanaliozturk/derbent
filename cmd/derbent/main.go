@@ -17,7 +17,7 @@ var version = "dev"
 
 var errUsage = errors.New("usage: derbent [--db path] | derbent mcp --agent <name> | derbent pending | " +
 	"derbent approve [--session] <id> | derbent deny <id> | derbent grants | derbent revoke <id>|--all | " +
-	"derbent pins [show|accept] | derbent receipts | derbent verify | derbent config check | derbent gate --agent <name> | derbent version")
+	"derbent pins [show|accept] | derbent receipts | derbent verify | derbent config check | derbent gate --agent <name> | derbent init [--cli <list>] [--preset <name>] [--yes] [--dry-run] | derbent version")
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -42,6 +42,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runMCP(ctx, args[1:], stdin, stdout, stderr)
 	case "gate":
 		return runGate(ctx, args[1:], stdin, stdout, stderr)
+	case "init":
+		return runInit(ctx, args[1:], stdin, stdout, stderr)
 	case "pending":
 		return runPending(ctx, args[1:], stdout, stderr)
 	case "approve", "deny":
