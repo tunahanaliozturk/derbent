@@ -1,0 +1,15 @@
+# Derbent preset: watch
+#
+# Every call is allowed and recorded, and nothing is asked. This is for the first days, to see what
+# your agents do before you decide what to allow, deny or ask about. To look at what they did:
+#
+#   derbent receipts --since 24h     # every call of the last day: agent, tool, decision
+#   derbent receipts --json          # the same as JSON lines
+#   derbent                          # the terminal UI, with a live feed
+#
+# Derbent wrote this file once and never changes it (ADR 0016): it is yours to edit. When you have
+# seen enough, `derbent init --preset balanced --print` shows a stricter starting point, and
+# `derbent config check` validates this file after each edit.
+
+[[rule]]
+action = "allow"

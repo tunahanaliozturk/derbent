@@ -1,0 +1,210 @@
+# Derbent preset: strict
+#
+# Reading is allowed, and so are Derbent's memory tools and the GitHub server's known read tools.
+# Everything else asks you first: every shell command, every file edit and every tool of a
+# downstream server. Every call is recorded (derbent receipts). An ask nobody answers is denied when
+# [approvals] timeout runs out, 50 seconds unless you set it, so keep `derbent` open in a terminal.
+#
+# Derbent wrote this file once and never changes it (ADR 0016): it is yours to edit. Rules are tried
+# from the top and the first match wins. To let a call through without asking, add an allow above
+# the asks, for example:
+#
+#   [[rule]]
+#   tool   = "native__Bash"
+#   args   = { command = "go test *" }
+#   action = "allow"
+#
+# An args pattern is text, not a shell parser, and can be fooled: `go test ./... && git push` matches
+# `go test *`. Keep such allows narrow. `derbent config check` validates the file after an edit.
+#
+# Each CLI names its built-in tools its own way (native__Bash in Claude Code and Codex, native__bash
+# and native__powershell in Copilot CLI, native__run_command in Antigravity CLI, and so on), so the
+# read-only tools below are listed per CLI.
+
+# --- Derbent's memory tools, for every agent.
+
+[[rule]]
+tool   = "memory_*"
+action = "allow"
+
+# --- Built-in tools that only read or keep notes, named exactly, so that a tool a CLI adds later is
+# not allowed by accident.
+
+# Claude Code
+[[rule]]
+tool   = "native__Read"
+action = "allow"
+
+[[rule]]
+tool   = "native__Glob"
+action = "allow"
+
+[[rule]]
+tool   = "native__Grep"
+action = "allow"
+
+[[rule]]
+tool   = "native__LSP"
+action = "allow"
+
+[[rule]]
+tool   = "native__ToolSearch"
+action = "allow"
+
+[[rule]]
+tool   = "native__TodoWrite"
+action = "allow"
+
+[[rule]]
+tool   = "native__TaskCreate"
+action = "allow"
+
+[[rule]]
+tool   = "native__TaskGet"
+action = "allow"
+
+[[rule]]
+tool   = "native__TaskList"
+action = "allow"
+
+[[rule]]
+tool   = "native__TaskUpdate"
+action = "allow"
+
+[[rule]]
+tool   = "native__AskUserQuestion"
+action = "allow"
+
+[[rule]]
+tool   = "native__EnterPlanMode"
+action = "allow"
+
+[[rule]]
+tool   = "native__ExitPlanMode"
+action = "allow"
+
+# Codex
+[[rule]]
+tool   = "native__update_plan"
+action = "allow"
+
+[[rule]]
+tool   = "native__view_image"
+action = "allow"
+
+# Copilot CLI
+[[rule]]
+tool   = "native__view"
+action = "allow"
+
+[[rule]]
+tool   = "native__glob"
+action = "allow"
+
+[[rule]]
+tool   = "native__grep"
+action = "allow"
+
+[[rule]]
+tool   = "native__rg"
+action = "allow"
+
+[[rule]]
+tool   = "native__read_bash"
+action = "allow"
+
+[[rule]]
+tool   = "native__read_powershell"
+action = "allow"
+
+[[rule]]
+tool   = "native__list_bash"
+action = "allow"
+
+[[rule]]
+tool   = "native__list_powershell"
+action = "allow"
+
+[[rule]]
+tool   = "native__ask_user"
+action = "allow"
+
+# Antigravity CLI
+[[rule]]
+tool   = "native__view_file"
+action = "allow"
+
+[[rule]]
+tool   = "native__list_dir"
+action = "allow"
+
+[[rule]]
+tool   = "native__find_by_name"
+action = "allow"
+
+[[rule]]
+tool   = "native__grep_search"
+action = "allow"
+
+# --- The GitHub MCP server, when it sits behind Derbent as [servers.github]: twelve read tools known
+# by name are allowed. Change the prefix if your server has another name.
+
+[[rule]]
+tool   = "github__get_me"
+action = "allow"
+
+[[rule]]
+tool   = "github__get_file_contents"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_code"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_repositories"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_issues"
+action = "allow"
+
+[[rule]]
+tool   = "github__search_pull_requests"
+action = "allow"
+
+[[rule]]
+tool   = "github__issue_read"
+action = "allow"
+
+[[rule]]
+tool   = "github__list_issues"
+action = "allow"
+
+[[rule]]
+tool   = "github__pull_request_read"
+action = "allow"
+
+[[rule]]
+tool   = "github__list_pull_requests"
+action = "allow"
+
+[[rule]]
+tool   = "github__list_commits"
+action = "allow"
+
+[[rule]]
+tool   = "github__get_commit"
+action = "allow"
+
+# --- Every other built-in tool (their names start with native__), which covers every shell command
+# and every file edit, and every tool of a downstream server (<server>__<tool>) asks.
+
+[[rule]]
+tool   = "*__*"
+action = "ask"
+
+# --- The last rule must have no condition. Only a tool without "__" in its name reaches it.
+
+[[rule]]
+action = "ask"
