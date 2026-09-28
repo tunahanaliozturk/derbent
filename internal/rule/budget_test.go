@@ -48,6 +48,8 @@ func TestBudgetReached(t *testing.T) {
 		"two used up, the longer wait": {"claude", bash, []rule.Passed{
 			passed(bash, 50*time.Minute), passed(read, 5*time.Minute), passed(read, 3*time.Minute), passed(bash, time.Minute),
 		}, 3, 55 * time.Minute},
+		// After the clock is set back: the wait the agent reads is the real one (see Known limits).
+		"a call stamped after now keeps its time": {"codex", "github__get_me", []rule.Passed{passed("github__get_me", -2*time.Hour)}, 2, 2*time.Hour + 10*time.Minute},
 		"over the limit, the wait frees one call": {"claude", bash, []rule.Passed{
 			passed(bash, 40*time.Minute), passed(bash, 30*time.Minute), passed(bash, 20*time.Minute),
 		}, 1, 30 * time.Minute},
