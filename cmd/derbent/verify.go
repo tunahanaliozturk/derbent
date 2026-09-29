@@ -204,9 +204,10 @@ var rowKeys = func() []string {
 }()
 
 // decodeRow reads one export line into row. The line must be one JSON object that holds each of Row's
-// fields once, under its exact name, and nothing else. Go's decoder alone would match a name in any case,
-// keep the last of two copies, read a missing field as its zero value and stop at the end of the object,
-// so a line could show a reader one value while the hash covers another, or leave a field out unnoticed.
+// fields once, under its exact name, none of them null, and nothing else. Go's decoder alone would match a
+// name in any case, keep the last of two copies, read a missing or null field as its zero value and stop at
+// the end of the object, so a line could show a reader one value while the hash covers another, or leave a
+// field out unnoticed.
 func decodeRow(line []byte, row *receipt.Row) error {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	tok, err := dec.Token()
@@ -232,6 +233,9 @@ func decodeRow(line []byte, row *receipt.Row) error {
 		var value json.RawMessage
 		if err = dec.Decode(&value); err != nil {
 			return err
+		}
+		if string(value) == "null" {
+			return fmt.Errorf("it holds null for %q", key)
 		}
 	}
 	if _, err = dec.Token(); err != nil { // the closing brace

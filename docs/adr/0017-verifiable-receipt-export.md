@@ -25,11 +25,11 @@ the hash was taken over. People also export part of the chain: one agent's calls
   head with a hash the user kept. Its summary says what a kept head covers: with more than one run, only
   the last run is tied to it, and without `--head` nothing ties the export to the database.
 - It reads UTF-8 with or without a byte order mark and UTF-16 with one, LF or CRLF line endings and lines
-  of any length. A line must be one JSON object that holds each field once, under its exact name, and
-  nothing else: a field the hash does not cover, a field given twice or left out, and text after the
-  object are refused. Go's decoder alone matches names in any case, keeps the last of two copies, reads a
-  missing field as zero and stops at the end of the object, so a line could otherwise show a reader one
-  value while the hash covers another.
+  of any length. A line must be one JSON object that holds each field once, under its exact name, none of
+  them null, and nothing else: a field the hash does not cover, a field given twice, left out or null,
+  and text after the object are refused. Go's decoder alone matches names in any case, keeps the last of
+  two copies, reads a missing or null field as zero and stops at the end of the object, so a line could
+  otherwise show a reader one value while the hash covers another.
 - `derbent receipts --limit 0` lists every receipt, so a whole chain can be exported.
 
 ## Consequences

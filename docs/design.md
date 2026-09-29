@@ -252,9 +252,9 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   that fails is named, and the exit status is 1. Lines of any length are read, with LF or CRLF endings, in
   UTF-8 with or without a byte order mark or in UTF-16 with one, as Windows PowerShell 5.1 writes a
   redirected command's output. A line must be one JSON object that holds each field listed above once,
-  under its exact name, and nothing else: a field the hash does not cover, a field given twice or left
-  out, and text after the object are refused. Blank lines are skipped, and a file with no receipt lines
-  fails.
+  under its exact name, none of them null, and nothing else: a field the hash does not cover, a field
+  given twice, left out or null, and text after the object are refused. Blank lines are skipped, and a
+  file with no receipt lines fails.
 - A line whose hash matches its fields shows that it was not changed only when its run ends at a kept
   head. The hash takes no key, so anyone holding an export can edit a line and compute its hash again: a
   run cut off by a gap, and any export checked without a kept head, shows only that its lines agree with
@@ -812,8 +812,9 @@ migrates it inside `BEGIN IMMEDIATE`.
   and from standard input, with a kept head, a wrong one and none: a filtered export, where only the last
   run is tied to the kept head, a line taken out of the middle (a gap, not a failure), an edited and a
   reordered line, an unknown field, a field in capitals, a repeated field, a zero-valued field left out,
-  text after the object, an empty file, a UTF-8 byte order mark, UTF-16 with a byte order mark, CRLF line
-  endings, a line of more than a mebibyte, and a cancel that stops the check at the next line.
+  a null field, text after the object, an empty file, a UTF-8 byte order mark, UTF-16 with a byte order
+  mark, CRLF line endings, a line of more than a mebibyte, and a cancel that stops the check at the next
+  line.
 - **Explain.** Every case in the rule tests also runs `Explain` and checks that it decides as `Decide`
   does, and a rule test checks the steps: each condition with the value it read, missing or not a string,
   and nothing read past the first match. A budget test checks the count and the wait of every budget that
