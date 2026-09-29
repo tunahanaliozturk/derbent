@@ -412,27 +412,54 @@ derbent suggest               # --min 3 to need fewer answers, --json for JSON l
 ```
 
 It groups your answers by agent and tool, and leaves out calls a project's rules asked about. Five
-approvals and no denial give an `allow`, five denials and no approval a `deny`, each as a `[[rule]]`
-snippet with the counts behind it and the rule to put it above, so first match reaches it:
+approvals and no denial give an `allow`, five denials and no approval a `deny`, each as `[[rule]]` tables
+with the counts behind them and the rule to put them above, so first match reaches them. For a shell tool,
+when every command you approved was the same, the `allow` matches that command alone. Otherwise it matches
+the start your commands share, cut back to a whole word, and comes after an `ask` for each operator that
+could add another command after that start (shortened here: there are nine):
 
 ```toml
 # claude's native__Bash: approved 5 times and never denied.
 # Put it above rule 1 in your config, so first match reaches it before rule 1, which asked.
+# The allow at the end also matches any options after the prefix, such as --force.
+# The asks above it stop chained, piped, redirected and substituted commands.
+# Calls the allow matches no longer reach the rules at and below rule 1.
 [[rule]]
 agent  = "claude"
 tool   = "native__Bash"
-args   = { command = "git *" }
+args   = { command = "go test *;*" }
+action = "ask"
+# ... the same ask for &, |, `, (, <, >, \n and \r ...
+[[rule]]
+agent  = "claude"
+tool   = "native__Bash"
+args   = { command = "go test *" }
 action = "allow"
 ```
 
-For a shell tool the snippet matches the start your commands share, cut back to a whole word. There is no
-suggestion when they share none, when that start holds a shell operator such as `&&` or `;`, or when a
-command cannot be read, so Derbent never suggests allowing a whole shell. The pattern matches text:
-`git *` also matches `git status && rm -rf build`, so read a snippet before you paste it, and narrow it. A
-`[receipts] redact` pattern that matches an argument's name masks the name as well, and a tool whose calls
-carry a masked name gets no suggestion, shell or not: a pattern such as `path` stops suggestions for every
-tool that takes a `file_path`. Derbent never edits your config. After you approve a call in the UI, when
-that agent's answers for the tool now make an `allow`, the status line ends with
+A shell gets no suggestion when a command cannot be read, or when the command or the start holds an
+operator such as `&&`, `;`, `|`, `>` or `$(`, has only one word (`git *` runs any command through
+`git -c alias.x='!cmd' x`), or names a shell, an interpreter or a launcher in any of its words, such as
+`sh`, `python`, `sudo`, `env`, `xargs`, `nice` or `Start-Process`, however it is spelled (`/bin/sh`,
+`CMD.EXE`, `python3.12`). These are text checks, and their lists cannot be complete: an option of an
+ordinary program can run another one, as `go test -exec` does, and the `allow` lets any options through.
+Read a snippet before you paste it, and narrow it.
+
+An `allow` for a tool that is not a shell lets every call through, whatever its arguments, and its comment
+says so. That can be far more than you approved: five approvals of `native__Write` to a `.env` file, which
+the balanced preset asks about, suggest an `allow` for `native__Write` above that rule, and pasted there it
+also lets a write to `~/.ssh/authorized_keys` through.
+
+Suggestions count every answered approval, including ones given by any process that can run
+`derbent approve` or write the database, and an agent with a shell can be such a process. A snippet shows
+what the approvals table holds, so read it before you paste it. A `[receipts] redact` pattern that matches
+an argument's name masks the name as well, and a tool whose calls carry a masked name gets no suggestion,
+shell or not: a pattern such as `path` stops suggestions for every tool that takes a `file_path`.
+
+Derbent never edits your config. The hook reads it on every call, so a rule for a `native__` tool decides
+the next call, but a running `derbent mcp` gate decides with the config it read when it started: after you
+paste a rule for any other tool, restart the CLI. After you approve a call in the UI, when that agent's
+answers for the tool now make an `allow`, the status line ends with
 `claude's native__Bash approved 5 times: run derbent suggest for a rule`
 ([ADR 0019](docs/adr/0019-rule-suggestions.md)).
 
@@ -709,7 +736,7 @@ each claim is tested. Every decision someone could reasonably have made differen
 | [0016](docs/adr/0016-presets-are-files.md) | Presets are files written once and owned by you, never a mode Derbent keeps. |
 | [0017](docs/adr/0017-verifiable-receipt-export.md) | Receipt exports carry every hashed field as stored, and `derbent verify --file` checks them without the database. |
 | [0018](docs/adr/0018-handoffs.md) | Handoffs are Derbent tools addressed by agent label or `*`, open then taken then done. |
-| [0019](docs/adr/0019-rule-suggestions.md) | Rule suggestions are printed from your answers and never written, and never allow a whole shell. |
+| [0019](docs/adr/0019-rule-suggestions.md) | Rule suggestions are printed from your answers and never written; a shell gets its exact command, or a prefix with an ask for each operator, and a prefix that names a shell or launcher is refused. |
 
 Changes are listed in the [changelog](CHANGELOG.md). To build, test or send a change, see
 [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).

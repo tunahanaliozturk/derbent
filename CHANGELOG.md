@@ -102,9 +102,12 @@ The first release.
   `derbent handoffs` lists them, and the balanced and strict presets allow the four tools
   ([ADR 0018](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0018-handoffs.md)).
 - `derbent suggest` prints the allow and deny rules your approvals and denials point to, with the counts
-  behind each and the rule to put it above, and for a shell only with the start its commands share, never
-  a whole shell. It never edits your config, and the UI says when a call you approve makes a tool's
-  answers reach an `allow`
+  behind each and the rule to put it above. For a shell it gives the one command you approved, or the
+  start your commands share with an `ask` above it for each operator that could add another command, and
+  it refuses a start of one word or one that names a shell, an interpreter or a launcher it knows; it is a
+  text check, and its lists cannot be complete. An `allow` for any other tool says it lets every call
+  through. It never edits your config, and the UI says when a call you approve makes a tool's answers
+  reach an `allow`
   ([ADR 0019](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0019-rule-suggestions.md)).
 
 ### Security

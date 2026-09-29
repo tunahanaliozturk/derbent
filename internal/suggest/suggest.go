@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,8 +25,36 @@ const Min = 5
 
 // commandKeys are the arguments that hold a shell command: command for the shell tools of Claude Code,
 // Codex and Copilot CLI, and CommandLine for Antigravity CLI's run_command. A tool whose calls carry one is
-// a shell, and a rule for it is suggested only with the start its commands share.
+// a shell, and a rule for it is suggested only with the command, or the start its commands share.
 var commandKeys = [...]string{"command", "CommandLine"}
+
+// shellTools are the four CLIs' shell tools, which are shells by name whatever their calls carry: a call
+// whose command cannot be read, even one with no arguments at all, gives the group no suggestion.
+// typedTools are Copilot CLI's tools that type text into a shell that is already running, where it can be
+// a command or the answer to a prompt; they never get a suggestion.
+var (
+	shellTools = [...]string{"native__Bash", "native__bash", "native__PowerShell", "native__powershell", "native__Monitor", "native__run_command"}
+	typedTools = [...]string{"native__write_bash", "native__write_powershell"}
+)
+
+// launchers are the shells, interpreters and programs that run another program or code given as text. A
+// command with one of them in any word, as program spells it, gets no suggestion. The list cannot be
+// complete: a text rule can be fooled, and an option of an ordinary program can run another one.
+var launchers = [...]string{
+	"sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "busybox", "pwsh", "powershell", "cmd", "wsl",
+	"python", "py", "node", "deno", "bun", "perl", "ruby", "php", "lua", "rscript", "osascript", "awk", "gawk",
+	"mawk", "tclsh", "expect", "sudo", "doas", "su", "runas", "gsudo", "pkexec", "env", "xargs", "eval", "exec",
+	"command", "builtin", ".", "source", "nohup", "nice", "ionice", "chrt", "taskset", "time", "timeout", "watch",
+	"setsid", "stdbuf", "flock", "script", "unshare", "nsenter", "chroot", "systemd-run", "ssh", "npx", "bunx",
+	"pnpx", "uvx", "pipx", "start", "start-process", "invoke-expression", "iex", "invoke-command", "call",
+	"mshta", "rundll32", "cscript", "wscript",
+}
+
+// operators are what can end a command and start another, feed it, or run one inside it: the separators
+// and pipe, a backtick, the ( of $( ), <( ), >( ) and PowerShell's ( ), which runs what it holds, the
+// redirects, and the line breaks. A command that holds one gets no suggestion, and a shell's allow for a
+// prefix gets an ask above it for each, so a command that starts with the prefix and holds one still asks.
+const operators = ";&|`(<>\n\r"
 
 // Suggestion is a rule the user's answers point to.
 type Suggestion struct {
@@ -33,6 +62,7 @@ type Suggestion struct {
 	Action      rule.Action // allow for approvals, deny for denials
 	Key         string      // the command argument, command or CommandLine, for a shell tool; "" for any other
 	Prefix      string      // what every answered command starts with, for a shell tool
+	Exact       bool        // every answered command was Prefix, so the pattern is Prefix alone, with no *
 	Approved    int
 	Denied      int
 	Rules       []int // the rules in the user's config that asked, lowest first
@@ -42,8 +72,9 @@ type Suggestion struct {
 // least approvals and no denial, or at least least denials and no approval, sorted by agent and tool.
 // Calls a project's rules asked about are left out: a rule in the user's config cannot loosen a project's
 // rules. A group gets no suggestion when a rule could not name it (an agent that is no agent label, an
-// empty tool name or one with a wildcard), or when it is a shell whose commands cannot all be read, or
-// share no start that a rule can take safely (see commonPrefix).
+// empty tool name or one with a wildcard), when it is a tool that types into a running shell, or when it
+// is a shell whose commands cannot all be read, or share no command or start that a rule can take safely
+// (see pattern and refused).
 func From(calls []approval.Answered, least int) []Suggestion {
 	type group struct{ agent, tool string }
 	byGroup := map[group][]approval.Answered{}
@@ -82,6 +113,8 @@ func suggestFor(agent, tool string, calls []approval.Answered, least int) (Sugge
 	switch {
 	case !config.AgentLabel.MatchString(agent) || tool == "" || strings.ContainsAny(tool, "*?"):
 		return Suggestion{}, false // no rule matches that agent, or matches only that tool
+	case slices.Contains(typedTools[:], tool):
+		return Suggestion{}, false
 	case s.Approved >= least && s.Denied == 0:
 		s.Action = rule.Allow
 	case s.Denied >= least && s.Approved == 0:
@@ -91,13 +124,14 @@ func suggestFor(agent, tool string, calls []approval.Answered, least int) (Sugge
 	}
 	key, cmds, shell, readable := shellCommands(calls)
 	switch {
-	case !shell:
+	case !shell && !slices.Contains(shellTools[:], tool):
 		return s, true
 	case !readable:
 		return Suggestion{}, false
 	}
-	s.Key, s.Prefix = key, commonPrefix(cmds)
-	return s, s.Prefix != ""
+	s.Key = key
+	s.Prefix, s.Exact = pattern(cmds)
+	return s, !refused(s.Prefix)
 }
 
 // shellCommands reads the command each call carries. shell reports that any call carries a command
@@ -141,13 +175,23 @@ func command(args map[string]any) (name, value string, ok bool) {
 	return name, value, true
 }
 
+// pattern is what a shell's rule matches the command against: the command itself, exact, when every
+// answered command is that same string and it holds neither a wildcard nor redaction's mask, which a
+// pattern cannot take as written; otherwise the start they share (commonPrefix), which the rule follows
+// with *.
+func pattern(cmds []string) (p string, exact bool) {
+	same := !slices.ContainsFunc(cmds, func(c string) bool { return c != cmds[0] })
+	if same && !strings.ContainsAny(cmds[0], "*?") && !strings.Contains(cmds[0], redact.Mask) {
+		return cmds[0], true
+	}
+	return commonPrefix(cmds), false
+}
+
 // commonPrefix is the start every command shares, cut so that the pattern it becomes, the start followed by
 // *, matches no more than the answered commands start with: before the first * or ?, which a pattern reads
 // as wildcards, and before redaction's mask, which no real call holds; then back to ASCII white space
 // unless every command ends there or has white space right after it, so neither a word nor a UTF-8
-// character is cut in two. It is "" when nothing but white space is left, or when what is left holds a
-// shell operator or a line break, after which the * would be a command of its own: a whole shell is never
-// suggested, not even behind "cd /work &&".
+// character is cut in two.
 func commonPrefix(cmds []string) string {
 	p := cmds[0]
 	for _, c := range cmds[1:] {
@@ -166,10 +210,66 @@ func commonPrefix(cmds []string) string {
 	if !endsAWord(p, cmds) {
 		p = p[:strings.LastIndexAny(p, " \t\n")+1]
 	}
-	if strings.TrimSpace(p) == "" || strings.ContainsAny(p, ";&|`\n\r") || strings.Contains(p, "$(") {
-		return ""
-	}
 	return p
+}
+
+// refused reports whether a rule must not take p, a shell's command or the start its commands share,
+// because the rule could then run any command. It is refused when it holds an operator, after which the *
+// would be a command of its own, as in "cd /work &&"; when it ends in $ or \, which join what the * adds to
+// the last word; when a word names a launcher or could name any program (see program); and when it has
+// fewer than two words after any leading NAME=value, since `git *`, `find *`, `make *`, `npm *`, `docker *`,
+// `rsync *` and `tar *` each run any command through an option. The same checks refuse an exact command.
+func refused(p string) bool {
+	if strings.ContainsAny(p, operators) || strings.HasSuffix(p, "$") || strings.HasSuffix(p, `\`) {
+		return true
+	}
+	words := strings.Fields(p)
+	for _, w := range words {
+		name, ok := program(w)
+		if !ok || slices.Contains(launchers[:], name) {
+			return true
+		}
+	}
+	for len(words) > 0 && assignment.MatchString(words[0]) {
+		words = words[1:]
+	}
+	return len(words) < 2
+}
+
+// assignment is a shell's NAME=value before a command, which sets a variable for it.
+var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// program is word as the program a shell would run for it: without the quotes around it or a leading \,
+// which only turns off an alias, without its directory, in lower case, without a Windows extension, and
+// without a version at the end, so "/usr/bin/Python3.12.exe" is python. A \ inside a word is a directory
+// separator to Windows and an escape to a Unix shell, where s\h runs sh, so when name is not a launcher the
+// word is read once more with every \ dropped. ok is false when the word still holds a character that can
+// make it any program: $ and % for a variable, a backtick, a quote inside it, a glob's [, a brace
+// expansion's { and cmd's ^ escape.
+func program(word string) (name string, ok bool) {
+	w := strings.TrimPrefix(strings.Trim(word, `"'`), `\`)
+	if strings.ContainsAny(w, "$%`\"'[{^") {
+		return "", false
+	}
+	name = base(w[strings.LastIndexAny(w, `/\`)+1:])
+	if !slices.Contains(launchers[:], name) {
+		unescaped := strings.ReplaceAll(w, `\`, "")
+		name = base(unescaped[strings.LastIndex(unescaped, "/")+1:])
+	}
+	return name, true
+}
+
+// base is a program's file name in lower case without a Windows extension, and without a version at its
+// end when that leaves a launcher's name: python3.12 is python, and rundll32 stays rundll32.
+func base(file string) string {
+	name := strings.ToLower(file)
+	for _, ext := range [...]string{".exe", ".cmd", ".bat", ".com"} {
+		name = strings.TrimSuffix(name, ext)
+	}
+	if v := strings.TrimRight(name, "0123456789."); slices.Contains(launchers[:], v) {
+		name = v
+	}
+	return name
 }
 
 // endsAWord reports whether every command ends right after p, or has white space there.
@@ -182,9 +282,11 @@ func endsAWord(p string, cmds []string) bool {
 	return true
 }
 
-// TOML is the suggestion as a [[rule]] table to paste into the config, under a comment that says what it
-// rests on and where it goes. Strings are TOML basic strings that read back as they were and cannot end
-// early; the comment is escaped like any text for a terminal, so it stays on its own lines.
+// TOML is the suggestion as [[rule]] tables to paste into the config, under a comment that says what it
+// rests on, where it goes and what else it lets through. A shell's allow for a prefix comes after an ask
+// for each operator, so a command that the prefix starts but that chains, pipes, redirects or substitutes
+// another one is still asked about. Strings are TOML basic strings that read back as they were and cannot
+// end early; the comment is escaped like any text for a terminal, so it stays on its own lines.
 func (s Suggestion) TOML() string {
 	var b strings.Builder
 	answers := fmt.Sprintf("approved %d %s and never denied", s.Approved, times(s.Approved))
@@ -192,17 +294,41 @@ func (s Suggestion) TOML() string {
 		answers = fmt.Sprintf("denied %d %s and never approved", s.Denied, times(s.Denied))
 	}
 	fmt.Fprintf(&b, "# %s's %s: %s.\n", visible.Escape(s.Agent), visible.Escape(s.Tool), answers)
+	below := "the rules below it"
 	if len(s.Rules) > 0 {
 		fmt.Fprintf(&b, "# Put it above rule %d in your config, so first match reaches it before %s.\n", s.Rules[0], asked(s.Rules))
+		below = fmt.Sprintf("the rules at and below rule %d", s.Rules[0])
 	}
-	b.WriteString("[[rule]]\n")
-	fmt.Fprintf(&b, "agent  = %s\n", quote(s.Agent))
-	fmt.Fprintf(&b, "tool   = %s\n", quote(s.Tool))
-	if s.Key != "" {
-		fmt.Fprintf(&b, "args   = { %s = %s }\n", s.Key, quote(s.Prefix+"*"))
+	pattern := s.Prefix
+	if !s.Exact {
+		pattern += "*"
 	}
-	fmt.Fprintf(&b, "action = %s\n", quote(string(s.Action)))
+	switch {
+	case s.Action != rule.Allow || s.Exact:
+	case s.Key == "":
+		fmt.Fprintf(&b, "# This allows every call to %s, whatever its arguments; %s no longer see them.\n", visible.Escape(s.Tool), below)
+	default:
+		b.WriteString("# The allow at the end also matches any options after the prefix, such as --force.\n" +
+			"# The asks above it stop chained, piped, redirected and substituted commands.\n")
+		fmt.Fprintf(&b, "# Calls the allow matches no longer reach %s.\n", below)
+		for _, op := range operators {
+			s.table(&b, pattern+string(op)+"*", rule.Ask)
+		}
+	}
+	s.table(&b, pattern, s.Action)
 	return b.String()
+}
+
+// table writes one [[rule]] table for the suggestion's agent and tool, with pattern for its command key,
+// if it has one, and action.
+func (s Suggestion) table(b *strings.Builder, pattern string, action rule.Action) {
+	b.WriteString("[[rule]]\n")
+	fmt.Fprintf(b, "agent  = %s\n", quote(s.Agent))
+	fmt.Fprintf(b, "tool   = %s\n", quote(s.Tool))
+	if s.Key != "" {
+		fmt.Fprintf(b, "args   = { %s = %s }\n", s.Key, quote(pattern))
+	}
+	fmt.Fprintf(b, "action = %s\n", quote(string(action)))
 }
 
 func times(n int) string {
@@ -235,6 +361,10 @@ func quote(s string) string {
 		case r == '"' || r == '\\':
 			b.WriteByte('\\')
 			b.WriteRune(r)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
 		case visible.Unsafe(r) && r > 0xFFFF:
 			fmt.Fprintf(&b, `\U%08X`, r)
 		case visible.Unsafe(r):
