@@ -66,7 +66,8 @@ func TestPresetsDecideTheSampleCalls(t *testing.T) {
 	}{
 		{"memory_search", map[string]any{"query": "deploy"}, allow, allow, allow},
 		{"handoff_take", map[string]any{"id": 1}, allow, allow, allow},
-		{"handoff__delete_all", nil, allow, allow, ask}, // a server called handoff is not Derbent's
+		// Not one of the four handoff tools, and no server can be called handoff: strict's *__* rule asks.
+		{"handoff__delete_all", nil, allow, allow, ask},
 		{"native__Bash", map[string]any{"command": "cd repo && git push origin main"}, allow, ask, ask},
 		{"native__Bash", map[string]any{"command": "ls"}, allow, allow, ask},
 		{"native__Bash", map[string]any{"command": "rm -rf build"}, allow, ask, ask},
