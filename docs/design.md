@@ -321,17 +321,17 @@ rule that asked, the project and the redacted arguments, and the terminal bell r
 TOML rule snippets with the counts behind them (ADR 0019). Derbent never edits the config file: the user
 copies what they want.
 
-- Calls are grouped by agent and tool. A group with at least N approvals (5 unless `--min` says) and no
-  denials gets an `allow`; one with at least N denials and no approvals gets a `deny`. Calls that timed
-  out or were withdrawn were never answered and do not count, and calls a project's rules asked about are
-  left out, since a rule in the user's config cannot loosen a project's.
+- Calls are grouped by agent and tool. A group with at least N approvals (5 unless `--min` sets another
+  count of at least 1) and no denials gets an `allow`; one with at least N denials and no approvals gets a
+  `deny`. Calls that timed out or were withdrawn were never answered and do not count, and calls a
+  project's rules asked about are left out, since a rule in the user's config cannot loosen a project's.
 - A tool whose calls carry a `command` argument, or `CommandLine` as Antigravity CLI's `run_command`
-  does, is a shell, and every one of its answered calls must carry it as a string. Its snippet adds
-  `args = { <key> = "<prefix>*" }`, with the key its calls carry (`command` or `CommandLine`), where the
-  prefix is the longest start its commands share, cut before any `*` or `?`, which a pattern reads as
-  wildcards, and back to where a word ends. When nothing but white space is left there is no suggestion
-  for that tool, so Derbent never suggests allowing a whole shell. A tool or agent name that holds a `*`
-  or `?` gets none either.
+  does, is a shell, and every one of its answered calls must carry one command, as a string, under the
+  same key. Its snippet adds `args = { <key> = "<prefix>*" }`, with the key its calls carry (`command` or
+  `CommandLine`), where the prefix is the longest start its commands share, cut before any `*` or `?`,
+  which a pattern reads as wildcards, and back to where a word ends. When nothing but white space is left
+  there is no suggestion for that tool, so Derbent never suggests allowing a whole shell. A tool or agent
+  name that holds a `*` or `?` gets none either.
 - Each snippet says where to put it: above the lowest-numbered rule that asked about those calls, from
   the approvals, so first match reaches it.
 - Strings in a snippet are TOML basic strings with quotes, backslashes, control characters and invisible
@@ -852,9 +852,11 @@ migrates it inside `BEGIN IMMEDIATE`.
   command that is not a string, a shell call without a command and a tool name with a wildcard give none;
   and a prefix never ends inside a word or a UTF-8 character. A snippet whose tool name holds quotes, a
   backslash, a newline and a bidirectional override reads back through the config parser as written and
-  decides as suggested. `derbent suggest` is tested as text and JSON lines, escaped, and on a database
-  from before migration 0006, and a UI test shows the status line after the fifth approval and not after
-  the fourth.
+  decides as suggested, and one whose agent label, tool name and prefix hold those, a carriage return, a
+  tab, an escape sequence, invisible characters and C1 controls decodes back to them with no line or
+  table of its own. `derbent suggest` is tested as text and as JSON lines, one for each suggestion,
+  escaped, on a database from before migration 0006, and with a `--min` below 1 refused, and a UI test
+  shows the status line after the fifth approval and not after the fourth or after a denial.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
@@ -972,6 +974,7 @@ derbent/
 | 0016 | Presets are files written once and owned by the user, never a mode Derbent keeps. |
 | 0017 | Receipt exports carry every hashed field as stored, and derbent verify --file checks them without the database, reporting gaps. |
 | 0018 | Handoffs are Derbent tools addressed by agent label or *, open then taken then done, with no reassignment or release in v1. |
+| 0019 | Rule suggestions are printed from the user's answers and never written, with a command prefix for shells and never a whole shell. |
 
 ## Milestones
 

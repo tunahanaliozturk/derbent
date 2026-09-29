@@ -337,6 +337,47 @@ func (q *Queue) Grants(ctx context.Context) ([]Grant, error) {
 	return out, nil
 }
 
+// Answered is a call the user approved or denied: what rule suggestions are made from (ADR 0019).
+type Answered struct {
+	Agent       string
+	Tool        string
+	Args        string // after redaction, as the approval queue holds them
+	Rule        int
+	ProjectRule bool // Rule is a position in the project's rules file
+	Approved    bool
+}
+
+// Answered lists the calls the user approved or denied, oldest first: every agent's calls to every tool,
+// or only agent's calls to tool when both are given. Calls that timed out or were withdrawn were never
+// answered and are left out. A database from before migration 0006, which the commands that only read do
+// not migrate, is read as Grants reads it.
+func (q *Queue) Answered(ctx context.Context, agent, tool string) ([]Answered, error) {
+	projectRule, err := q.projectRuleColumn(ctx, "project_rule")
+	if err != nil {
+		return nil, err
+	}
+	//nolint:gosec // projectRule is a column name or 0, never input
+	rows, err := q.db.QueryContext(ctx, `SELECT agent, tool, args, rule, `+projectRule+`, state = 'approved'
+		FROM approvals WHERE state IN ('approved', 'denied') AND (?1 = '' OR agent = ?1) AND (?2 = '' OR tool = ?2)
+		ORDER BY id`, agent, tool)
+	if err != nil {
+		return nil, fmt.Errorf("read answered approvals: %w", err)
+	}
+	defer rows.Close()
+	var out []Answered
+	for rows.Next() {
+		var a Answered
+		if err = rows.Scan(&a.Agent, &a.Tool, &a.Args, &a.Rule, &a.ProjectRule, &a.Approved); err != nil {
+			return nil, fmt.Errorf("read answered approval: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("read answered approvals: %w", err)
+	}
+	return out, nil
+}
+
 // Revoke deletes the session grant that approval id made and returns it. Both paths read the grants on
 // every call, so the next call it covered asks again. An id that holds no grant gives ErrNoGrant.
 func (q *Queue) Revoke(ctx context.Context, id int64) (Grant, error) {

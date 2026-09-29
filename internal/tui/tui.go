@@ -19,6 +19,8 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
+	"github.com/tunahanaliozturk/derbent/internal/rule"
+	"github.com/tunahanaliozturk/derbent/internal/suggest"
 	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
@@ -331,15 +333,31 @@ func (m Model) decide(v approval.Verdict, asked int64) (tea.Model, tea.Cmd) {
 		if err := m.approvals.Decide(m.ctx, p.ID, v); err != nil {
 			return statusMsg(fmt.Sprintf("#%d: %v", p.ID, err))
 		}
+		if v == approval.Deny {
+			return statusMsg(fmt.Sprintf("#%d denied: %s %s", p.ID, p.Agent, p.Tool))
+		}
+		status := fmt.Sprintf("#%d approved once: %s %s", p.ID, p.Agent, p.Tool)
 		if v == approval.ApproveSession {
-			return statusMsg(fmt.Sprintf("#%d approved %s", p.ID, sessionScope(p)))
+			status = fmt.Sprintf("#%d approved %s", p.ID, sessionScope(p))
 		}
-		if v == approval.ApproveOnce {
-			return statusMsg(fmt.Sprintf("#%d approved once: %s %s", p.ID, p.Agent, p.Tool))
-		}
-		// approval.Deny, the only other verdict a key gives
-		return statusMsg(fmt.Sprintf("#%d denied: %s %s", p.ID, p.Agent, p.Tool))
+		return statusMsg(status + m.suggestion(p))
 	}
+}
+
+// suggestion is what the status line adds after an approval of p when that agent's answered calls to that
+// tool now make an allow that derbent suggest prints (ADR 0019). It is "" when they do not, and when they
+// cannot be read: the approval went through either way, and the next approval tries again.
+func (m Model) suggestion(p approval.Pending) string {
+	calls, err := m.approvals.Answered(m.ctx, p.Agent, p.Tool)
+	if err != nil {
+		return ""
+	}
+	for _, s := range suggest.From(calls, suggest.Min) {
+		if s.Action == rule.Allow {
+			return fmt.Sprintf("; %s's %s approved %d times: run derbent suggest for a rule", p.Agent, p.Tool, s.Approved)
+		}
+	}
+	return ""
 }
 
 // sessionScope is what A approves for p: the tool's calls that the rule which asked holds, under the

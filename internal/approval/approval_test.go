@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -474,5 +476,44 @@ func TestAnApprovalRecordsWhichRuleListAsked(t *testing.T) {
 	}
 	if got := approval.RuleName(3, false); got != "rule 3" {
 		t.Fatalf("RuleName(3, false) = %q", got)
+	}
+}
+
+// Answered lists the calls the user approved or denied, oldest first, with the rule and the list that
+// asked, and leaves out the ones that timed out, were withdrawn or still wait; agent and tool narrow it.
+func TestAnsweredListsApprovedAndDeniedCalls(t *testing.T) {
+	q, db := open(t)
+	for i, row := range []struct {
+		agent, tool, state string
+		projectRule        int
+	}{
+		{"codex", "native__Bash", "approved", 0},
+		{"codex", "native__Bash", "denied", 1},
+		{"codex", "native__Bash", "expired", 0},
+		{"codex", "native__Bash", "withdrawn", 0},
+		{"codex", "native__Bash", "pending", 0},
+		{"claude", "native__Bash", "approved", 0},
+		{"codex", "memory_write", "approved", 0},
+	} {
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO approvals
+			(created_ms, deadline_ms, project, agent, session, tool, args, rule, project_rule, state)
+			VALUES (1, 2, '/work/shop', ?, 's', ?, ?, ?, ?, ?)`,
+			row.agent, row.tool, fmt.Sprintf(`{"command":"echo %d"}`, i), i+1, row.projectRule, row.state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := q.Answered(t.Context(), "", "")
+	want := []approval.Answered{
+		{Agent: "codex", Tool: "native__Bash", Args: `{"command":"echo 0"}`, Rule: 1, Approved: true},
+		{Agent: "codex", Tool: "native__Bash", Args: `{"command":"echo 1"}`, Rule: 2, ProjectRule: true},
+		{Agent: "claude", Tool: "native__Bash", Args: `{"command":"echo 5"}`, Rule: 6, Approved: true},
+		{Agent: "codex", Tool: "memory_write", Args: `{"command":"echo 6"}`, Rule: 7, Approved: true},
+	}
+	if err != nil || !slices.Equal(all, want) {
+		t.Fatalf("Answered = %+v, %v; want %+v", all, err, want)
+	}
+	narrow, err := q.Answered(t.Context(), "codex", "native__Bash")
+	if err != nil || !slices.Equal(narrow, want[:2]) {
+		t.Fatalf("Answered(codex, native__Bash) = %+v, %v", narrow, err)
 	}
 }

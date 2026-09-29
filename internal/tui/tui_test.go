@@ -1125,3 +1125,48 @@ func TestAProjectRuleIsNamedOnTheRowAndInTheSessionQuestion(t *testing.T) {
 		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
 	}
 }
+
+// After the fifth approval of one agent's calls to one tool, with no denial, the status line says a rule
+// could stop the asking. After the fourth it does not, nor when one of the calls was denied. Every case
+// shows the approval itself, so a missing notice cannot come from an approval that did not happen.
+func TestTheStatusLineSaysWhenARuleCouldBeSuggested(t *testing.T) {
+	once := approval.ApproveOnce
+	for _, tc := range []struct {
+		name   string
+		before []approval.Verdict
+		notice bool
+	}{
+		{"the fifth approval", []approval.Verdict{once, once, once, once}, true},
+		{"the fourth approval", []approval.Verdict{once, once, once}, false},
+		{"after a denial", []approval.Verdict{once, once, once, once, approval.Deny}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, d := newModel(t)
+			for _, v := range tc.before {
+				done := waiting(t, d.q, askReq)
+				waitPending(t, d.q, 1)
+				p, err := d.q.Pending(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = d.q.Decide(t.Context(), p[0].ID, v); err != nil {
+					t.Fatal(err)
+				}
+				<-done
+			}
+			waiting(t, d.q, askReq)
+			waitPending(t, d.q, 1)
+			m, _ = refresh(m)
+			m, cmd := press(later(m, armAfter), "a")
+			m = settle(m, cmd)
+			approved := fmt.Sprintf("#%d approved once: codex github__create_issue", len(tc.before)+1)
+			if !strings.Contains(screen(m), approved) {
+				t.Fatalf("the status line lacks %q:\n%s", approved, screen(m))
+			}
+			notice := approved + "; codex's github__create_issue approved 5 times: run derbent suggest for a rule"
+			if got := strings.Contains(screen(m), notice); got != tc.notice {
+				t.Fatalf("the status line shows the notice: %v, want %v:\n%s", got, tc.notice, screen(m))
+			}
+		})
+	}
+}
