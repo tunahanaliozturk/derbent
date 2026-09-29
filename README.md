@@ -12,9 +12,9 @@ record of everyone who did. Derbent does the same for your coding agents' tool c
 
 Claude Code, Codex, GitHub Copilot CLI and Antigravity CLI connect to Derbent as one MCP server, and your
 other MCP servers sit behind it. Each CLI's pre-tool hook sends its built-in tools, such as the shell and
-file edits, through the same gate. The gate gives the agents one shared memory, decides every call with
-your allow, deny and ask rules, holds the calls you want to see until you approve them, and writes a
-hash-chained receipt for each one.
+file edits, through the same gate. The gate gives the agents one shared memory and a way to leave tasks
+for each other, decides every call with your allow, deny and ask rules, holds the calls you want to see
+until you approve them, and writes a hash-chained receipt for each one.
 
 It is one binary for Windows, macOS and Linux. There is no daemon and no network listener: a SQLite file
 is the only shared state.
@@ -172,8 +172,10 @@ entries for the other three follow each CLI's documentation (see [Built-in tools
 
 Every agent now has `memory_write`, `memory_search` and `memory_read`, and a note one agent writes in a
 repository can be found by the others in the same repository. Search is full-text, and results mark
-each note with its author and as a note, not an instruction. Without a config file every call is
-allowed, and `derbent mcp` says so on stderr when it starts. Every call is recorded:
+each note with its author and as a note, not an instruction. `handoff_create`, `handoff_list`,
+`handoff_take` and `handoff_done` let one agent leave a task for another (see [Handoffs](#handoffs)).
+Without a config file every call is allowed, and `derbent mcp` says so on stderr when it starts. Every
+call is recorded:
 
 ```bash
 derbent verify
@@ -187,6 +189,30 @@ prints the number of receipts, the hash of the last one, and whether the chain i
 a decision to memory; the other finds it and asks to add a note, which waits until `derbent approve`
 approves it from another shell; `derbent verify` then finds the chain intact. The version with Codex and
 a GitHub issue is described there too, and was not recorded.
+
+## Handoffs
+
+One agent can leave a task for another. `handoff_create` addresses it to an agent label, such as
+`reviewer`, or to `*` for any agent, with a title, a body of up to 16 KiB and tags. `handoff_list` shows
+the open handoffs in the current project addressed to the calling agent or to `*`; `mine` shows the ones
+it created instead, `state` picks `taken`, `done` or `all`, and `all_projects` looks in every project.
+`handoff_take` gives one to the agent and returns it whole, and `handoff_done` marks it done with an
+optional note of up to 4 KiB. Only one agent can take a handoff, and only the agent that took it can
+finish it. There is no release or reassignment yet: a handoff whose agent stops after taking it stays
+taken ([ADR 0018](docs/adr/0018-handoffs.md)).
+
+```bash
+derbent handoffs          # the open handoffs of every project; --all for every state, --json for JSON lines
+```
+
+A handoff is text one agent writes for another to act on, so what the tools return is marked as tasks
+written by agents, information and not instructions, and the rules decide the four tools like any other:
+put `handoff_create` or `handoff_take` behind `ask` for an agent you want to watch. An agent label is not
+authentication, so any agent started as `reviewer` can take the reviewer's handoffs. Ids count up from 1,
+and `handoff_take` takes a handoff of any project by its id, so an agent can try one id after another,
+claim every open handoff addressed to `*`, and learn from the refusals whom the others are for or who
+took them. Put `handoff_take` behind `ask` for an agent you do not trust. The balanced and strict presets
+allow the four tools.
 
 ## Rules
 
@@ -233,6 +259,27 @@ never an `allow`.
 The file is read strictly: an unknown key is an error that names the key, and a syntax error names its
 line. A `derbent mcp` gate reads the file when its CLI starts it; the hook reads it on every call.
 
+To see how a call would be decided before it happens, ask Derbent:
+
+```bash
+derbent explain --agent claude --tool native__Bash --args '{"command":"git push origin main"}'
+```
+
+It prints each rule in order and why it matches or not, down to the first match; then the project's rules
+from the `.derbent.toml` of the checkout you are in, or of `--project`; every budget that applies, with its
+count; a downstream tool's pin; with `--session`, whether a session grant covers the call; and last the
+verdict and what decides it, `ask (rule:4)` for this call under the rules above. It changes nothing and
+starts no servers, and `--json` prints one object. Built-in tools go by the name the hook gives them,
+`native__<tool>`.
+
+Windows PowerShell 5.1 drops the double quotes inside `--args`. Writing each as `\"` keeps them, but when
+a value holds a space, as `git push origin main` does, PowerShell 5.1 then splits the argument at it. Put
+`--%` before `--args`, as the last flag, and PowerShell passes the rest of the line as written:
+
+```powershell
+derbent explain --agent claude --tool native__Bash --% --args "{\"command\":\"git push origin main\"}"
+```
+
 Three presets give a first config instead of a blank page. `derbent init --preset <name>` writes one to
 the config path when no file is there, and `--print` prints it instead:
 
@@ -245,9 +292,9 @@ the config path when no file is there, and `--print` prints it instead:
   match text, so a command in a form they do not list, such as `"git" push`, gets through until Derbent
   parses shell commands; the file's own comments say what each pattern catches and misses.
 - `strict` allows reading, the built-in tools that keep notes and plans or ask you a question (such as
-  Claude Code's `TodoWrite`, `ExitPlanMode` and `AskUserQuestion`), Derbent's memory tools and the
-  twelve known read tools of a GitHub server behind Derbent, and asks about everything else, every shell
-  command included.
+  Claude Code's `TodoWrite`, `ExitPlanMode` and `AskUserQuestion`), Derbent's memory and handoff tools
+  (`handoff_create`, `handoff_list`, `handoff_take` and `handoff_done`) and the twelve known read tools of
+  a GitHub server behind Derbent, and asks about everything else, every shell command included.
 
 Derbent writes the preset once and never changes it; it is yours to edit
 ([ADR 0016](docs/adr/0016-presets-are-files.md)).
@@ -355,6 +402,39 @@ or write the database, so an approval or an `args` rule on a shell tool does not
 The default timeout sits below Codex's default tool timeout of 60 seconds
 ([ADR 0005](docs/adr/0005-approval-timeout.md)). If you raise it, raise `tool_timeout_sec` for the
 `derbent` server in Codex's config too.
+
+## Rule suggestions
+
+When you keep approving the same thing, Derbent can say which rule would stop the asking:
+
+```bash
+derbent suggest               # --min 3 to need fewer answers, --json for JSON lines
+```
+
+It groups your answers by agent and tool, and leaves out calls a project's rules asked about. Five
+approvals and no denial give an `allow`, five denials and no approval a `deny`, each as a `[[rule]]`
+snippet with the counts behind it and the rule to put it above, so first match reaches it:
+
+```toml
+# claude's native__Bash: approved 5 times and never denied.
+# Put it above rule 1 in your config, so first match reaches it before rule 1, which asked.
+[[rule]]
+agent  = "claude"
+tool   = "native__Bash"
+args   = { command = "git *" }
+action = "allow"
+```
+
+For a shell tool the snippet matches the start your commands share, cut back to a whole word. There is no
+suggestion when they share none, when that start holds a shell operator such as `&&` or `;`, or when a
+command cannot be read, so Derbent never suggests allowing a whole shell. The pattern matches text:
+`git *` also matches `git status && rm -rf build`, so read a snippet before you paste it, and narrow it. A
+`[receipts] redact` pattern that matches an argument's name masks the name as well, and a tool whose calls
+carry a masked name gets no suggestion, shell or not: a pattern such as `path` stops suggestions for every
+tool that takes a `file_path`. Derbent never edits your config. After you approve a call in the UI, when
+that agent's answers for the tool now make an `allow`, the status line ends with
+`claude's native__Bash approved 5 times: run derbent suggest for a rule`
+([ADR 0019](docs/adr/0019-rule-suggestions.md)).
 
 ## Budgets
 
@@ -534,6 +614,32 @@ to write the database could still rewrite the whole chain, or delete the newest 
 would verify. Keep a copy of the head hash somewhere else if you want to be able to tell later that
 neither happened.
 
+To hand receipts to someone else, or keep them off this machine, export them and check the export without
+the database ([ADR 0017](docs/adr/0017-verifiable-receipt-export.md)):
+
+```bash
+derbent verify                                    # note the head it prints
+derbent receipts --json --limit 0 > receipts.jsonl
+derbent verify --file receipts.jsonl --head <the head verify printed>
+```
+
+Each line carries every field the hash covers, exactly as stored, so `verify --file` recomputes each
+line's hash, checks that each line's `prev_hash` is the hash of the line before it where their sequence
+numbers follow on, and prints the runs of sequence numbers, any gaps, the anchor (the hash of the receipt
+before the first line) and the head. The first line that fails is named, and the exit status is 1. `-`
+reads the export from standard input. A filtered export, such as one with `--agent codex`, has gaps,
+which are reported, not failed. With `--head`, the export must end at the receipt whose hash you kept, so
+a receipt written between the two commands fails the check: run them while no agent is working, or run
+both again. When the export has more than one run, only the last one is tied to the kept head, and the
+`tied:` line says so.
+
+The hash takes no key, so anyone holding an export can edit a line and compute its hash again. Without
+`--head` the check shows only that the lines agree with each other; with it, that the last run is what the
+database held when you kept the hash. It cannot show that nothing was taken out of the middle, which looks
+like a filter's gap. Windows PowerShell 5.1's `>` writes UTF-16, which `verify --file` reads, but it also
+re-encodes the output through the console's code page, which can change text outside ASCII and fail those
+lines; export from cmd, Git Bash or PowerShell 7.4 or later, which keep the bytes.
+
 ## Overhead
 
 Measured on GitHub's hosted runners on 2026-09-27, after milestone 6, from one workflow run: Linux and
@@ -568,6 +674,10 @@ in the design. The ones to know first:
 - Only Claude Code's hook has been checked in a real session. The Codex, Copilot CLI and Antigravity CLI
   adapters follow each CLI's documentation.
 - Argument globs match strings, not meaning: `git push*` does not match `cd repo && git push`.
+- A receipt export shows its lines unchanged only up to a head you kept, and never that nothing was left
+  out of it. A suggested `args` pattern matches text, as every shell rule does.
+- A handoff's address is a label, not an identity, and any agent that can call `handoff_take` can claim
+  every open handoff addressed to `*`.
 - Approvals depend on you watching. Unattended, `ask` means denied after the timeout.
 - Pins trust the first definition they see, including a new tool that an update adds to a pinned server,
   so name the tools you allow for a server whose updates you do not review. A budget can be passed by the
@@ -597,6 +707,9 @@ each claim is tested. Every decision someone could reasonably have made differen
 | [0014](docs/adr/0014-project-rules.md) | Project rules can only tighten your rules and never change tool listings. |
 | [0015](docs/adr/0015-setup-writes-cli-configs.md) | Setup adds MCP entries through each CLI's own `mcp add` and edits hook files, never replacing an entry, with copies first. |
 | [0016](docs/adr/0016-presets-are-files.md) | Presets are files written once and owned by you, never a mode Derbent keeps. |
+| [0017](docs/adr/0017-verifiable-receipt-export.md) | Receipt exports carry every hashed field as stored, and `derbent verify --file` checks them without the database. |
+| [0018](docs/adr/0018-handoffs.md) | Handoffs are Derbent tools addressed by agent label or `*`, open then taken then done. |
+| [0019](docs/adr/0019-rule-suggestions.md) | Rule suggestions are printed from your answers and never written, and never allow a whole shell. |
 
 Changes are listed in the [changelog](CHANGELOG.md). To build, test or send a change, see
 [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).

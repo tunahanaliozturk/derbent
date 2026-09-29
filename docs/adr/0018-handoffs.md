@@ -33,6 +33,12 @@ on it, and nobody could tell whether it was done.
   `derbent handoffs --all`, and the task has to be created again.
 - Addressing is by label, and a label is not authentication: any agent started as `reviewer` can take the
   reviewer's handoffs. A rule can put `handoff_take` behind `ask` for agents that should not.
+- Ids are sequential, `handoff_take` works across projects by id, and there is no release. A hostile agent
+  can call `handoff_take` over one id after another and claim every open handoff addressed to `*`, for
+  good, and the refusals it gets on the way tell it whom each of the others is addressed to ("handoff 7
+  is addressed to reviewer, not to codex") and who took it ("handoff 7 is taken by reviewer, not open").
+  The mitigation is a rule that puts `handoff_take`, or all four handoff tools, behind `ask` for agents
+  you do not trust.
 - A handoff is text one agent writes for another to act on, which makes it a path for instructions planted
   by one agent to reach the next. The notice says so, and a rule can put `handoff_create` behind `ask`.
 - The finish is bound to the agent label that took the handoff, not to its gate session, so another

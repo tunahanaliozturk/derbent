@@ -47,3 +47,6 @@ rule that lets far more through than the user ever looked at, a shell most of al
   user approving the same call for longer. `--min` lets a user choose.
 - The group is the agent and the tool, so one denial of any command stops an `allow` for the whole tool,
   and a user who approves many unrelated commands of one shell gets no suggestion when they share no start.
+- A key that holds the redaction mask stops suggestions for any tool whose calls carry it, shell or not,
+  since a command could hide behind it. So a redaction pattern that matches a common key name, such as
+  `path`, which masks `file_path` to `file_[redacted]`, stops suggestions for every tool with that key.

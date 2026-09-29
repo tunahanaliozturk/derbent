@@ -86,6 +86,26 @@ The first release.
   `env_vars`, Claude Code's local-scope entry and, for an exec-form hook, its version. It checks the
   config, and that the database is Derbent's, no newer than the binary, and can be written or created.
   It times the hook's start, names each problem with its fix, and changes no file.
+- `derbent receipts --json` lines carry every field the hash covers, the stored time text, `args_sha256`
+  and `prev_hash` included, and `--limit 0` lists every receipt. `derbent verify --file <path>`, or `-`
+  for standard input, checks such an export without the database: each line's hash, the links within each
+  run of sequence numbers, and with `--head` the head against a hash you kept. A filtered export's gaps
+  are reported, not failed, and a file Windows PowerShell 5.1 wrote as UTF-16 is read
+  ([ADR 0017](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0017-verifiable-receipt-export.md)).
+- `derbent explain --agent <label> --tool <name> [--args <json>]` shows how Derbent would decide a call:
+  each rule in order and why it matches or not, the project's rules, every budget that applies with its
+  count, the pin, with `--session` a session grant, and the verdict. It matches rules and combines your
+  decision with the project's through the gate's own code, counts budgets with the gate's own read,
+  starts no servers and changes nothing.
+- Handoffs: `handoff_create`, `handoff_list`, `handoff_take` and `handoff_done` let one agent leave a task
+  for another, addressed by agent label or `*`; one agent takes it, and only that agent finishes it.
+  `derbent handoffs` lists them, and the balanced and strict presets allow the four tools
+  ([ADR 0018](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0018-handoffs.md)).
+- `derbent suggest` prints the allow and deny rules your approvals and denials point to, with the counts
+  behind each and the rule to put it above, and for a shell only with the start its commands share, never
+  a whole shell. It never edits your config, and the UI says when a call you approve makes a tool's
+  answers reach an `allow`
+  ([ADR 0019](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0019-rule-suggestions.md)).
 
 ### Security
 
@@ -113,5 +133,10 @@ The first release.
 - A `.derbent.toml` that cannot be read or holds anything but rules denies every call in its project, and
   so does one that is a symbolic link, is not a regular file, or is larger than 64 KiB, so it can never
   hold the hook or fill its memory.
+- What `handoff_list` and `handoff_take` return is marked as tasks written by agents, information and not
+  instructions, and a handoff can only be addressed to a label an agent can have, or `*`.
+- `derbent explain`, `derbent handoffs`, `derbent suggest` and `derbent verify --file` escape text from
+  agents, tools and files before it reaches your terminal, and a suggested rule's strings are quoted so
+  that they cannot end early.
 
 [1.0.0]: https://github.com/tunahanaliozturk/derbent/releases/tag/v1.0.0
