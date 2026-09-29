@@ -306,6 +306,22 @@ func TestRowsKeepTheStoredTimeText(t *testing.T) {
 	}
 }
 
+// Every stored chain was hashed by the digest that Sum replaced, so Sum must feed the hash the same bytes
+// in the same order, or no existing database would verify. The expected hash was computed by that digest
+// at commit 439bd0f, over the same fields, with text outside ASCII so that each length prefix counts bytes.
+func TestSumHashesAsTheStoredChainsWere(t *testing.T) {
+	r := receipt.Row{
+		Seq: 42, At: "2026-09-27T10:00:00.12Z", Project: "/work/şehir", Agent: "claude", Session: "oturum-ü",
+		Tool: "github__create_issue", Args: `{"title":"çığ 日本 😀"}`, ArgsSHA256: "5d41402abc4b2a76b9719d911017c592",
+		Decision: "allow", DecidedBy: "rule:3", Outcome: "ok", ResultSize: 1234,
+		ResultSHA256: "7d793037a0760186574b0282f2f435e7", DurationMS: 1500,
+		PrevHash: "9355c90e3630016049d6f5a0a771ce291b2334755d68c0d3a2bc1ec76d830007", Hash: "not read",
+	}
+	if got, want := r.Sum(), "808938ff7711e3c572f1679b869276d49d628e5079d22e9c046eca2f37bf5035"; got != want {
+		t.Fatalf("Sum = %s, want %s, the hash the stored chains were written with", got, want)
+	}
+}
+
 // exportOf checks rows as an export and returns what the check found, or the first failure with the
 // number of the row that failed.
 func exportOf(rows ...receipt.Row) (receipt.Export, error) {
@@ -347,6 +363,9 @@ func TestExportCheck(t *testing.T) {
 	rewound := all[0]
 	rewound.PrevHash = strings.Repeat("2", 64)
 	rewound.Hash = rewound.Sum()
+	restarted := all[4]
+	restarted.PrevHash = receipt.Genesis
+	restarted.Hash = restarted.Sum()
 	for name, tc := range map[string]struct {
 		rows []receipt.Row
 		want string
@@ -356,6 +375,7 @@ func TestExportCheck(t *testing.T) {
 		"a number going back": {[]receipt.Row{all[0], all[2], all[1]}, "row 3: its sequence number 2 does not come after 3"},
 		"a repeated line":     {[]receipt.Row{all[0], all[0]}, "row 2: its sequence number 1 does not come after 1"},
 		"a false start":       {[]receipt.Row{rewound}, "row 1: it is receipt 1, and its prev_hash is not the genesis hash"},
+		"a second start":      {[]receipt.Row{restarted}, "row 1: it is receipt 5, and its prev_hash is the genesis hash"},
 	} {
 		if _, err = exportOf(tc.rows...); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, tc.want)

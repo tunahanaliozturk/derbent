@@ -244,16 +244,23 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   It recomputes each line's hash from its fields with the function the database check uses, and checks
   that each line's `prev_hash` is the hash of the line before it when their sequence numbers follow on. A
   gap in the numbers, which a filtered export has, starts a new run and is reported, not failed; a number
-  that does not rise, and a receipt 1 whose `prev_hash` is not the genesis hash, fail. It prints how
-  many lines it checked, the runs, the gaps, the anchor (the first line's `prev_hash`) and the head (the
-  last line's `hash`), and `--head <hash>` checks the head against a hash the user kept. The first line
-  that fails is named, and the exit status is 1. Lines of any length are read, in UTF-8 with or without
-  a byte order mark or in UTF-16 with one, as Windows PowerShell 5.1 writes a redirected command's
-  output, and a line with a field the hash does not cover is refused. Blank lines are skipped, and a file
-  with no receipt lines fails.
-- An export shows that each line is intact, that the lines of each run follow one another in the chain,
-  and with a kept head that it reaches that head. It cannot show that nothing was left out: a line removed
-  from the middle looks like a filter's gap, and lines cut from either end go unseen without a kept head.
+  that does not rise, a receipt 1 whose `prev_hash` is not the genesis hash, and a later receipt whose
+  `prev_hash` is, fail. It prints how many lines it checked, the runs, the gaps, the anchor (the first
+  line's `prev_hash`) and the head (the last line's `hash`), and `--head <hash>` checks the head against a
+  hash the user kept. With a kept head and more than one run it says that only the last run is tied to
+  that head, and without `--head` it says that nothing ties the export to the database. The first line
+  that fails is named, and the exit status is 1. Lines of any length are read, with LF or CRLF endings, in
+  UTF-8 with or without a byte order mark or in UTF-16 with one, as Windows PowerShell 5.1 writes a
+  redirected command's output. A line must be one JSON object that holds each field listed above once,
+  under its exact name, and nothing else: a field the hash does not cover, a field given twice or left
+  out, and text after the object are refused. Blank lines are skipped, and a file with no receipt lines
+  fails.
+- A line whose hash matches its fields shows that it was not changed only when its run ends at a kept
+  head. The hash takes no key, so anyone holding an export can edit a line and compute its hash again: a
+  run cut off by a gap, and any export checked without a kept head, shows only that its lines agree with
+  each other. An export also cannot show that nothing was left out: a line removed from the middle looks
+  like a filter's gap, lines cut from the start look like an export that starts later, and lines cut from
+  the end go unseen without a kept head.
 
 ## Approvals
 
@@ -796,14 +803,17 @@ migrates it inside `BEGIN IMMEDIATE`.
   own are checked against the default config, which they load. Store tests show `store.Check` refusing
   a newer schema, another program's SQLite file and a text file, leaving a database byte for byte with no
   file beside it, and passing 200 checks of a database another connection is writing and checkpointing.
-- **Export.** Receipt tests show a row keeping stored time text that Go would print shorter, such as
-  `.120`, and the export check passing a whole chain, reporting a filtered export's gaps as runs, and
-  naming the line with an edited field, a broken link, a number that does not rise or a receipt 1 whose
-  `prev_hash` is not the genesis hash. End-to-end tests export with `derbent receipts --json
-  --limit 0` and check with `derbent verify --file`, from a file and from standard input, with a kept head
-  and a wrong one: a filtered export, a line taken out of the middle (a gap, not a failure), an edited
-  and a reordered line, an unknown field and an empty file, a UTF-8 byte order mark, UTF-16 with a byte
-  order mark, CRLF line endings, and a line of more than a mebibyte.
+- **Export.** Receipt tests show `Row.Sum` giving, for a row with text outside ASCII, the hash that the
+  digest it replaced gave, a row keeping stored time text that Go would print shorter, such as `.120`,
+  and the export check passing a whole chain, reporting a filtered export's gaps as runs, and naming the
+  line with an edited field, a broken link, a number that does not rise, a receipt 1 whose `prev_hash` is
+  not the genesis hash or a later receipt whose `prev_hash` is. End-to-end tests export more than 100
+  receipts with `derbent receipts --json --limit 0` and check with `derbent verify --file`, from a file
+  and from standard input, with a kept head, a wrong one and none: a filtered export, where only the last
+  run is tied to the kept head, a line taken out of the middle (a gap, not a failure), an edited and a
+  reordered line, an unknown field, a field in capitals, a repeated field, a zero-valued field left out,
+  text after the object, an empty file, a UTF-8 byte order mark, UTF-16 with a byte order mark, CRLF line
+  endings, a line of more than a mebibyte, and a cancel that stops the check at the next line.
 - **Explain.** Every case in the rule tests also runs `Explain` and checks that it decides as `Decide`
   does, and a rule test checks the steps: each condition with the value it read, missing or not a string,
   and nothing read past the first match. A budget test checks the count and the wait of every budget that
@@ -1083,11 +1093,12 @@ Not in v1, in rough order of value:
   release that moves them breaks init for that CLI until Derbent follows; doctor names what it cannot
   find.
 - CI runs the tests on Windows and Linux; on macOS it only builds.
-- A receipt export cannot show that nothing was left out (see Receipts). A stored field that is not valid
-  UTF-8, which only unmasked arguments from a client that writes such bytes or a project path that is not
-  UTF-8 can hold, cannot pass through JSON unchanged, so its line fails the check while the database
-  verifies. Windows PowerShell 5.1 re-encodes a redirected command's output through the console's code
-  page, which can change text outside ASCII; cmd, Git Bash and PowerShell 7.4 or later keep the bytes.
+- A receipt export shows a line unchanged only when its run ends at a kept head, and cannot show that
+  nothing was left out (see Receipts). A stored field that is not valid UTF-8, which only unmasked
+  arguments from a client that writes such bytes or a project path that is not UTF-8 can hold, cannot
+  pass through JSON unchanged, so its line fails the check while the database verifies. Windows
+  PowerShell 5.1 re-encodes a redirected command's output through the console's code page, which can
+  change text outside ASCII; cmd, Git Bash and PowerShell 7.4 or later keep the bytes.
 - `derbent explain` starts no servers, so it cannot tell whether a downstream server offers a tool or
   which definition it sends now; it reports the pin as the database records it.
 - A handoff is addressed by agent label, and any agent started as `reviewer` can take the reviewer's

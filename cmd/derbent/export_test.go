@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -71,8 +72,10 @@ func exportLines(s string) []string {
 
 // The milestone's evidence for export: a whole chain exported with --limit 0 verifies without the
 // database, reaching the head verify printed; a filtered export reports its gaps and verifies; a line taken
-// out of the middle is a gap, not a failure; and an edited line, a reordered one, an unknown field, a head
-// that is not the kept one and an empty file each fail, naming the line.
+// out of the middle is a gap, not a failure; and an edited line, a reordered one, a line that is not exactly
+// one receipt, a head that is not the kept one and an empty file each fail, naming the line. The output
+// never claims more than the hashes show: only the run that ends at a kept head is tied to it, and without
+// --head nothing is.
 func TestAnExportVerifiesWithoutTheDatabase(t *testing.T) {
 	db := receiptsDB(t, 6)
 	head := headOf(t, runOK(t, "verify", "--db", db))
@@ -83,26 +86,33 @@ func TestAnExportVerifiesWithoutTheDatabase(t *testing.T) {
 	}
 	for _, want := range []string{
 		"receipts: 6 lines, 1 run\n", "runs:     1-6\n", "anchor:   " + receipt.Genesis + " (the start of the chain)\n",
-		"head:     " + head + "\n", "kept:     the head is the hash you kept\n", "export:   every line intact, every run linked\n",
+		"head:     " + head + "\n", "kept:     the head is the hash you kept\n",
+		"export:   every line's hash matches its fields, and the lines of each run are linked\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "tied:") {
+		t.Errorf("one run ending at the kept head needs no word on the others:\n%s", out)
+	}
 
 	codex := runOK(t, "receipts", "--json", "--limit", "0", "--agent", "codex", "--db", db)
 	if out, err = verifyBytes(t, []byte(codex), "--head", head); err != nil ||
 		!strings.Contains(out, "receipts: 3 lines, 3 runs\n") || !strings.Contains(out, "runs:     2, 4, 6\n") ||
-		!strings.Contains(out, "gaps:     3, 5, not in the export\n") {
+		!strings.Contains(out, "gaps:     3, 5, not in the export\n") ||
+		!strings.Contains(out, "tied:     only the last run, 6, is tied to the kept head; the 2 runs before it are tied to no kept hash\n") {
 		t.Fatalf("filtered export: %v\n%s", err, out)
 	}
 
 	l := exportLines(whole)
 	gap := strings.Join(append(append([]string{}, l[:2]...), l[3:]...), "")
-	if out, err = verifyBytes(t, []byte(gap)); err != nil || !strings.Contains(out, "gaps:     3, not in the export\n") {
+	if out, err = verifyBytes(t, []byte(gap)); err != nil || !strings.Contains(out, "gaps:     3, not in the export\n") ||
+		!strings.Contains(out, "kept:     no --head given, so nothing ties the export to the database: anyone can recompute every hash\n") {
 		t.Fatalf("a line taken out: %v\n%s", err, out)
 	}
 
+	const notAReceipt = "line 1 is not a receipt as derbent receipts --json prints it"
 	for name, tc := range map[string]struct {
 		text  string
 		extra []string
@@ -110,9 +120,18 @@ func TestAnExportVerifiesWithoutTheDatabase(t *testing.T) {
 	}{
 		"an edited line":   {strings.Replace(whole, "note 2", "note X", 1), nil, "at line 3 (receipt 3): its hash does not match its fields"},
 		"a reordered line": {l[0] + l[2] + l[1], nil, "at line 3 (receipt 2): its sequence number 2 does not come after 3"},
-		"an unknown field": {strings.Replace(l[0], `{"seq":1,`, `{"seq":1,"extra":1,`, 1), nil, "line 1 is not a receipt as derbent receipts --json prints it"},
-		"a wrong head":     {whole, []string{"--head", strings.Repeat("0", 63) + "1"}, "its head is not the hash you kept"},
-		"an empty file":    {"\n", nil, "holds no receipts"},
+		"an unknown field": {strings.Replace(l[0], `{"seq":1,`, `{"seq":1,"extra":1,`, 1), nil, notAReceipt},
+		// Go's decoder matches a name in any case and keeps the last copy, so without the key check jq
+		// would show the first args and the hash would cover the second.
+		"a field in capitals": {strings.Replace(l[0], `"args":`, `"args":"shown to jq","ARGS":`, 1), nil, notAReceipt + `: it holds "ARGS"`},
+		"a repeated field":    {strings.Replace(l[0], `"args":`, `"args":"first","args":`, 1), nil, notAReceipt + `: it holds "args" twice`},
+		"a trailing ]":        {strings.TrimSuffix(l[0], "\n") + "]\n", nil, notAReceipt + ": it holds more after the object"},
+		"a trailing }":        {strings.TrimSuffix(l[0], "\n") + "}\n", nil, notAReceipt + ": it holds more after the object"},
+		// A field left out decodes as its zero value, which is what these two hold, so the hash still matches.
+		"a zero duration left out": {strings.Replace(l[0], `,"duration_ms":0`, "", 1), nil, notAReceipt + `: it lacks "duration_ms"`},
+		"an empty result left out": {strings.Replace(l[0], `,"result_sha256":""`, "", 1), nil, notAReceipt + `: it lacks "result_sha256"`},
+		"a wrong head":             {whole, []string{"--head", strings.Repeat("0", 63) + "1"}, "its head is not the hash you kept"},
+		"an empty file":            {"\n", nil, "holds no receipts"},
 	} {
 		out, err = verifyBytes(t, []byte(tc.text), tc.extra...)
 		if !errors.Is(err, errExportBroken) || !strings.Contains(err.Error(), tc.want) {
@@ -165,7 +184,7 @@ func TestVerifyFileReadsALongLine(t *testing.T) {
 	}
 }
 
-// - reads the export from standard input, so it can come straight from derbent receipts in a pipe.
+// --file - reads the export from standard input, so it can come straight from derbent receipts in a pipe.
 func TestVerifyFileReadsStandardInput(t *testing.T) {
 	whole := runOK(t, "receipts", "--json", "--limit", "0", "--db", receiptsDB(t, 3))
 	var out bytes.Buffer
@@ -175,22 +194,51 @@ func TestVerifyFileReadsStandardInput(t *testing.T) {
 	}
 }
 
-// --limit 0 lists every receipt, so a whole chain can be exported; the default stays the newest 50.
+// cancelOnRead cancels a context when it is read, and holds nothing.
+type cancelOnRead context.CancelFunc
+
+func (c cancelOnRead) Read([]byte) (int, error) {
+	c()
+	return 0, io.EOF
+}
+
+// Ctrl-C cancels the command's context, and verify --file stops at the next line instead of reading on.
+// The line after the cancel is not JSON, so reading it would fail differently.
+func TestVerifyFileStopsWhenCancelled(t *testing.T) {
+	first := runOK(t, "receipts", "--json", "--db", receiptsDB(t, 1)) // one line, with its newline
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	in := io.MultiReader(strings.NewReader(first), cancelOnRead(cancel), strings.NewReader("not a receipt\n"))
+	if err := run(ctx, []string{"verify", "--file", "-"}, in, io.Discard, io.Discard); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancel", err)
+	}
+}
+
+// --limit 0 lists every receipt, past the 100 that receipt.Filter reads a zero limit as, so a whole chain
+// can be exported; the default stays the newest 50.
 func TestReceiptsLimitZeroListsEveryReceipt(t *testing.T) {
-	db := receiptsDB(t, 60)
+	db := receiptsDB(t, 101)
 	if got := len(exportLines(runOK(t, "receipts", "--json", "--db", db))); got != 50 {
 		t.Fatalf("the default lists %d, want the newest 50", got)
 	}
-	if got := len(exportLines(runOK(t, "receipts", "--json", "--limit", "0", "--db", db))); got != 60 {
-		t.Fatalf("--limit 0 lists %d, want 60", got)
+	whole := runOK(t, "receipts", "--json", "--limit", "0", "--db", db)
+	if got := len(exportLines(whole)); got != 101 {
+		t.Fatalf("--limit 0 lists %d, want 101", got)
 	}
-	for _, args := range [][]string{
-		{"receipts", "--limit", "-1", "--db", db},
-		{"verify", "--file", "x.jsonl", "--db", db},
-		{"verify", "--head", strings.Repeat("0", 64), "--db", db},
+	export := filepath.Join(t.TempDir(), "export.jsonl")
+	if err := os.WriteFile(export, []byte(whole), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"receipts", "--limit", "-1", "--db", db}, "--limit must be 0, for every receipt, or more"},
+		{[]string{"verify", "--file", export, "--db", db}, "give --file or --db, not both"},
+		{[]string{"verify", "--head", strings.Repeat("0", 64), "--db", db}, "--head goes with --file"},
 	} {
-		if err := run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err == nil {
-			t.Errorf("%v was accepted", args)
+		if err := run(t.Context(), tc.args, strings.NewReader(""), io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v: err = %v, want %q", tc.args, err, tc.want)
 		}
 	}
 }
