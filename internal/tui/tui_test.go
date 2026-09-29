@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/goleak"
 
@@ -428,6 +429,12 @@ func TestSelectionFollowsTheCallWhenAnOlderOneLeaves(t *testing.T) {
 	if want := fmt.Sprintf("#%d approved once", p[1].ID); !strings.Contains(screen(m), want) {
 		t.Fatalf("screen lacks %q:\n%s", want, screen(m))
 	}
+}
+
+// flat is the screen without styles, its words joined by single spaces, so text wrapped at a space over
+// two lines is found.
+func flat(s string) string {
+	return strings.Join(strings.Fields(ansi.Strip(s)), " ")
 }
 
 // joined is the screen's lines trimmed and run together, so a word wrapped over two lines is found.
@@ -943,8 +950,8 @@ func TestWaitingRowsFitTheWindow(t *testing.T) {
 }
 
 // However short the window, the main screen and the detail view fit it, with the header at the top and
-// the status line, which may be asking for a second A, at the bottom, even with two calls waiting and
-// long arguments.
+// the status line, which may be asking for a second A, wrapped at the bottom, even with two calls waiting
+// and long arguments.
 func TestTheScreenFitsAShortWindow(t *testing.T) {
 	for _, height := range []int{12, 16} {
 		m, _ := newModel(t)
@@ -961,7 +968,9 @@ func TestTheScreenFitsAShortWindow(t *testing.T) {
 			}
 			s := screen(m)
 			lines := strings.Split(s, "\n")
-			if len(lines) > height || !strings.Contains(lines[0], view.first) || !strings.Contains(lines[len(lines)-1], "press A again") {
+			status := m.statusLines()
+			if len(status) < 2 || len(lines) > height || !strings.Contains(lines[0], view.first) ||
+				!strings.Contains(lines[len(lines)-len(status)], "press A again") || !strings.Contains(lines[len(lines)-1], "session") {
 				t.Errorf("%s in %d rows: %d lines, want at most %d with %q first and the question last:\n%s",
 					view.name, height, len(lines), height, view.first, s)
 			}
@@ -1067,14 +1076,15 @@ func TestHostileTextCannotReachTheTerminal(t *testing.T) {
 	}
 	// A's question and the decision's status line carry the agent and tool names too.
 	m, _ = press(later(m, armAfter), "A")
-	if s = screen(m); !strings.Contains(s, `press A again to approve gh\u009b2Jissue`) {
+	if s = screen(m); !strings.Contains(flat(s), `press A again to approve gh\u009b2Jissue`) || len(m.statusLines()) != statusRows ||
+		!strings.HasSuffix(m.statusLines()[statusRows-1], "…") {
 		t.Errorf("the status line does not ask for a second A, escaped:\n%s", s)
 	}
 	noRawText(t, s, 60)
 	m, _ = press(m, "esc")
 	m, cmd := press(later(m, armAfter), "a") // back on the main screen, the call arms again
 	m = settle(m, cmd)
-	if s = screen(m); !strings.Contains(s, `approved once: co\u001b[2Jdex`) {
+	if s = screen(m); !strings.Contains(flat(s), `approved once: co\u001b[2Jdex`) {
 		t.Errorf("the status line does not show the decision, escaped:\n%s", s)
 	}
 	noRawText(t, s, 60)
@@ -1126,19 +1136,24 @@ func TestAProjectRuleIsNamedOnTheRowAndInTheSessionQuestion(t *testing.T) {
 	}
 }
 
-// After the fifth approval of one agent's calls to one tool, with no denial, the status line says a rule
-// could stop the asking. After the fourth it does not, nor when one of the calls was denied. Every case
-// shows the approval itself, so a missing notice cannot come from an approval that did not happen.
+// After the fifth approval of one agent's calls to one tool, once or for the session, with no denial, the
+// status line says a rule could stop the asking, whole, wrapped over as many lines as it takes. After the
+// fourth it does not, nor when one of the calls was denied. Every case shows the approval itself, so a
+// missing notice cannot come from an approval that did not happen.
 func TestTheStatusLineSaysWhenARuleCouldBeSuggested(t *testing.T) {
 	once := approval.ApproveOnce
+	session := "#5 approved github__create_issue calls that rule 2 asks about, for the rest of codex's session"
 	for _, tc := range []struct {
-		name   string
-		before []approval.Verdict
-		notice bool
+		name     string
+		before   []approval.Verdict
+		keys     []string
+		approved string
+		notice   bool
 	}{
-		{"the fifth approval", []approval.Verdict{once, once, once, once}, true},
-		{"the fourth approval", []approval.Verdict{once, once, once}, false},
-		{"after a denial", []approval.Verdict{once, once, once, once, approval.Deny}, false},
+		{"the fifth approval", []approval.Verdict{once, once, once, once}, []string{"a"}, "#5 approved once: codex github__create_issue", true},
+		{"the fifth, for the session", []approval.Verdict{once, once, once, once}, []string{"A", "A"}, session, true},
+		{"the fourth approval", []approval.Verdict{once, once, once}, []string{"a"}, "#4 approved once: codex github__create_issue", false},
+		{"after a denial", []approval.Verdict{once, once, once, once, approval.Deny}, []string{"a"}, "#6 approved once: codex github__create_issue", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, d := newModel(t)
@@ -1157,14 +1172,14 @@ func TestTheStatusLineSaysWhenARuleCouldBeSuggested(t *testing.T) {
 			waiting(t, d.q, askReq)
 			waitPending(t, d.q, 1)
 			m, _ = refresh(m)
-			m, cmd := press(later(m, armAfter), "a")
+			m, cmd := press(later(m, armAfter), tc.keys...)
 			m = settle(m, cmd)
-			approved := fmt.Sprintf("#%d approved once: codex github__create_issue", len(tc.before)+1)
-			if !strings.Contains(screen(m), approved) {
-				t.Fatalf("the status line lacks %q:\n%s", approved, screen(m))
+			noRawText(t, screen(m), 140)
+			if !strings.Contains(flat(screen(m)), tc.approved) {
+				t.Fatalf("the status line lacks %q:\n%s", tc.approved, screen(m))
 			}
-			notice := approved + "; codex's github__create_issue approved 5 times: run derbent suggest for a rule"
-			if got := strings.Contains(screen(m), notice); got != tc.notice {
+			notice := tc.approved + "; codex's github__create_issue approved 5 times: run derbent suggest for a rule"
+			if got := strings.Contains(flat(screen(m)), notice); got != tc.notice {
 				t.Fatalf("the status line shows the notice: %v, want %v:\n%s", got, tc.notice, screen(m))
 			}
 		})

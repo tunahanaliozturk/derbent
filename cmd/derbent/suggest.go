@@ -62,7 +62,7 @@ func runSuggest(ctx context.Context, args []string, stdout, stderr io.Writer) er
 			var line []byte
 			if line, err = json.Marshal(suggestionLine{
 				Agent: s.Agent, Tool: s.Tool, Action: string(s.Action), Arg: s.Key, Prefix: s.Prefix,
-				Approved: s.Approved, Denied: s.Denied, Rules: s.Rules, TOML: s.TOML(),
+				Approved: s.Approved, Denied: s.Denied, Rules: append([]int{}, s.Rules...), TOML: s.TOML(), // [] even when no rule asked
 			}); err != nil {
 				return err
 			}
@@ -73,7 +73,9 @@ func runSuggest(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return nil
 	}
 	if len(list) == 0 {
-		_, err = fmt.Fprintf(stdout, "no suggestions: no agent's calls to one tool were approved %d %s with no denial, or denied %d %s with no approval\n",
+		_, err = fmt.Fprintf(stdout, "no suggestions: no agent's calls to one tool were approved at least %d %s with no denial, "+
+			"or denied at least %d %s with no approval; a shell tool's calls also need readable commands that start "+
+			"with the same words, with no shell operator among them\n",
 			*least, plural(*least, "time", "times"), *least, plural(*least, "time", "times"))
 		return err
 	}

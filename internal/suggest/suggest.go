@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
+	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/redact"
 	"github.com/tunahanaliozturk/derbent/internal/rule"
 	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
@@ -39,8 +41,9 @@ type Suggestion struct {
 // From groups the answered calls by agent and tool and returns a suggestion for each group with at least
 // least approvals and no denial, or at least least denials and no approval, sorted by agent and tool.
 // Calls a project's rules asked about are left out: a rule in the user's config cannot loosen a project's
-// rules. A group gets no suggestion when its agent or tool name holds a wildcard, or when it is a shell
-// whose commands cannot all be read, or share no start but white space.
+// rules. A group gets no suggestion when a rule could not name it (an agent that is no agent label, an
+// empty tool name or one with a wildcard), or when it is a shell whose commands cannot all be read, or
+// share no start that a rule can take safely (see commonPrefix).
 func From(calls []approval.Answered, least int) []Suggestion {
 	type group struct{ agent, tool string }
 	byGroup := map[group][]approval.Answered{}
@@ -77,8 +80,8 @@ func suggestFor(agent, tool string, calls []approval.Answered, least int) (Sugge
 	}
 	slices.Sort(s.Rules)
 	switch {
-	case strings.ContainsAny(agent+tool, "*?"):
-		return Suggestion{}, false // a rule would read the name as wildcards
+	case !config.AgentLabel.MatchString(agent) || tool == "" || strings.ContainsAny(tool, "*?"):
+		return Suggestion{}, false // no rule matches that agent, or matches only that tool
 	case s.Approved >= least && s.Denied == 0:
 		s.Action = rule.Allow
 	case s.Denied >= least && s.Approved == 0:
@@ -117,15 +120,20 @@ func shellCommands(calls []approval.Answered) (key string, cmds []string, shell,
 }
 
 // command returns the call's command argument and its name, or no name for a call that carries none. ok is
-// false when the call carries more than one, or one that is not a string.
+// false when the call carries more than one, or one that is not a string, or a key a command may hide
+// behind: one that holds redaction's mask, since redaction masks keys too, or a command key written in
+// other case, which an args condition, matching names exactly, would never read. Such a key still names a
+// command, so the tool counts as a shell whose commands cannot be read, never as no shell at all.
 func command(args map[string]any) (name, value string, ok bool) {
-	for _, k := range commandKeys {
-		v, present := args[k]
-		if !present {
+	for k, v := range args {
+		exact := slices.Contains(commandKeys[:], k)
+		hidden := strings.Contains(k, redact.Mask) ||
+			slices.ContainsFunc(commandKeys[:], func(c string) bool { return strings.EqualFold(k, c) })
+		if !exact && !hidden {
 			continue
 		}
 		s, isString := v.(string)
-		if name != "" || !isString {
+		if !exact || name != "" || !isString {
 			return k, "", false
 		}
 		name, value = k, s
@@ -135,9 +143,11 @@ func command(args map[string]any) (name, value string, ok bool) {
 
 // commonPrefix is the start every command shares, cut so that the pattern it becomes, the start followed by
 // *, matches no more than the answered commands start with: before the first * or ?, which a pattern reads
-// as wildcards, and then back to ASCII white space unless every command ends there or has white space
-// right after it, so neither a word nor a UTF-8 character is cut in two. It is "" when nothing but white
-// space is left, so a whole shell is never suggested.
+// as wildcards, and before redaction's mask, which no real call holds; then back to ASCII white space
+// unless every command ends there or has white space right after it, so neither a word nor a UTF-8
+// character is cut in two. It is "" when nothing but white space is left, or when what is left holds a
+// shell operator or a line break, after which the * would be a command of its own: a whole shell is never
+// suggested, not even behind "cd /work &&".
 func commonPrefix(cmds []string) string {
 	p := cmds[0]
 	for _, c := range cmds[1:] {
@@ -150,10 +160,13 @@ func commonPrefix(cmds []string) string {
 	if i := strings.IndexAny(p, "*?"); i >= 0 {
 		p = p[:i]
 	}
+	if i := strings.Index(p, redact.Mask); i >= 0 {
+		p = p[:i]
+	}
 	if !endsAWord(p, cmds) {
 		p = p[:strings.LastIndexAny(p, " \t\n")+1]
 	}
-	if strings.TrimSpace(p) == "" {
+	if strings.TrimSpace(p) == "" || strings.ContainsAny(p, ";&|`\n\r") || strings.Contains(p, "$(") {
 		return ""
 	}
 	return p

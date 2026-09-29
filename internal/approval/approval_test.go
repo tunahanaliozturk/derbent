@@ -480,7 +480,8 @@ func TestAnApprovalRecordsWhichRuleListAsked(t *testing.T) {
 }
 
 // Answered lists the calls the user approved or denied, oldest first, with the rule and the list that
-// asked, and leaves out the ones that timed out, were withdrawn or still wait; agent and tool narrow it.
+// asked, and leaves out the ones that timed out, were withdrawn or still wait; agent and tool narrow it,
+// each on its own or both together.
 func TestAnsweredListsApprovedAndDeniedCalls(t *testing.T) {
 	q, db := open(t)
 	for i, row := range []struct {
@@ -512,8 +513,17 @@ func TestAnsweredListsApprovedAndDeniedCalls(t *testing.T) {
 	if err != nil || !slices.Equal(all, want) {
 		t.Fatalf("Answered = %+v, %v; want %+v", all, err, want)
 	}
-	narrow, err := q.Answered(t.Context(), "codex", "native__Bash")
-	if err != nil || !slices.Equal(narrow, want[:2]) {
-		t.Fatalf("Answered(codex, native__Bash) = %+v, %v", narrow, err)
+	for _, tc := range []struct {
+		agent, tool string
+		want        []approval.Answered
+	}{
+		{"codex", "native__Bash", want[:2]},
+		{"codex", "", []approval.Answered{want[0], want[1], want[3]}},
+		{"", "native__Bash", want[:3]},
+		{"claude", "memory_write", nil},
+	} {
+		if narrow, narrowErr := q.Answered(t.Context(), tc.agent, tc.tool); narrowErr != nil || !slices.Equal(narrow, tc.want) {
+			t.Errorf("Answered(%q, %q) = %+v, %v; want %+v", tc.agent, tc.tool, narrow, narrowErr, tc.want)
+		}
 	}
 }
