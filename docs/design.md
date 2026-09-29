@@ -182,6 +182,28 @@ that session's receipts.
 Superseded entries drop out of search results but stay readable by id. Search is SQLite FTS5 ranked by
 bm25 (ADR 0007).
 
+Handoff tools (ADR 0018):
+
+| Tool | Input | Output |
+|---|---|---|
+| `handoff_create` | to (an agent label or `*`), title, body (up to 16 KiB), tags | id |
+| `handoff_list` | state (`open` unless given, `taken`, `done` or `all`), `mine`, `all_projects` | id, project, from, to, title, state, time |
+| `handoff_take` | id | the whole handoff |
+| `handoff_done` | id, optional note (up to 4 KiB) | id, state |
+
+A handoff is a task one agent leaves for another. The four tools are served like the memory tools and
+pass the rules like any tool. A handoff belongs to a project and records the agents and gate sessions
+that created and took it, as a memory entry does. `handoff_list` lists the current project's handoffs
+addressed to the calling agent or to `*`, or with `mine` the ones it created, and with `all_projects`
+every project's. A handoff is open until an agent it is addressed to takes it, then taken by that agent,
+then done when that agent finishes it, with its note. Taking one that is not open or not addressed to the
+agent, and finishing one the agent did not take, is a tool error; of two agents taking one at once, one
+gets it. Nothing moves a handoff back: there is no reassignment or release in v1. `to` must be an agent
+label, the form `--agent` takes, or `*`, so a handoff never waits for an agent that cannot exist. What the
+tools return is marked as tasks written by agents, information and not instructions.
+`derbent handoffs [--db path] [--json] [--all]` lists every project's open handoffs, and every state with
+`--all`, newest first, escaped, from the database opened read-only.
+
 ## Receipts
 
 Each call through the gate appends one row: sequence number, time, project, agent, gate session, tool,
@@ -205,13 +227,32 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   `derbent mcp` and `derbent gate` included, which check it read-only before they write anything.
 - `derbent verify` opens the database read-only, never creates or migrates it, walks the chain and
   names the first sequence number whose hash, predecessor or position is wrong. It prints the head
-  hash. Someone able to write the database could rewrite the whole chain consistently, or delete the
-  newest receipts and leave a shorter chain that still verifies, and keeping a copy of the head hash
-  elsewhere is what catches both (ADR 0004).
+  hash, and checks an export without the database with `--file` (see below). Someone able to write the
+  database could rewrite the whole chain consistently, or delete the newest receipts and leave a shorter
+  chain that still verifies, and keeping a copy of the head hash elsewhere is what catches both
+  (ADR 0004).
 - `derbent receipts` opens the database read-only and lists receipts filtered by agent, tool glob,
-  project and time, the newest 50 unless `--limit` says otherwise, as a table or as JSON lines. Stored
-  text can come from an agent, so control characters, bidirectional overrides and invisible characters
-  are escaped in both, by the same function the UI uses (`internal/visible`).
+  project and time, the newest 50 unless `--limit` says otherwise, every one with `--limit 0`, as a table
+  or as JSON lines. Stored text can come from an agent, so control characters, bidirectional overrides
+  and invisible characters are escaped in both, by the same function the UI uses (`internal/visible`).
+- A JSON line of `derbent receipts --json` carries every field the hash covers, exactly as stored: `seq`,
+  `at` (the stored RFC 3339 text with its fraction, which is what the hash reads), `project`, `agent`,
+  `session`, `tool`, `args`, `args_sha256`, `decision`, `decided_by`, `outcome`, `result_size`,
+  `result_sha256`, `duration_ms`, `prev_hash` and `hash` (ADR 0017). JSON escaping is as it was and
+  decodes back to the stored text.
+- `derbent verify --file <path>`, or `-` for standard input, checks such an export without the database.
+  It recomputes each line's hash from its fields with the function the database check uses, and checks
+  that each line's `prev_hash` is the hash of the line before it when their sequence numbers follow on. A
+  gap in the numbers, which a filtered export has, starts a new run and is reported, not failed; a number
+  that does not rise, and a first receipt whose `prev_hash` is not the genesis hash, fail. It prints how
+  many lines it checked, the runs, the gaps, the anchor (the first line's `prev_hash`) and the head (the
+  last line's `hash`), and `--head <hash>` checks the head against a hash the user kept. The first line
+  that fails is named, and the exit status is 1. Lines of any length are read, in UTF-8 with or without
+  a byte order mark or in UTF-16 with one, as Windows PowerShell 5.1 writes a redirected command's
+  output, and a line with a field the hash does not cover is refused.
+- An export shows that each line is intact, that the lines of each run follow one another in the chain,
+  and with a kept head that it reaches that head. It cannot show that nothing was left out: a line removed
+  from the middle looks like a filter's gap, and lines cut from either end go unseen without a kept head.
 
 ## Approvals
 
@@ -265,6 +306,30 @@ rule that asked, the project and the redacted arguments, and the terminal bell r
   and says what it revoked; `derbent revoke --all` deletes every grant and says how many. An id with no
   grant is an error that names it. Both paths read the grants table on every call, so a revoked grant
   stops covering calls at once.
+
+## Rule suggestions
+
+`derbent suggest [--db path] [--min N] [--json]` reads the calls the user approved or denied and prints
+TOML rule snippets with the counts behind them (ADR 0019). Derbent never edits the config file: the user
+copies what they want.
+
+- Calls are grouped by agent and tool. A group with at least N approvals (5 unless `--min` says) and no
+  denials gets an `allow`; one with at least N denials and no approvals gets a `deny`. Calls that timed
+  out or were withdrawn were never answered and do not count, and calls a project's rules asked about are
+  left out, since a rule in the user's config cannot loosen a project's.
+- A tool whose calls carry a `command` argument, or `CommandLine` as Antigravity CLI's `run_command`
+  does, is a shell, and every one of its answered calls must carry it as a string. Its snippet adds
+  `args = { command = "<prefix>*" }`, where the prefix is the longest start its commands share, cut before
+  any `*` or `?`, which a pattern reads as wildcards, and back to where a word ends. When nothing but white
+  space is left there is no suggestion for that tool, so Derbent never suggests allowing a whole shell. A
+  tool or agent name that holds a `*` or `?` gets none either.
+- Each snippet says where to put it: above the lowest-numbered rule that asked about those calls, from
+  the approvals, so first match reaches it.
+- Strings in a snippet are TOML basic strings with quotes, backslashes, control characters and invisible
+  or reordering characters escaped, so they read back as they were and cannot end early. The comment above
+  each snippet is escaped like any text for a terminal. `--json` prints one line per suggestion.
+- After the user approves a call in the UI, when that agent's answered calls to that tool now make an
+  `allow`, the status line says "<agent>'s <tool> approved <n> times: run derbent suggest for a rule".
 
 ## Budgets
 
@@ -346,8 +411,8 @@ agent reads and follows. The gate pins each downstream tool (ADR 0013).
 - `pin = false` in a server's table turns pinning off for a server whose descriptions change on every
   start: its tools are served as they come and never pinned.
 - A tool that disappears keeps its pin, so it cannot come back changed without notice.
-- Only downstream tools are pinned. The memory tools are Derbent's own, and the CLIs' built-in tools have
-  no definition the gate receives.
+- Only downstream tools are pinned. The memory and handoff tools are Derbent's own, and the CLIs'
+  built-in tools have no definition the gate receives.
 - The UI shows one line above the waiting calls while any tool is changed. `derbent config check` shows
   each tool's pin state (`new`, `pinned`, `changed`) and pins nothing. It, `derbent pins` and `pins show`
   read the database without migrating it, so a database from before the pins table holds no pins for
@@ -400,6 +465,32 @@ file never loosens anything, and a grant is keyed on what the rules say, not on 
 - An agent that can edit the repository can edit or delete `.derbent.toml`. That only takes the project
   back to the user's own rules, never below them.
 
+## Explain
+
+`derbent explain --agent <label> --tool <name> [--args <json>] [--project <dir>] [--config path]
+[--db path] [--session <id>] [--json]` shows how Derbent would decide one call, and changes nothing. It
+loads the config as the hook does, starts no servers, and opens the database read-only, only when it
+exists.
+
+- It prints each of the user's rules in order with why it matches or not: the agent glob, the tool glob,
+  and each `args` condition with the value it read, or that the value was missing or not a string. It
+  stops at the first match and says the rules below it are not read. Then it prints the project's rules
+  the same way, from the `.derbent.toml` of the checkout `--project`, or the working directory, is in;
+  then every budget that applies, with its count in the window; then, for a downstream tool, its pin as
+  the database records it; then, with `--session`, whether a session grant covers the call; and last the
+  verdict and what would decide it: `rule:<n>`, `project:<n>`, `budget:<n>`, `pin`, `gate` or
+  `grant:<id>`.
+- A `native__` name is explained as the hook decides it. Any other name is explained as the MCP gate
+  decides it, which refuses a name it does not serve before any rule is read. Explain says what it cannot
+  know: whether a downstream server offers the tool, and which definition it sends now.
+- Without the database, budgets, pins and grants are reported as not checked.
+- `rule.Set` explains a call with the same matching `Decide` uses, and explain combines the user's and the
+  project's decisions with the function the gate uses, so explain and the gate cannot disagree. Every case
+  in the rule tests checks that `Explain` decides as `Decide` does.
+- Text from agents and the config is escaped. `--json` prints one object. An `--args` that is not JSON is
+  an error that shows the text as it arrived, since Windows PowerShell 5.1 drops the double quotes inside
+  an argument unless each is written as `\"`.
+
 ## Built-in tools
 
 `derbent gate --agent claude` is installed as a Claude Code `PreToolUse` hook matching every tool. It
@@ -431,11 +522,11 @@ tools (ADR 0006). One process runs per tool call, and for every CLI:
 - A call is the gate's own only when three things hold. Its name starts with the CLI's prefix for the
   MCP entry named by `--server` (default `derbent`): `mcp__derbent__` in Claude Code and Codex,
   `derbent-` in Copilot CLI, and `mcp_derbent_` for Antigravity CLI, which is assumed until a real
-  session shows it. The rest of the name is a tool the gate serves: a memory tool, or `<server>__<tool>`
-  for a server in the config, since the hook starts no servers and cannot know their exact tools. And
-  when the hook input names the MCP server, as Claude Code 2.1.274 and later do in `mcp_server.name`,
-  that server is the `--server` entry. Any other call, including one to an MCP server configured in the
-  CLI directly, is decided as `native__` plus the CLI's name for it, such as
+  session shows it. The rest of the name is a tool the gate serves: a memory or handoff tool, or
+  `<server>__<tool>` for a server in the config, since the hook starts no servers and cannot know their
+  exact tools. And when the hook input names the MCP server, as Claude Code 2.1.274 and later do in
+  `mcp_server.name`, that server is the `--server` entry. Any other call, including one to an MCP server
+  configured in the CLI directly, is decided as `native__` plus the CLI's name for it, such as
   `native__mcp__github__get_me`.
 - The gate session is the CLI's session id (Claude Code, Codex, Copilot CLI) or conversation id
   (Antigravity CLI). `A` on a hook tool covers later calls of that `native__` tool that the same rule
@@ -468,20 +559,20 @@ a first config.
 
 - **Presets.** `watch`, `balanced` and `strict` are commented TOML files embedded in the binary. `watch`
   is one rule that allows and records every call, and names no tool. `balanced` allows reading, and asks
-  about pushing, `--force`, discarding work with `git reset --hard` or `git checkout --`, deleting
-  files, running a downloaded script, the terraform, tofu, pulumi, kubectl and helm subcommands its
-  infrastructure section lists, writing a `.env` file with a file tool or a shell redirect, `~/.ssh` in
-  a file path or a shell command, text typed into a running Copilot CLI shell, and every tool of a
-  GitHub server behind Derbent but twelve known reads. It names each CLI's read-only, shell and file
-  tools and the argument keys they use (see Built-in tools), and its comments say what its patterns
-  catch, what they miss and where they catch too much. Its shell rules match text, so a command in a form
-  they do not list, such as `"git" push`, gets through; the preset says so at the top. `strict` allows
-  Derbent's memory tools, each CLI's built-in tools that only read, keep notes and plans or ask the user,
-  named per CLI, and the same twelve GitHub reads, and asks about everything else, every shell command
-  included, so it needs no argument keys. A preset is a file written once, not a
-  mode: Derbent never changes it after writing it, and the user owns it (ADR 0016).
-  `derbent init --preset <name>` writes it to the default config path only when no file is there, and
-  `--print` prints it and writes nothing.
+  about pushing, `--force`, discarding work with `git reset --hard` or `git checkout --`, deleting files,
+  running a downloaded script, the terraform, tofu, pulumi, kubectl and helm subcommands its
+  infrastructure section lists, writing a `.env` file with a file tool or a shell redirect, `~/.ssh` in a
+  file path or a shell command, text typed into a running Copilot CLI shell, and every tool of a GitHub
+  server behind Derbent but twelve known reads. It names each CLI's read-only, shell and file tools and
+  the argument keys they use (see Built-in tools), and its comments say what its patterns catch, what
+  they miss and where they catch too much. Its shell rules match text, so a command in a form they do not
+  list, such as `"git" push`, gets through; the preset says so at the top. `strict` allows Derbent's
+  memory and handoff tools, each CLI's built-in tools that only read, keep notes and plans or ask the
+  user, named per CLI, and the same twelve GitHub reads, and asks about everything else, every shell
+  command included, so it needs no argument keys. A preset is a file written once, not a mode: Derbent
+  never changes it after writing it, and the user owns it (ADR 0016). `derbent init --preset <name>`
+  writes it to the default config path only when no file is there, and `--print` prints it and writes
+  nothing.
 - **init.** `derbent init [--cli <list>] [--preset <name>] [--yes] [--dry-run]` sets up each CLI it finds
   (its command on `PATH`, or for Antigravity CLI the directory `~/.gemini/config`), or the ones `--cli`
   names. For each it adds Derbent's MCP entry through the CLI's own `mcp add` command where there is one
@@ -613,6 +704,10 @@ migrates it inside `BEGIN IMMEDIATE`.
 - Memory is text written by one agent and read by another, which makes it a path for instructions planted
   by one agent to reach the next. Search and read results mark each entry with its author and as notes,
   not instructions, and a rule can put `memory_write` behind `ask`.
+- A handoff is text one agent writes for another to act on, which makes it the same kind of path. What
+  `handoff_list` and `handoff_take` return is marked as tasks written by agents, information and not
+  instructions, and a rule can put `handoff_create` or `handoff_take` behind `ask`. Handoffs are addressed
+  by label, and a label is not authentication.
 - The user's config sets the rules. A repository's `.derbent.toml` can only make them stricter (see
   Project rules), so an agent that edits or deletes it only takes the project back to the user's rules.
 - Tool pins guard against a downstream server that changes a tool's definition after the gate first saw
@@ -699,6 +794,38 @@ migrates it inside `BEGIN IMMEDIATE`.
   own are checked against the default config, which they load. Store tests show `store.Check` refusing
   a newer schema, another program's SQLite file and a text file, leaving a database byte for byte with no
   file beside it, and passing 200 checks of a database another connection is writing and checkpointing.
+- **Export.** Receipt tests show a row keeping stored time text that Go would print shorter, such as
+  `.120`, and the export check passing a whole chain, reporting a filtered export's gaps as runs, and
+  naming the line with an edited field, a broken link, a number that does not rise or a first receipt
+  whose `prev_hash` is not the genesis hash. End-to-end tests export with `derbent receipts --json
+  --limit 0` and check with `derbent verify --file`, from a file and from standard input, with a kept head
+  and a wrong one: a filtered export, a line taken out of the middle (a gap, not a failure), an edited
+  and a reordered line, an unknown field and an empty file, a UTF-8 byte order mark, UTF-16 with a byte
+  order mark, CRLF line endings, and a line of more than a mebibyte.
+- **Explain.** Every case in the rule tests also runs `Explain` and checks that it decides as `Decide`
+  does, and a rule test checks the steps: each condition with the value it read, missing or not a string,
+  and nothing read past the first match. A budget test checks the count and the wait of every budget that
+  applies. End-to-end tests run `derbent explain` before each of a series of hook calls, allowed, denied
+  and refused by a budget, and find its verdict in the receipt the call then gets. They check a project
+  rule that makes a call stricter, a session grant, a changed pin, a name the gate does not serve,
+  arguments that are not an object or not JSON, escaping, and that the database is read without a byte
+  changed and never created.
+- **Handoffs.** Store tests create, list, take and finish handoffs, refuse a `to` no agent label can be and
+  a title, body, note or tags over their limits, refuse a take of a handoff that is not open or not
+  addressed to the agent and a finish by another agent, and race eight agents to take one handoff, with
+  one winner. Gate tests pass a handoff from one agent to another through the MCP tools, with a receipt for
+  each call, hide a tool a rule denies, and mark what they return as information. The hook skips the four
+  tools through the real binary, and `derbent handoffs` lists them escaped, also on a database from before
+  the handoffs table.
+- **Rule suggestions.** Suggestion tests group answers by agent and tool, suggest an allow or a deny at the
+  threshold and not below it or with mixed answers, leave out calls a project's rules asked about, and
+  never widen: a `*` or `?` in the commands cuts the prefix before it; a prefix of white space only, a
+  command that is not a string, a shell call without a command and a tool name with a wildcard give none;
+  and a prefix never ends inside a word or a UTF-8 character. A snippet whose tool name holds quotes, a
+  backslash, a newline and a bidirectional override reads back through the config parser as written and
+  decides as suggested. `derbent suggest` is tested as text and JSON lines, escaped, and on a database
+  from before migration 0006, and a UI test shows the status line after the fifth approval and not after
+  the fourth.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
@@ -752,12 +879,14 @@ derbent/
 ├── internal/gate/                the MCP server facing agents, tool listing, forwarding, hook decisions
 ├── internal/downstream/          MCP clients for stdio and HTTP servers, restarts
 ├── internal/memory/              memory over FTS5
+├── internal/handoff/             handoffs: tasks agents leave for each other
 ├── internal/pin/                 tool pins: canonical definitions and the pins table
 ├── internal/preset/              the rule presets derbent init writes
 ├── internal/setup/               the CLIs' config files: where they are, reading them, the changes init makes
 ├── internal/receipt/             appending, verify, listing
 ├── internal/redact/              masking secrets in stored arguments
 ├── internal/approval/            pending approvals, polling, session grants
+├── internal/suggest/             rule suggestions from the user's answers
 ├── internal/hook/                pre-tool hook protocols of the four CLIs, with golden files in testdata/
 ├── internal/store/               SQLite, migrations
 ├── internal/tui/                 Bubble Tea UI
@@ -832,7 +961,11 @@ Each milestone gets its own implementation plan and ends with a green CI run.
    scratch repository making a call ask that the user's rules allow, approved with `derbent approve`, and
    a downstream test server whose tool description changed between two gate starts withheld and served
    again after `derbent pins accept`.
-7. **Workflow.** Verifiable receipt export, `derbent explain`, handoffs and rule suggestions.
+7. **Workflow.** Verifiable receipt export, `derbent explain`, handoffs and rule suggestions. Exit: two
+   real Claude Code sessions in which `claude` creates a handoff for `reviewer`, which lists and takes it
+   and marks it done; `derbent explain` for one of those calls matching what the receipts show;
+   `derbent receipts --json` exported and checked with `derbent verify --file`; and `derbent suggest` on a
+   database with five approvals of the same command prefix printing the expected snippet.
 
 How the exit checks went: milestone 1 as planned, its tests running in CI on Windows and Linux, and
 milestone 2 as planned, with the GitHub MCP server answering a real Claude Code session through the
@@ -881,17 +1014,13 @@ Not in v1, in rough order of value:
 1. **Secret broker.** Downstream tokens live in the operating system's credential store (Windows
    Credential Manager, macOS Keychain, Secret Service), so neither the agents nor the config file ever
    hold them.
-2. **Rule suggestions.** After the user has approved the same agent and tool five times, the UI offers
-   to turn it into an allow rule. Repeated denials offer a deny rule.
-3. **Handoffs.** `handoff_create` and `handoff_list` tools, so one agent can leave a task addressed to
-   another.
-4. **Approvals away from the desk.** A push notification with approve and deny actions. It needs a relay
+2. **Approvals away from the desk.** A push notification with approve and deny actions. It needs a relay
    or a listener, so it comes with its own security design.
-5. **Timeline.** Receipts grouped into sessions per agent, and export to OpenTelemetry.
-6. **Better memory.** Local embeddings, expiry, and flagging notes from two agents that contradict
+3. **Timeline.** Receipts grouped into sessions per agent, and export to OpenTelemetry.
+4. **Better memory.** Local embeddings, expiry, and flagging notes from two agents that contradict
    each other.
-7. **Skill suggestions.** A tool sequence that repeats across sessions offered as a draft skill.
-8. **More of MCP.** Resources and prompts from downstream servers, and approvals shown inside the
+5. **Skill suggestions.** A tool sequence that repeats across sessions offered as a draft skill.
+6. **More of MCP.** Resources and prompts from downstream servers, and approvals shown inside the
    agent's own UI through elicitation.
 
 ## Known limits and risks
@@ -951,3 +1080,14 @@ Not in v1, in rough order of value:
   release that moves them breaks init for that CLI until Derbent follows; doctor names what it cannot
   find.
 - CI runs the tests on Windows and Linux; on macOS it only builds.
+- A receipt export cannot show that nothing was left out (see Receipts). A stored field that is not valid
+  UTF-8, which only unmasked arguments from a client that writes such bytes or a project path that is not
+  UTF-8 can hold, cannot pass through JSON unchanged, so its line fails the check while the database
+  verifies. Windows PowerShell 5.1 re-encodes a redirected command's output through the console's code
+  page, which can change text outside ASCII; cmd, Git Bash and PowerShell 7.4 or later keep the bytes.
+- `derbent explain` starts no servers, so it cannot tell whether a downstream server offers a tool or
+  which definition it sends now; it reports the pin as the database records it.
+- A handoff is addressed by agent label, and any agent started as `reviewer` can take the reviewer's
+  handoffs. A handoff whose agent stops after taking it stays taken, since there is no release in v1.
+- A suggested prefix pattern matches text, so `git *` also matches `git status && rm -rf build`, and one
+  denial of any command stops an `allow` for the whole tool.
