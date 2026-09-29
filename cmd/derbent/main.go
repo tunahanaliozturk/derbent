@@ -17,7 +17,7 @@ var version = "dev"
 
 var errUsage = errors.New("usage: derbent [--db path] | derbent mcp --agent <name> | derbent pending | " +
 	"derbent approve [--session] <id> | derbent deny <id> | derbent grants | derbent revoke <id>|--all | " +
-	"derbent pins [show|accept] | derbent receipts | derbent verify | derbent config check | derbent gate --agent <name> | derbent init [--cli <list>] [--preset <name>] [--yes] [--dry-run] | derbent doctor [--cli <list>] [--config path] | derbent version")
+	"derbent pins [show|accept] | derbent receipts | derbent verify [--file path [--head hash]] |derbent config check | derbent gate --agent <name> | derbent init [--cli <list>] [--preset <name>] [--yes] [--dry-run] | derbent doctor [--cli <list>] [--config path] | derbent version")
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -59,7 +59,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "receipts":
 		return runReceipts(ctx, args[1:], stdout, stderr)
 	case "verify":
-		return runVerify(ctx, args[1:], stdout, stderr)
+		return runVerify(ctx, args[1:], stdin, stdout, stderr)
 	case "config":
 		if len(args) < 2 || args[1] != "check" {
 			return fmt.Errorf("unknown config command: %w", errUsage)

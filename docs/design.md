@@ -244,7 +244,7 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   It recomputes each line's hash from its fields with the function the database check uses, and checks
   that each line's `prev_hash` is the hash of the line before it when their sequence numbers follow on. A
   gap in the numbers, which a filtered export has, starts a new run and is reported, not failed; a number
-  that does not rise, and a first receipt whose `prev_hash` is not the genesis hash, fail. It prints how
+  that does not rise, and a receipt 1 whose `prev_hash` is not the genesis hash, fail. It prints how
   many lines it checked, the runs, the gaps, the anchor (the first line's `prev_hash`) and the head (the
   last line's `hash`), and `--head <hash>` checks the head against a hash the user kept. The first line
   that fails is named, and the exit status is 1. Lines of any length are read, in UTF-8 with or without
@@ -798,8 +798,8 @@ migrates it inside `BEGIN IMMEDIATE`.
   file beside it, and passing 200 checks of a database another connection is writing and checkpointing.
 - **Export.** Receipt tests show a row keeping stored time text that Go would print shorter, such as
   `.120`, and the export check passing a whole chain, reporting a filtered export's gaps as runs, and
-  naming the line with an edited field, a broken link, a number that does not rise or a first receipt
-  whose `prev_hash` is not the genesis hash. End-to-end tests export with `derbent receipts --json
+  naming the line with an edited field, a broken link, a number that does not rise or a receipt 1 whose
+  `prev_hash` is not the genesis hash. End-to-end tests export with `derbent receipts --json
   --limit 0` and check with `derbent verify --file`, from a file and from standard input, with a kept head
   and a wrong one: a filtered export, a line taken out of the middle (a gap, not a failure), an edited
   and a reordered line, an unknown field and an empty file, a UTF-8 byte order mark, UTF-16 with a byte
@@ -943,6 +943,7 @@ derbent/
 | 0014 | Project rules in `.derbent.toml` can only tighten the user's rules and never change tool listings. |
 | 0015 | Setup adds MCP entries through each CLI's own mcp add where there is one and edits hook files, never replacing an entry, with copies first and the binary's absolute path. |
 | 0016 | Presets are files written once and owned by the user, never a mode Derbent keeps. |
+| 0017 | Receipt exports carry every hashed field as stored, and derbent verify --file checks them without the database, reporting gaps. |
 
 ## Milestones
 

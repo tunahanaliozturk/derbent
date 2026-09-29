@@ -916,7 +916,7 @@ func TestReceiptsJSONEscapesWhatATerminalActsOn(t *testing.T) {
 	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {
 		t.Fatalf("want exactly one line: %q", line)
 	}
-	var got receiptLine
+	var got receipt.Row
 	if err = json.Unmarshal([]byte(line), &got); err != nil {
 		t.Fatalf("the line is not JSON: %v: %q", err, line)
 	}

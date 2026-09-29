@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,6 +272,97 @@ func TestListFiltersAndKeepsTheNewest(t *testing.T) {
 	if r := got[0]; r.Agent != "codex" || r.Tool != "github__create_issue" || !r.At.Equal(base.Add(4*time.Minute+500*time.Millisecond)) ||
 		r.Duration != 4*time.Millisecond || r.Hash == "" {
 		t.Fatalf("receipt read back as %+v", r)
+	}
+}
+
+// An export carries the time as the database stores it, which is what the hash reads. A time whose
+// fraction Go would print shorter, such as .120, must come back as it is, or a line from another writer,
+// or an older one, would fail its check.
+func TestRowsKeepTheStoredTimeText(t *testing.T) {
+	db := openDB(t, filepath.Join(t.TempDir(), "p.db"))
+	r := receipt.Row{
+		Seq: 1, At: "2026-09-27T10:00:00.120Z", Project: "p", Agent: "claude", Session: "s", Tool: "t", Args: "{}",
+		Decision: "allow", DecidedBy: "rule:1", Outcome: "ok", PrevHash: receipt.Genesis,
+	}
+	r.Hash = r.Sum()
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO receipts (seq, at, project, agent, session, tool, args,
+		args_sha256, decision, decided_by, outcome, result_size, result_sha256, duration_ms, prev_hash, hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.Seq, r.At, r.Project, r.Agent, r.Session, r.Tool, r.Args, r.ArgsSHA256, r.Decision, r.DecidedBy,
+		r.Outcome, r.ResultSize, r.ResultSHA256, r.DurationMS, r.PrevHash, r.Hash); err != nil {
+		t.Fatal(err)
+	}
+	log := receipt.NewLog(db)
+	rows, err := log.Rows(t.Context(), receipt.Filter{})
+	if err != nil || len(rows) != 1 || rows[0] != r {
+		t.Fatalf("Rows = %+v, %v; want %+v", rows, err, r)
+	}
+	var c receipt.ExportCheck
+	if err = c.Add(rows[0]); err != nil {
+		t.Fatalf("the stored row fails the export check: %v", err)
+	}
+	if res := verify(t, log); res.FirstBad != 0 || res.Head != r.Hash {
+		t.Fatalf("Verify = %+v", res)
+	}
+}
+
+// exportOf checks rows as an export and returns what the check found, or the first failure with the
+// number of the row that failed.
+func exportOf(rows ...receipt.Row) (receipt.Export, error) {
+	var c receipt.ExportCheck
+	for i, r := range rows {
+		if err := c.Add(r); err != nil {
+			return c.Result(), fmt.Errorf("row %d: %w", i+1, err)
+		}
+	}
+	return c.Result(), nil
+}
+
+// The export check needs no database: it recomputes each row's hash, links rows whose sequence numbers
+// follow on, reports a gap as a new run, and fails a row that was edited, a broken link, a number that
+// does not rise and a first receipt that does not follow the genesis hash.
+func TestExportCheck(t *testing.T) {
+	log := receipt.NewLog(openDB(t, filepath.Join(t.TempDir(), "p.db")))
+	appendN(t, log, 6)
+	all, err := log.Rows(t.Context(), receipt.Filter{Limit: -1})
+	if err != nil || len(all) != 6 {
+		t.Fatalf("Rows = %d rows, %v", len(all), err)
+	}
+	res, err := exportOf(all...)
+	if err != nil || res.Lines != 6 || len(res.Runs) != 1 || res.Runs[0] != [2]int64{1, 6} ||
+		res.Anchor != receipt.Genesis || res.Head != all[5].Hash {
+		t.Fatalf("whole chain: %+v, %v", res, err)
+	}
+	res, err = exportOf(all[1], all[2], all[4], all[5])
+	if err != nil || res.Lines != 4 || len(res.Runs) != 2 || res.Runs[0] != [2]int64{2, 3} || res.Runs[1] != [2]int64{5, 6} ||
+		res.Anchor != all[0].Hash || res.Head != all[5].Hash {
+		t.Fatalf("filtered: %+v, %v", res, err)
+	}
+
+	edited := all[2]
+	edited.Args = `{"title":"forged"}`
+	relinked := all[2]
+	relinked.PrevHash = strings.Repeat("1", 64)
+	relinked.Hash = relinked.Sum() // its own hash passes; the link to row 2 does not
+	rewound := all[0]
+	rewound.PrevHash = strings.Repeat("2", 64)
+	rewound.Hash = rewound.Sum()
+	for name, tc := range map[string]struct {
+		rows []receipt.Row
+		want string
+	}{
+		"an edited field":     {[]receipt.Row{all[0], all[1], edited}, "row 3: its hash does not match its fields"},
+		"a broken link":       {[]receipt.Row{all[0], all[1], relinked}, "row 3: its prev_hash is not the hash of the line before it"},
+		"a number going back": {[]receipt.Row{all[0], all[2], all[1]}, "row 3: its sequence number 2 does not come after 3"},
+		"a repeated line":     {[]receipt.Row{all[0], all[0]}, "row 2: its sequence number 1 does not come after 1"},
+		"a false start":       {[]receipt.Row{rewound}, "row 1: it is receipt 1, and its prev_hash is not the genesis hash"},
+	} {
+		if _, err = exportOf(tc.rows...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
+	}
+	if res, err = exportOf(); err != nil || res.Lines != 0 || len(res.Runs) != 0 {
+		t.Fatalf("no rows: %+v, %v", res, err)
 	}
 }
 
