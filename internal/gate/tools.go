@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -63,6 +64,12 @@ type readOutput struct {
 // MemoryTools are the tools every gate serves itself: write, search and read. The pre-tool hook leaves
 // calls to them to the MCP gate, which decides and records them.
 var MemoryTools = [...]string{"memory_write", "memory_search", "memory_read"}
+
+// OwnTool reports whether name is one of the tools every gate serves itself. The pre-tool hook leaves
+// calls to them to the MCP gate, and derbent explain explains them as the MCP gate decides them.
+func OwnTool(name string) bool {
+	return slices.Contains(MemoryTools[:], name)
+}
 
 func (g *Gate) addMemoryTools(s *mcp.Server) {
 	write, search, read := MemoryTools[0], MemoryTools[1], MemoryTools[2]

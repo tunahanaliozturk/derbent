@@ -56,10 +56,17 @@ type Set struct {
 }
 
 type compiled struct {
+	spec        Spec
 	agent, tool glob
-	args        map[string]glob
+	args        []argGlob // sorted by name, so that Explain reports them in a fixed order
 	action      Action
 	key         string
+}
+
+// argGlob is one args condition: the argument it reads and the pattern it matches.
+type argGlob struct {
+	name, pattern string
+	glob          glob
 }
 
 // Compile checks specs and compiles their patterns. The last rule must be unconditional, so every
@@ -96,12 +103,9 @@ func compile(specs []Spec) (Set, error) {
 		}
 		f := form(sp)
 		fmt.Fprintf(prefix, "%d:%s", len(f), f)
-		c := compiled{agent: newGlob(sp.Agent), tool: newGlob(sp.Tool), action: sp.Action, key: hex.EncodeToString(prefix.Sum(nil))}
-		if len(sp.Args) > 0 {
-			c.args = make(map[string]glob, len(sp.Args))
-			for name, pattern := range sp.Args {
-				c.args[name] = newGlob(pattern)
-			}
+		c := compiled{spec: sp, agent: newGlob(sp.Agent), tool: newGlob(sp.Tool), action: sp.Action, key: hex.EncodeToString(prefix.Sum(nil))}
+		for _, name := range slices.Sorted(maps.Keys(sp.Args)) {
+			c.args = append(c.args, argGlob{name: name, pattern: sp.Args[name], glob: newGlob(sp.Args[name])})
 		}
 		set.rules = append(set.rules, c)
 	}
@@ -143,15 +147,47 @@ func form(sp Spec) string {
 // Decide returns the decision of the first rule matching the call. args holds the call's arguments
 // decoded as a JSON object, or nil when there are none.
 func (s Set) Decide(agent, tool string, args map[string]any) Decision {
+	return s.decide(agent, tool, args, nil)
+}
+
+// Explain decides the call as Decide does and says how: every rule it read, in order, up to and including
+// the one that matched. derbent explain prints it. Both run decide, so they cannot disagree.
+func (s Set) Explain(agent, tool string, args map[string]any) Explanation {
+	var e Explanation
+	e.Decision = s.decide(agent, tool, args, &e.Steps)
+	return e
+}
+
+// decide is Decide, and when steps is not nil it records how each rule it reads met the call.
+func (s Set) decide(agent, tool string, args map[string]any, steps *[]Step) Decision {
 	for i, r := range s.rules {
-		if !r.agent.match(agent) || !r.tool.match(tool) {
-			continue
+		var st *Step
+		if steps != nil {
+			*steps = append(*steps, Step{Rule: i + 1, Action: r.action, Agent: r.spec.Agent, Tool: r.spec.Tool})
+			st = &(*steps)[len(*steps)-1]
 		}
-		if match, unread := r.argsMatch(args); match {
+		if match, unread := r.matches(agent, tool, args, st); match {
 			return Decision{Action: r.action, Rule: i + 1, Unread: unread}
 		}
 	}
 	return Decision{Action: Deny}
+}
+
+// matches reports whether the rule matches the call, and whether through a value it could not read. The
+// args conditions are read only when the agent and the tool match. st, when not nil, records how.
+func (c compiled) matches(agent, tool string, args map[string]any, st *Step) (match, unread bool) {
+	agentOK, toolOK := c.agent.match(agent), c.tool.match(tool)
+	if st != nil {
+		st.AgentMatches, st.ToolMatches = agentOK, toolOK
+	}
+	if !agentOK || !toolOK {
+		return false, false
+	}
+	match, unread = c.argsMatch(args, st)
+	if st != nil {
+		st.Matches, st.Unread = match, unread
+	}
+	return match, unread
 }
 
 // Hidden reports whether tool should be left out of agent's tool list, which is when no call to it
@@ -175,30 +211,82 @@ func (s Set) Hidden(agent, tool string) bool {
 	return true
 }
 
-// argsMatch checks every args condition of the rule against the call. A condition matches a string
-// value through its pattern. A value the pattern cannot read (a number, an array, an object, null)
-// matches a deny or an ask and never an allow, so an args condition never lets through what it cannot
-// check: the call is refused or a person looks at it. A missing argument matches neither. unread
-// reports that the rule matched through such a value.
-func (c compiled) argsMatch(args map[string]any) (match, unread bool) {
-	for name, g := range c.args {
-		v, present := args[name]
-		if !present {
-			return false, false
-		}
+// argsMatch checks every args condition of the rule against the call, in name order. A condition matches
+// a string value through its pattern. A value the pattern cannot read (a number, an array, an object,
+// null) matches a deny or an ask and never an allow, so an args condition never lets through what it
+// cannot check: the call is refused or a person looks at it. A missing argument matches neither. unread
+// reports that the rule matched through such a value. With st it reads every condition and records each;
+// without, it stops at the first that fails.
+func (c compiled) argsMatch(args map[string]any, st *Step) (match, unread bool) {
+	match = true
+	for _, a := range c.args {
+		read := Arg{Name: a.name, Pattern: a.pattern}
+		v, present := args[a.name]
 		s, isString := v.(string)
-		if !isString {
+		switch {
+		case !present:
+			read.Read, match = ArgMissing, false
+		case !isString:
+			read.Read = ArgUnreadable
 			if c.action == Allow {
-				return false, false
+				match = false
+			} else {
+				unread = true
 			}
-			unread = true
-			continue
+		case a.glob.match(s):
+			read.Value, read.Read = s, ArgMatches
+		default:
+			read.Value, read.Read, match = s, ArgDiffers, false
 		}
-		if !g.match(s) {
+		if st != nil {
+			st.Args = append(st.Args, read)
+		} else if !match {
 			return false, false
 		}
 	}
-	return true, unread
+	return match, match && unread
+}
+
+// Explanation is how Decide reaches its decision: every rule it reads, in order, up to and including the
+// one that matches, and the decision.
+type Explanation struct {
+	Steps    []Step
+	Decision Decision
+}
+
+// Step is how one rule met a call. The patterns are as the config wrote them; an empty one matches
+// anything.
+type Step struct {
+	Rule         int    `json:"rule"` // the rule's 1-based position
+	Action       Action `json:"action"`
+	Agent        string `json:"agent"`
+	Tool         string `json:"tool"`
+	AgentMatches bool   `json:"agent_matches"`
+	ToolMatches  bool   `json:"tool_matches"`
+	// Args are the rule's args conditions in name order, each with what it read. They are read only when
+	// the agent and the tool match.
+	Args    []Arg `json:"args"`
+	Matches bool  `json:"matches"`
+	Unread  bool  `json:"unread"`
+}
+
+// ArgRead is how an args condition met the argument it names.
+type ArgRead string
+
+// The ways an args condition can meet a call's argument.
+const (
+	ArgMatches    ArgRead = "matches"
+	ArgDiffers    ArgRead = "differs"
+	ArgMissing    ArgRead = "missing"
+	ArgUnreadable ArgRead = "unreadable" // not a string: it matches a deny or an ask, never an allow
+)
+
+// Arg is how one args condition of a rule met the call.
+type Arg struct {
+	Name    string  `json:"name"`
+	Pattern string  `json:"pattern"`
+	Value   string  `json:"value,omitempty"` // the argument, when it is a string
+	Read    ArgRead `json:"read"`
 }
 
 // glob matches * against any run of characters, newlines included, and ? against exactly one.

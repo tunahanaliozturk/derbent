@@ -36,7 +36,7 @@ type HookAnswer struct {
 // call whose receipt cannot be written is refused, and the error says why.
 func (g *Gate) Hook(ctx context.Context, tool string, args json.RawMessage) (HookAnswer, error) {
 	start := time.Now()
-	decoded, argsJSON, isObject := decodeArgs(args)
+	decoded, argsJSON, isObject := DecodeArgs(args)
 	rec := receipt.Receipt{
 		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: tool,
 		Args: g.redact(argsJSON), ArgsSHA256: sha256Hex(args),

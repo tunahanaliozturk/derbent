@@ -137,7 +137,7 @@ func (g *Gate) waitForTools(ctx context.Context) {
 func (g *Gate) call(ctx context.Context, method string, req *mcp.CallToolRequest, next mcp.MethodHandler) (mcp.Result, error) {
 	start := time.Now()
 	name := req.Params.Name
-	args, argsJSON, isObject := decodeArgs(req.Params.Arguments)
+	args, argsJSON, isObject := DecodeArgs(req.Params.Arguments)
 	rec := receipt.Receipt{
 		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name,
 		Args: g.redact(argsJSON), ArgsSHA256: sha256Hex(req.Params.Arguments),
@@ -194,50 +194,61 @@ type settled struct {
 // strictness orders the actions, so project rules can only make a call stricter (ADR 0014).
 var strictness = map[rule.Action]int{rule.Allow: 0, rule.Ask: 1, rule.Deny: 2}
 
-// verdict is what the rules decided for a call: the user's rules, made stricter by the project's.
-type verdict struct {
-	action  rule.Action
-	by      string // rule:<n> or project:<n>
-	rule    int
-	project bool   // the project's rules set the action
-	key     string // what a session grant for the call is keyed on; "" when no grant may cover it
-	// userAllows is set when the user's rules alone allow the call. An approval of a call only the
+// Judgement is what the rules decided for a call: the user's rules, made stricter by the project's.
+type Judgement struct {
+	Action  rule.Action
+	By      string // rule:<n> or project:<n>
+	Rule    int
+	Project bool   // the project's rules set the action
+	Key     string // what a session grant for the call is keyed on; "" when no grant may cover it
+	// UserAllows is set when the user's rules alone allow the call. An approval of a call only the
 	// project asked about then answers as those rules would, so the project never loosens them.
-	userAllows bool
+	UserAllows bool
 }
 
-// judge decides a call with the user's rules and then the project's (ADR 0014). The stricter action
+// Judge decides a call with the user's rules and then the project's (ADR 0014). The stricter action
 // wins, deny over ask over allow, and on a tie the user's rule is named. A call the project's rules ask
 // about is keyed on both lists, the user's rules up to the one that decided and the project's up to the
 // one that asked, so an edit at or above either stops a grant from covering it (ADR 0011). A call a rule
-// matched on an argument it could not read gets no key, so no grant covers it. A project with no rules
-// file, or no rule matching, adds nothing: Decide on its rules gives Rule 0 then.
-func (g *Gate) judge(name string, args map[string]any) (verdict, error) {
-	if knobs.skipRules {
-		return verdict{action: rule.Allow, by: "rule:0"}, nil
+// matched on an argument it could not read gets no key, so no grant covers it. A project with no rules, or
+// none matching, adds nothing: Decide on its rules gives Rule 0 then. The gate and derbent explain both
+// decide with it, so they cannot disagree.
+func Judge(user, project rule.Set, agent, tool string, args map[string]any) Judgement {
+	d := user.Decide(agent, tool, args)
+	j := Judgement{
+		Action: d.Action, By: "rule:" + strconv.Itoa(d.Rule), Rule: d.Rule, Key: user.Key(d.Rule),
+		UserAllows: d.Action == rule.Allow,
 	}
-	d := g.Rules.Decide(g.Agent, name, args)
-	v := verdict{action: d.Action, by: "rule:" + strconv.Itoa(d.Rule), rule: d.Rule, key: g.Rules.Key(d.Rule), userAllows: d.Action == rule.Allow}
 	unread := d.Unread
-	if g.ProjectRules != nil {
-		set, err := g.ProjectRules.Load()
-		if err != nil {
-			return verdict{}, err
+	if p := project.Decide(agent, tool, args); p.Rule > 0 {
+		if strictness[p.Action] > strictness[j.Action] {
+			j.Action, j.By, j.Rule, j.Project = p.Action, "project:"+strconv.Itoa(p.Rule), p.Rule, true
 		}
-		if p := set.Decide(g.Agent, name, args); p.Rule > 0 {
-			if strictness[p.Action] > strictness[v.action] {
-				v.action, v.by, v.rule, v.project = p.Action, "project:"+strconv.Itoa(p.Rule), p.Rule, true
-			}
-			if p.Action == rule.Ask {
-				v.key += "+" + set.Key(p.Rule)
-				unread = unread || p.Unread
-			}
+		if p.Action == rule.Ask {
+			j.Key += "+" + project.Key(p.Rule)
+			unread = unread || p.Unread
 		}
 	}
 	if unread {
-		v.key = ""
+		j.Key = ""
 	}
-	return v, nil
+	return j
+}
+
+// judge is Judge with this gate's rules and its project's, which it reads again for each call.
+func (g *Gate) judge(name string, args map[string]any) (Judgement, error) {
+	if knobs.skipRules {
+		return Judgement{Action: rule.Allow, By: "rule:0"}, nil
+	}
+	var project rule.Set
+	if g.ProjectRules != nil {
+		set, err := g.ProjectRules.Load()
+		if err != nil {
+			return Judgement{}, err
+		}
+		project = set
+	}
+	return Judge(g.Rules, project, g.Agent, name, args), nil
 }
 
 // settle decides a call before it runs: the user's rules, made stricter by the project's, then a budget
@@ -254,21 +265,21 @@ func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isO
 	if err != nil {
 		return settled{by: "gate", text: name + " was refused: " + err.Error()}
 	}
-	if v.action == rule.Deny {
-		if v.project {
-			return settled{by: v.by, text: fmt.Sprintf("%s is not allowed in this project (rule %d of %s)", name, v.rule, config.ProjectRulesFile)}
+	if v.Action == rule.Deny {
+		if v.Project {
+			return settled{by: v.By, text: fmt.Sprintf("%s is not allowed in this project (rule %d of %s)", name, v.Rule, config.ProjectRulesFile)}
 		}
-		return settled{by: v.by, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, v.rule)}
+		return settled{by: v.By, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, v.Rule)}
 	}
 	// A deny stays a deny. Otherwise a used-up budget refuses the call without asking the user: once the
 	// calls an agent stuck in a loop had let through use it up, its further calls stop here (ADR 0012).
 	if s, over := g.overBudget(ctx, name); over {
 		return s
 	}
-	if v.action == rule.Ask {
+	if v.Action == rule.Ask {
 		return g.ask(ctx, name, redacted, v)
 	}
-	return settled{allow: true, by: v.by}
+	return settled{allow: true, by: v.By}
 }
 
 // overBudget refuses a call when a budget that applies to it is used up. The count reads the receipts,
@@ -281,13 +292,9 @@ func (g *Gate) overBudget(ctx context.Context, name string) (settled, bool) {
 		return settled{}, false
 	}
 	now := time.Now()
-	allowed, err := g.Receipts.AllowedSince(ctx, g.Agent, now.Add(-window))
+	passed, err := Passed(ctx, g.Receipts, g.Agent, now.Add(-window))
 	if err != nil {
 		return settled{by: "gate", text: name + " was refused because its budget could not be counted: " + err.Error()}, true
-	}
-	passed := make([]rule.Passed, len(allowed))
-	for i, a := range allowed {
-		passed[i] = rule.Passed{Tool: a.Tool, At: a.At}
 	}
 	r, reached := g.Budgets.Reached(g.Agent, name, passed, now)
 	if !reached {
@@ -296,22 +303,36 @@ func (g *Gate) overBudget(ctx context.Context, name string) (settled, bool) {
 	return settled{by: "budget:" + strconv.Itoa(r.N), text: r.Message(g.Agent)}, true
 }
 
+// Passed returns the calls agent had let through at or after since, as budgets count them. The gate's
+// budget check and derbent explain both read them with it, so they count the same calls.
+func Passed(ctx context.Context, log *receipt.Log, agent string, since time.Time) ([]rule.Passed, error) {
+	allowed, err := log.AllowedSince(ctx, agent, since)
+	if err != nil {
+		return nil, err
+	}
+	passed := make([]rule.Passed, len(allowed))
+	for i, a := range allowed {
+		passed[i] = rule.Passed{Tool: a.Tool, At: a.At}
+	}
+	return passed, nil
+}
+
 // ask settles a call the rules send to the user. A grant from an earlier "approve for this session" lets
 // it through at once when it was keyed the same way (see judge): grants are keyed on a fingerprint of the
 // rule and every rule above it, so one rule's grant never covers a call that another rule holds, nor one
 // the same rule catches after a rule above it changed (ADR 0011). Otherwise the call waits in the
 // approval queue until the user decides, the timeout passes, the agent gives up, or the gate is told to
 // stop. A call with no key is shown to the user every time, and approving it writes no grant.
-func (g *Gate) ask(ctx context.Context, name, redacted string, v verdict) settled {
+func (g *Gate) ask(ctx context.Context, name, redacted string, v Judgement) settled {
 	if g.Approvals == nil {
-		return settled{by: v.by, text: name + " needs the user's approval, and this gate cannot ask for it"}
+		return settled{by: v.By, text: name + " needs the user's approval, and this gate cannot ask for it"}
 	}
-	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name, v.key)
+	id, granted, err := g.Approvals.Granted(ctx, g.Agent, g.Session, name, v.Key)
 	if err != nil {
-		return settled{by: v.by, text: name + " needs the user's approval, which could not be checked: " + err.Error()}
+		return settled{by: v.By, text: name + " needs the user's approval, which could not be checked: " + err.Error()}
 	}
 	if granted {
-		return settled{allow: true, user: !v.userAllows, by: "grant:" + strconv.FormatInt(id, 10)}
+		return settled{allow: true, user: !v.UserAllows, by: "grant:" + strconv.FormatInt(id, 10)}
 	}
 	// A gate told to stop asks nothing more: the call never waits, so the gate itself refuses it.
 	stopping := settled{by: "gate", text: name + " was refused because the gate is stopping; it did not run"}
@@ -327,7 +348,7 @@ func (g *Gate) ask(ctx context.Context, name, redacted string, v verdict) settle
 	}
 	out, err := g.Approvals.Ask(wait, approval.Request{
 		Project: g.Project, Agent: g.Agent, Session: g.Session, Tool: name, Args: redacted,
-		Rule: v.rule, ProjectRule: v.project, RuleKey: v.key,
+		Rule: v.Rule, ProjectRule: v.Project, RuleKey: v.Key,
 	}, g.ApprovalTimeout)
 	ref := strconv.FormatInt(out.ID, 10)
 	withdrawn := "withdrawn:" + ref
@@ -342,9 +363,9 @@ func (g *Gate) ask(ctx context.Context, name, redacted string, v verdict) settle
 	case err != nil && wait.Err() != nil:
 		return settled{by: withdrawn, text: name + " was withdrawn before the user decided, because the gate is stopping; it did not run"}
 	case err != nil:
-		return settled{by: v.by, text: name + " needs the user's approval, which could not be asked for: " + err.Error()}
+		return settled{by: v.By, text: name + " needs the user's approval, which could not be asked for: " + err.Error()}
 	case out.Approved:
-		return settled{allow: true, user: !v.userAllows, by: "user:" + ref}
+		return settled{allow: true, user: !v.UserAllows, by: "user:" + ref}
 	case out.By == approval.ByTimeout:
 		return settled{by: "timeout:" + ref, text: fmt.Sprintf("%s needs the user's approval and none came within %s, so it was denied. "+
 			"Try again and ask the user to approve it in the derbent UI while it waits.", name, g.ApprovalTimeout)}
@@ -372,10 +393,11 @@ func (g *Gate) redact(args string) string {
 	return g.Redact(args)
 }
 
-// decodeArgs returns the arguments as a map for the rules and as compact JSON for the receipt, and
+// DecodeArgs returns the arguments as a map for the rules and as compact JSON for the receipt, and
 // reports whether they are an object. Missing and null arguments are both no arguments to the rules;
-// missing ones are recorded as {} and null ones as null.
-func decodeArgs(raw json.RawMessage) (map[string]any, string, bool) {
+// missing ones are recorded as {} and null ones as null. derbent explain reads --args with it, so it
+// reads arguments as the gate does.
+func DecodeArgs(raw json.RawMessage) (map[string]any, string, bool) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, "{}", true
 	}

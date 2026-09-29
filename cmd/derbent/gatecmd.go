@@ -127,14 +127,19 @@ func runGate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	return nil
 }
 
-// servedBy reports whether the MCP gate under cfg may serve a tool: a memory tool, or <server>__<tool>
-// for a server in cfg. The hook starts no servers, so it cannot know their exact tools.
+// servedBy reports whether the MCP gate under cfg may serve a tool: one of Derbent's own (gate.OwnTool), or
+// <server>__<tool> for a server in cfg. The hook starts no servers, so it cannot know their exact tools.
 func servedBy(cfg config.Config) func(tool string) bool {
 	return func(tool string) bool {
-		if slices.Contains(gate.MemoryTools[:], tool) {
-			return true
-		}
-		name, rest, ok := strings.Cut(tool, "__")
-		return ok && rest != "" && slices.ContainsFunc(cfg.Servers, func(s config.Server) bool { return s.Name == name })
+		_, _, ok := downstreamTool(cfg, tool)
+		return gate.OwnTool(tool) || ok
 	}
+}
+
+// downstreamTool splits a gate tool name <server>__<name> and reports whether server is one of cfg's servers
+// and name is not empty. The hook and derbent explain both ask it which names belong to a downstream
+// server.
+func downstreamTool(cfg config.Config, tool string) (server, name string, ok bool) {
+	server, name, _ = strings.Cut(tool, "__")
+	return server, name, name != "" && slices.ContainsFunc(cfg.Servers, func(s config.Server) bool { return s.Name == server })
 }
