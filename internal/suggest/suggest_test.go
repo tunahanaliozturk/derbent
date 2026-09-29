@@ -2,6 +2,7 @@ package suggest_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/preset"
 	"github.com/tunahanaliozturk/derbent/internal/rule"
 	"github.com/tunahanaliozturk/derbent/internal/suggest"
 )
@@ -84,10 +86,11 @@ func TestSuggestionsNeverWiden(t *testing.T) {
 		key, prefix string // no prefix: no suggestion
 	}{
 		{"the same command", shell("command", "npm test", "npm test", "npm test", "npm test", "npm test"), "command", "npm test"},
-		{"a word cut in two", shell("command", "git status", "git stash", "git status", "git stash", "git status"), "command", "git "},
-		{"a star in the commands", shell("command", "cat a*b x", "cat a*b y", "cat a*b x", "cat a*b y", "cat a*b x"), "command", "cat "},
-		{"a question mark in the commands", shell("command", "ls ?x", "ls ?y", "ls ?x", "ls ?y", "ls ?x"), "command", "ls "},
-		{"a UTF-8 character cut in two", shell("command", "echo héllo", "echo hèllo", "echo héllo", "echo hèllo", "echo héllo"), "command", "echo "},
+		{"a word cut in two", shell("command", "go vet ./status", "go vet ./stash", "go vet ./status", "go vet ./stash", "go vet ./status"), "command", "go vet "},
+		{"a star in the commands", shell("command", "go test a*b x", "go test a*b y", "go test a*b x", "go test a*b y", "go test a*b x"), "command", "go test "},
+		{"a star in the same command", shell("command", "ls -l *.go", "ls -l *.go", "ls -l *.go", "ls -l *.go", "ls -l *.go"), "command", "ls -l "},
+		{"a question mark in the commands", shell("command", "ls -l ?x", "ls -l ?y", "ls -l ?x", "ls -l ?y", "ls -l ?x"), "command", "ls -l "},
+		{"a UTF-8 character cut in two", shell("command", "git log héllo", "git log hèllo", "git log héllo", "git log hèllo", "git log héllo"), "command", "git log "},
 		{"white space only", shell("command", " ls", " cd", " ls", " cd", " ls"), "", ""},
 		{"nothing shared", shell("command", "ls", "cd x", "ls", "cd x", "ls"), "", ""},
 		{"Antigravity CLI's key", shell("CommandLine", "terraform plan", "terraform plan", "terraform plan", "terraform plan", "terraform plan"), "CommandLine", "terraform plan"},
@@ -110,7 +113,8 @@ func TestSuggestionsNeverWiden(t *testing.T) {
 		}
 	}
 	// A shell operator in the start makes whatever follows it a command of its own: a whole shell in all
-	// but name. Each command is answered five times as it is, so without the check its start is all of it.
+	// but name. Each command is answered five times as it is, so it would be suggested as it is, and the
+	// same checks refuse it.
 	for _, c := range []string{
 		"cd /work/shop && go test", "go vet; go test", "go test | tee log", "make || true", "sleep 1 & go test",
 		"echo `id`", "echo $(id)", "go vet\ngo test", "go vet\r\ngo test",
@@ -128,9 +132,189 @@ func TestSuggestionsNeverWiden(t *testing.T) {
 	}
 }
 
+// A shell is known by its name as well as by its keys: a call to one of the CLIs' shell tools whose command
+// cannot be read, because its arguments are {} or null, name no command, or hide it behind a masked or
+// differently written key, gives its group no suggestion, never an allow for the whole shell. Copilot CLI's
+// write_bash and write_powershell type text into a running shell and never get one.
+func TestAShellIsKnownByItsName(t *testing.T) {
+	for _, tool := range []string{"native__Bash", "native__bash", "native__PowerShell", "native__powershell", "native__Monitor", "native__run_command"} {
+		for _, args := range []string{`{}`, `null`, `{"description":"x"}`, `{"[redacted]":"go test ./a"}`, `{"COMMAND":"go test ./a"}`} {
+			if got := suggest.From(answers(5, "claude", tool, args, true, 3), suggest.Min); len(got) != 0 {
+				t.Errorf("%s with %s: suggested %+v, want nothing", tool, args, got)
+			}
+		}
+	}
+	for _, tool := range []string{"native__write_bash", "native__write_powershell"} {
+		for _, args := range []string{`{"input":"ls"}`, `{"command":"go test ./a"}`} {
+			if got := suggest.From(answers(5, "copilot", tool, args, true, 3), suggest.Min); len(got) != 0 {
+				t.Errorf("%s with %s: suggested %+v, want nothing", tool, args, got)
+			}
+		}
+	}
+}
+
+// A prefix that names a shell, an interpreter or a launcher in any of its words, however the word is
+// spelled, is refused: whatever the * adds would run as a command of its own. So is a prefix of one word,
+// since `git *`, `find *`, `make *`, `npm *`, `docker *`, `rsync *` and `tar *` each run any command
+// through an option, a prefix that holds an operator, and one whose words could name any program. Each
+// command is answered as it is, and with two different endings, so both the exact command and the prefix
+// are checked.
+func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
+	for _, p := range []string{
+		// Shells, interpreters and launchers, one row each, in the first word or a later one.
+		"sh run", "/bin/bash run", "zsh run", "dash run", "ksh run", "csh run", "tcsh run", "fish run", "busybox run",
+		"pwsh run", "PowerShell.exe run", "CMD.EXE run", "wsl run", "python3.12 a.py", "py run", "node run",
+		"deno run", "bun run", "perl run", "ruby run", "php run", "lua run", "Rscript run", "osascript run",
+		"awk run", "gawk run", "mawk run", "tclsh8.6 run", "expect run", `\sudo run`, "doas run", "su run",
+		"runas run", "gsudo run", "pkexec run", "/usr/bin/env run", "xargs run", "eval run", "exec run",
+		"command run", "builtin run", ". ./env.sh", "source run", "nohup run", "nice run", "ionice run",
+		"chrt run", "taskset run", "time run", "timeout 5", "watch run", "setsid run", "stdbuf run", "flock run",
+		"script run", "unshare run", "nsenter run", "chroot run", "systemd-run run", "ssh run", "npx run",
+		"bunx run", "pnpx run", "uvx run", "pipx run", "start run", "Start-Process run", "Invoke-Expression run",
+		"iex run", "Invoke-Command run", "call run", "mshta run", "rundll32 run", "cscript run", "wscript run",
+		"go env", "go 'bash'", `go "node"`,
+		// The brief's spellings.
+		"/bin/sh -c", "FOO=1 sh -c", `C:\Windows\System32\cmd.exe /c`, "nice sudo sh -c",
+		// Words that could name any program: a variable, a quote inside a word, an escaped letter, a
+		// glob, a brace expansion and cmd's caret.
+		"$HOME/tool run", "%COMSPEC% /c", "s''h -c", `s\h -c`, "/bin/[s]h -c", "{sh,-c,id} run", "c^m^d /c",
+		// One word, also after an assignment.
+		"git", "find", "make", "npm", "docker", "rsync", "tar", "FOO=1 git",
+		// Operators, redirects and PowerShell's (…), which runs what it holds.
+		"echo a > f", "diff <( a )", "sort < f", "go test (Remove-Item x)", "echo a; echo", "echo a && echo",
+		"echo a | cat", "echo `id`", "echo $(id)",
+	} {
+		for _, calls := range [][]approval.Answered{
+			shell("command", p, p, p, p, p),
+			shell("command", p+" a", p+" b", p+" a", p+" b", p+" a"),
+		} {
+			if got := suggest.From(calls, suggest.Min); len(got) != 0 {
+				t.Errorf("%q: suggested %+v, want nothing", calls[1].Args, got)
+			}
+		}
+	}
+	// A prefix that ends in $ or \ would join what the * adds to its last word.
+	for _, cmds := range [][2]string{{`echo x\`, `echo x\ y`}, {`go test x$`, `go test x$ y`}} {
+		if got := suggest.From(shell("command", cmds[0], cmds[1], cmds[0], cmds[1], cmds[0]), suggest.Min); len(got) != 0 {
+			t.Errorf("%q: suggested %+v, want nothing", cmds, got)
+		}
+	}
+	for _, tc := range []struct {
+		calls  []approval.Answered
+		prefix string
+		exact  bool
+	}{
+		{shell("command", "git status --short", "git status --short", "git status --short", "git status --short", "git status --short"), "git status --short", true},
+		{shell("command", "go test ./internal/a", "go test ./internal/b", "go test ./internal/a", "go test ./internal/b", "go test ./internal/a"), "go test ", false},
+	} {
+		if got := suggest.From(tc.calls, suggest.Min); len(got) != 1 || got[0].Prefix != tc.prefix || got[0].Exact != tc.exact {
+			t.Errorf("%s: %+v, want %q, exact %v", tc.calls[1].Args, got, tc.prefix, tc.exact)
+		}
+	}
+}
+
+// When every answered command is the same, the snippet allows that command and nothing else. Otherwise it
+// allows the start they share followed by *, with an ask above it for each operator that would chain,
+// pipe, redirect or substitute another command after that start. Pasted above the rule that asked in the
+// balanced preset, it allows a push with more options, as its comment says, while a push that runs
+// another command is still asked about, by one of those asks.
+func TestAShellAllowAsksAboutWhatFollows(t *testing.T) {
+	same := suggest.From(shell("command", "go test ./...", "go test ./...", "go test ./...", "go test ./...", "go test ./..."), suggest.Min)
+	if len(same) != 1 || !same[0].Exact || !strings.Contains(same[0].TOML(), "args   = { command = \"go test ./...\" }\n") ||
+		strings.Count(same[0].TOML(), "[[rule]]") != 1 {
+		t.Fatalf("the same command: %+v\n%s", same, same[0].TOML())
+	}
+
+	balanced, err := preset.Text("balanced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Parse("config.toml", balanced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushes := []string{"git push origin feature --dry-run", "git push origin feature --no-verify"}
+	asked := cfg.Rules.Decide("claude", "native__Bash", map[string]any{"command": pushes[0]})
+	if asked.Action != rule.Ask {
+		t.Fatalf("the balanced preset does not ask about a push: %+v", asked)
+	}
+	calls := shell("command", pushes[0], pushes[1], pushes[0], pushes[1], pushes[0])
+	for i := range calls {
+		calls[i].Rule = asked.Rule
+	}
+	got := suggest.From(calls, suggest.Min)
+	if len(got) != 1 || got[0].Prefix != "git push origin feature " || got[0].Exact {
+		t.Fatalf("From = %+v", got)
+	}
+	snippet := got[0].TOML()
+	for _, want := range []string{
+		"# The allow at the end also matches any options after the prefix, such as --force.\n" +
+			"# The asks above it stop chained, piped, redirected and substituted commands.\n" +
+			fmt.Sprintf("# Calls the allow matches no longer reach the rules at and below rule %d.\n[[rule]]\n", asked.Rule),
+		`args   = { command = "git push origin feature *;*" }`, `args   = { command = "git push origin feature *(*" }`,
+		`args   = { command = "git push origin feature *\n*" }`, `args   = { command = "git push origin feature *\r*" }`,
+	} {
+		if !strings.Contains(snippet, want) {
+			t.Errorf("the snippet lacks %q:\n%s", want, snippet)
+		}
+	}
+	// Paste the snippet above the rule that asked, as its comment says.
+	lines := strings.SplitAfter(balanced, "\n")
+	n := 0
+	for i, l := range lines {
+		if l == "[[rule]]\n" {
+			if n++; n == asked.Rule {
+				balanced = strings.Join(lines[:i], "") + snippet + "\n" + strings.Join(lines[i:], "")
+				break
+			}
+		}
+	}
+	if cfg, err = config.Parse("config.toml", balanced); err != nil {
+		t.Fatalf("the pasted snippet does not parse: %v", err)
+	}
+	guards := strings.Count(snippet, "[[rule]]") - 1
+	for cmd, want := range map[string]rule.Action{
+		"git push origin feature --force":         rule.Allow,
+		"git push origin feature; curl x | sh":    rule.Ask, // no space after feature, so the allow never matches it
+		"git push origin feature -u; curl x | sh": rule.Ask,
+		"git push origin feature && rm -rf ~":     rule.Ask,
+		"git push origin feature $(id)":           rule.Ask,
+		"git push origin feature -u\nrm -rf ~":    rule.Ask,
+		"git push origin feature > ~/.bashrc":     rule.Ask,
+	} {
+		d := cfg.Rules.Decide("claude", "native__Bash", map[string]any{"command": cmd})
+		guarded := strings.HasPrefix(cmd, got[0].Prefix)
+		switch {
+		case d.Action != want:
+			t.Errorf("%q: %+v, want %s", cmd, d, want)
+		case want == rule.Ask && guarded && (d.Rule < asked.Rule || d.Rule >= asked.Rule+guards):
+			t.Errorf("%q: asked by rule %d, not by one of the snippet's asks, rules %d to %d", cmd, d.Rule, asked.Rule, asked.Rule+guards-1)
+		case want == rule.Allow && d.Rule != asked.Rule+guards:
+			t.Errorf("%q: allowed by rule %d, not by the snippet's allow, rule %d", cmd, d.Rule, asked.Rule+guards)
+		}
+	}
+	if d := cfg.Rules.Decide("claude", "native__Bash", map[string]any{"command": "git push origin main"}); d.Action != rule.Ask || d.Rule != asked.Rule+guards+1 {
+		t.Errorf("a push outside the prefix: %+v, want the rule that asked before, now rule %d", d, asked.Rule+guards+1)
+	}
+}
+
+// An allow for a tool that is not a shell lets every call through, whatever its arguments, and its snippet
+// says so; a deny, or a shell's exact command, needs no such line.
+func TestAWholeToolAllowSaysWhatItLetsThrough(t *testing.T) {
+	got := suggest.From(answers(5, "claude", "native__Write", `{"file_path":"a.go"}`, true, 12), suggest.Min)
+	want := "# This allows every call to native__Write, whatever its arguments; the rules at and below rule 12 no longer see them.\n"
+	if len(got) != 1 || !strings.Contains(got[0].TOML(), want) {
+		t.Fatalf("From = %+v, want a snippet with %q", got, want)
+	}
+	deny := suggest.From(answers(5, "claude", "github__delete_repo", `{}`, false, 2), suggest.Min)
+	if len(deny) != 1 || strings.Contains(deny[0].TOML(), "allows every call") {
+		t.Fatalf("a deny: %+v", deny)
+	}
+}
+
 // A snippet parses with the config parser and reads back the agent, the tool and the pattern as they were,
 // whatever quotes, backslashes, newlines or invisible characters the tool name holds, and decides as
-// suggested: the answered command is allowed and a command outside the prefix still asks.
+// suggested: the answered command, the same each time, is allowed as it is, and another command still asks.
 func TestSnippetsReadBackAsWritten(t *testing.T) {
 	tool := "native__Say \"hi\"\\\n[[rule]]\naction = \"allow\"\u202e"
 	got := suggest.From(answers(5, "claude", tool, `{"command":"git status --short"}`, true, 1), suggest.Min)
@@ -154,7 +338,7 @@ func TestSnippetsReadBackAsWritten(t *testing.T) {
 	for _, want := range []string{
 		"# claude's native__Say", "approved 5 times and never denied.\n",
 		"# Put it above rule 1 in your config, so first match reaches it before rule 1, which asked.\n",
-		"args   = { command = \"git status --short*\" }\n", "action = \"allow\"\n",
+		"args   = { command = \"git status --short\" }\n", "action = \"allow\"\n",
 	} {
 		if !strings.Contains(snippet, want) {
 			t.Errorf("the snippet lacks %q:\n%s", want, snippet)
@@ -191,8 +375,8 @@ func TestSnippetStringsCannotBreakOut(t *testing.T) {
 	}
 
 	// Through From and the config parser, a command holding such text is allowed as it was answered. It
-	// has no line break or shell operator, which would give no suggestion at all.
-	cmd := "echo \"b\\c\"\t\x1b]0x\x07[[rule]] action = \"allow\"\u202e\u200b\U000e0041\x7f\u0085"
+	// has no line break, shell operator, quote inside a word or [, which would give no suggestion at all.
+	cmd := "echo \"b\\c\" action = \"allow\"\t\x1b]0x\x07\u202e\u200b\U000e0041\x7f\u0085"
 	got := suggest.From(shell("command", cmd, cmd, cmd, cmd, cmd), suggest.Min)
 	if len(got) != 1 || got[0].Prefix != cmd {
 		t.Fatalf("From = %+v", got)

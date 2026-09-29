@@ -326,19 +326,39 @@ copies what they want.
   `deny`. Calls that timed out or were withdrawn were never answered and do not count, and calls a
   project's rules asked about are left out, since a rule in the user's config cannot loosen a project's.
 - A tool whose calls carry a `command` argument, or `CommandLine` as Antigravity CLI's `run_command`
-  does, is a shell, and every one of its answered calls must carry one command, as a string, under that
-  exact key. A command key written in other case, such as `Command`, is a command that cannot be read: the
-  tool gets no suggestion, never an `allow` for all of it. A key that holds the redaction mask
-  `[redacted]`, which redaction writes over keys as well, is taken the same way, since a command could
-  hide behind it, and for every tool, shell or not: a tool whose calls carry one gets no suggestion. So a
-  redaction pattern that matches a common key name, such as `path` in `file_path`, stops suggestions for
-  every tool whose calls carry that key.
-- A shell's snippet adds `args = { <key> = "<prefix>*" }`, with the key its calls carry (`command` or
-  `CommandLine`). The prefix is the longest start its commands share, cut before any `*` or `?`, which a
-  pattern reads as wildcards, and before `[redacted]`, which no real call holds, then back to where a word
-  ends. There is no suggestion for the tool when nothing but white space is left, or when what is left
-  holds a shell operator (`;`, `&`, `|`, a backtick or `$(`) or a line break, after which the `*` would be
-  a command of its own, as in `cd /work/shop && *`. Derbent never suggests allowing a whole shell.
+  does, is a shell, and so is a tool named as one of the CLIs' shells (`native__Bash`, `native__bash`,
+  `native__PowerShell`, `native__powershell`, `native__Monitor`, `native__run_command`) whatever its calls
+  carry. Every one of a shell's answered calls must carry one command, as a string, under that exact key:
+  a call with none, with `{}` or `null` for arguments, or with a command key written in other case, such as
+  `Command`, is a command that cannot be read, and the tool gets no suggestion, never an `allow` for all
+  of it. A key that holds the redaction mask `[redacted]`, which redaction writes over keys as well, is
+  taken the same way, since a command could hide behind it, and for every tool, shell or not: a tool whose
+  calls carry one gets no suggestion. So a redaction pattern that matches a common key name, such as `path`
+  in `file_path`, stops suggestions for every tool whose calls carry that key. Copilot CLI's
+  `native__write_bash` and `native__write_powershell`, which type text into a running shell, never get one.
+- When every answered command is the same, with no `*`, `?` or `[redacted]` in it, a shell's snippet adds
+  `args = { <key> = "<command>" }`, which matches that command alone. Otherwise it adds
+  `args = { <key> = "<prefix>*" }`, with the key its calls carry (`command` or `CommandLine`). The prefix is
+  the longest start its commands share, cut before any `*` or `?`, which a pattern reads as wildcards, and
+  before `[redacted]`, which no real call holds, then back to where a word ends.
+- The command or prefix gets no suggestion when it holds an operator (`;`, `&`, `|`, a backtick, `(`,
+  `<`, `>` or a line break), after which the `*` would be a command of its own, as in `cd /work/shop && *`;
+  when it ends in `$` or `\`; when it has fewer than two words after any leading `NAME=value`, since
+  `git *`, `find *`, `make *`, `npm *`, `docker *`, `rsync *` and `tar *` each run any command through an
+  option; and when one of its words names a shell, an interpreter or a launcher (`sh`, `bash`, `pwsh`,
+  `cmd`, `python`, `node`, `sudo`, `env`, `xargs`, `nice`, `timeout`, `ssh`, `npx`, `Start-Process`, `iex`
+  and the others ADR 0019 lists), read without quotes, a leading `\`, its directory, its case, a Windows
+  extension or a version, or could name any program because it holds `$`, `%`, a backtick, a quote inside
+  it, `[`, `{` or `^`.
+- A shell's `allow` for a prefix comes after nine `ask` tables for the same agent and tool,
+  `<prefix>*;*`, `<prefix>*&*`, `<prefix>*|*`, `` <prefix>*`* ``, `<prefix>*(*`, `<prefix>*<*`,
+  `<prefix>*>*`, `<prefix>*\n*` and `<prefix>*\r*`, so a command that starts with the prefix and chains,
+  pipes, redirects or substitutes another still asks. A comment says the `allow` still matches any options
+  after the prefix, such as `--force`, and that the calls it matches no longer reach the rules at and below
+  the one it goes above. An `allow` for a tool that is not a shell says it allows every call to the tool,
+  whatever its arguments. These are text rules, and the lists cannot be complete: an option of an
+  ordinary program can run another one (`go test -exec`), and a shell can spell a program in ways the
+  lists do not know. Suggestions refuse the forms named here, not every way to a whole shell.
 - A group gets none when a rule could not name it: an agent that is not an agent label, or a tool name
   that is empty or holds a `*` or `?`.
 - Each snippet says where to put it: above the lowest-numbered rule that asked about those calls, so
@@ -347,7 +367,13 @@ copies what they want.
 - Strings in a snippet are TOML basic strings with quotes, backslashes, control characters and invisible
   or reordering characters escaped, so they read back as they were and cannot end early. The comment above
   each snippet is escaped like any text for a terminal. `--json` prints one line per suggestion, with
-  `rules` a list even when it is empty.
+  `rules` a list even when it is empty, `exact` set when the pattern is the command alone, and `toml` the
+  whole snippet, the asks included.
+- Suggestions count every answered approval, including ones given by any process that can run
+  `derbent approve` or write the database, and an agent with a shell can be such a process, so a snippet
+  is read before it is pasted. When a snippet is for a tool that is not `native__`, the header says to
+  restart the CLI after pasting it: the hook reads the config on every call, but a running `derbent mcp`
+  gate decides with the config it read when it started.
 - After the user approves a call in the UI, once or for the session, when that agent's answered calls to
   that tool now make an `allow`, the status line ends with "<agent>'s <tool> approved <n> times: run
   derbent suggest for a rule". The status line wraps over up to three lines, so at ordinary sizes the
@@ -879,13 +905,24 @@ migrates it inside `BEGIN IMMEDIATE`.
   space only or with a shell operator or line break in it, a command that is not a string, a shell call
   without a command, a masked or differently written command key, both command keys across calls or in
   one call, a tool name that is empty or has a wildcard, and an agent that is not an agent label give
-  none; and a prefix never ends inside a word or a UTF-8 character. A snippet whose tool name holds
+  none; and a prefix never ends inside a word or a UTF-8 character. A shell known by name with `{}`,
+  `null` or no command key gives none, and so do `native__write_bash` and `native__write_powershell`. A
+  table test gives one row to each shell, interpreter and launcher on the list, in the first word and in
+  a later one, and to `/bin/sh -c`, `FOO=1 sh -c`, `C:\Windows\System32\cmd.exe /c`, `python3.12 a.py`,
+  `nice sudo sh -c`, a variable, an escaped letter, a glob, a brace expansion, a one-word prefix, `>`,
+  `<(` and PowerShell's `( )`, each refused as an exact command and as a prefix, while
+  `git status --short` five times gives that command exact and `go test ./internal/a` and
+  `go test ./internal/b` give `go test *`. A prefix snippet pasted above the rule that asked in the
+  balanced preset allows `git push origin feature --force`, as its comment says, while `; curl x | sh`,
+  `&& rm -rf ~`, `$(id)`, a line break and a redirect after the prefix ask, each by one of its asks. An
+  allow for a tool that is not a shell says it allows every call. A snippet whose tool name holds
   quotes, a backslash, a newline and a bidirectional override reads back through the config parser as
   written and decides as suggested, and one whose agent label, tool name and prefix hold those, a carriage
   return, a tab, an escape sequence, invisible characters and C1 controls decodes back to them with no
   line or table of its own. `derbent suggest` is tested as text and as JSON lines, one for each suggestion, with
-  `rules` an empty list when no rule asked, escaped and decoded back, on a database from before migration
-  0006, and with a `--min` below 1 refused. A UI test shows the notice after the fifth approval, once or
+  `rules` an empty list when no rule asked and `toml` the whole snippet with its asks, escaped and decoded
+  back, on a database from before migration 0006, with the restart line only when a snippet is for a tool
+  that is not `native__`, and with a `--min` below 1 refused. A UI test shows the notice after the fifth approval, once or
   for the session, wrapped whole into the window, and not after the fourth or after a denial.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
@@ -1004,7 +1041,7 @@ derbent/
 | 0016 | Presets are files written once and owned by the user, never a mode Derbent keeps. |
 | 0017 | Receipt exports carry every hashed field as stored, and derbent verify --file checks them without the database, reporting gaps. |
 | 0018 | Handoffs are Derbent tools addressed by agent label or *, open then taken then done, with no reassignment or release in v1. |
-| 0019 | Rule suggestions are printed from the user's answers and never written, with a command prefix for shells and never a whole shell. |
+| 0019 | Rule suggestions are printed from the user's answers and never written; a shell gets its exact command, or a command prefix with an ask for each operator, and prefixes that name a shell or launcher are refused. |
 
 ## Milestones
 
@@ -1159,7 +1196,10 @@ Not in v1, in rough order of value:
   id after another, claim every open handoff addressed to `*`, and learn from the refusals whom each of
   the others is for and who took it. A rule that puts `handoff_take`, or every handoff tool, behind `ask`
   for agents the user does not trust closes that.
-- A suggested prefix pattern matches text, so `git *` also matches `git status && rm -rf build`, and
-  `ls*`, suggested when every answered command was `ls`, also matches `lsof`. One denial of any command
-  stops an `allow` for the whole tool. The rule a snippet says to put it above is numbered as the config
+- A suggested rule matches text. An `allow` for a command prefix still matches any options after it, and
+  an option of an ordinary program can run another one (`go test -exec`); the asks above it cover the
+  operators named in Rule suggestions, not every shell's; and the list of shells and launchers a
+  suggestion refuses cannot be complete. Suggestions count every answered approval, including ones an
+  agent with a shell gave through `derbent approve` or the database. One denial of any command stops an
+  `allow` for the whole tool. The rule a snippet says to put it above is numbered as the config
   was when each call was asked, so it can be stale after the rules are reordered.

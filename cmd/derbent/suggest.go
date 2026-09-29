@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
@@ -20,6 +21,7 @@ type suggestionLine struct {
 	Action   string `json:"action"`
 	Arg      string `json:"arg,omitempty"`
 	Prefix   string `json:"prefix,omitempty"`
+	Exact    bool   `json:"exact"` // the pattern is prefix alone, the one command answered, with no *
 	Approved int    `json:"approved"`
 	Denied   int    `json:"denied"`
 	Rules    []int  `json:"rules"`
@@ -61,7 +63,7 @@ func runSuggest(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		for _, s := range list {
 			var line []byte
 			if line, err = json.Marshal(suggestionLine{
-				Agent: s.Agent, Tool: s.Tool, Action: string(s.Action), Arg: s.Key, Prefix: s.Prefix,
+				Agent: s.Agent, Tool: s.Tool, Action: string(s.Action), Arg: s.Key, Prefix: s.Prefix, Exact: s.Exact,
 				Approved: s.Approved, Denied: s.Denied, Rules: append([]int{}, s.Rules...), TOML: s.TOML(), // [] even when no rule asked
 			}); err != nil {
 				return err
@@ -74,13 +76,18 @@ func runSuggest(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	}
 	if len(list) == 0 {
 		_, err = fmt.Fprintf(stdout, "no suggestions: no agent's calls to one tool were approved at least %d %s with no denial, "+
-			"or denied at least %d %s with no approval; a shell tool's calls also need readable commands that start "+
-			"with the same words, with no shell operator among them\n",
+			"or denied at least %d %s with no approval; a shell tool's calls also need readable commands that are "+
+			"the same or start with the same two or more words, with no shell operator, shell, interpreter or launcher among them\n",
 			*least, plural(*least, "time", "times"), *least, plural(*least, "time", "times"))
 		return err
 	}
 	var b strings.Builder
 	b.WriteString("# Rules your answers point to. Derbent changes no file: copy the ones you want into your config.\n")
+	// The hook reads the config on every call; the MCP gate, which decides every other tool, when it starts.
+	if slices.ContainsFunc(list, func(s suggest.Suggestion) bool { return !strings.HasPrefix(s.Tool, "native__") }) {
+		b.WriteString("# A running derbent mcp gate decides with the config it read when it started, so after you paste a rule\n" +
+			"# for a tool that is not native__, restart the CLI.\n")
+	}
 	for _, s := range list {
 		b.WriteString("\n")
 		b.WriteString(s.TOML())
