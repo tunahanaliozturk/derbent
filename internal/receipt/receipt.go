@@ -1,5 +1,5 @@
 // Package receipt appends a hash-chained receipt for every call through the gate and verifies the
-// chain afterwards.
+// chain afterwards, in the database or in an export of it.
 package receipt
 
 import (
@@ -78,12 +78,11 @@ func (l *Log) Append(ctx context.Context, r Receipt) (Receipt, error) {
 		}
 		r.Seq, r.PrevHash = last+1, prev
 		w := rowOf(r)
-		r.Hash = w.digest()
-		_, err = conn.ExecContext(ctx, `INSERT INTO receipts (seq, at, project, agent, session, tool, args,
-			args_sha256, decision, decided_by, outcome, result_size, result_sha256, duration_ms, prev_hash, hash)
+		r.Hash = w.Sum()
+		_, err = conn.ExecContext(ctx, `INSERT INTO receipts (`+rowColumns+`)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			w.seq, w.at, w.project, w.agent, w.session, w.tool, w.args, w.argsSHA256, w.decision, w.decidedBy,
-			w.outcome, w.resultSize, w.resultSHA256, w.durationMS, w.prevHash, r.Hash)
+			w.Seq, w.At, w.Project, w.Agent, w.Session, w.Tool, w.Args, w.ArgsSHA256, w.Decision, w.DecidedBy,
+			w.Outcome, w.ResultSize, w.ResultSHA256, w.DurationMS, w.PrevHash, r.Hash)
 		if err != nil {
 			return fmt.Errorf("insert receipt: %w", err)
 		}
@@ -98,9 +97,7 @@ func (l *Log) Append(ctx context.Context, r Receipt) (Receipt, error) {
 // Verify walks the whole chain in sequence order and reports the first receipt whose sequence
 // number, previous hash or own hash is wrong.
 func (l *Log) Verify(ctx context.Context) (Result, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT seq, at, project, agent, session, tool, args, args_sha256,
-		decision, decided_by, outcome, result_size, result_sha256, duration_ms, prev_hash, hash
-		FROM receipts ORDER BY seq`)
+	rows, err := l.db.QueryContext(ctx, `SELECT `+rowColumns+` FROM receipts ORDER BY seq`)
 	if err != nil {
 		return Result{}, fmt.Errorf("read receipts: %w", err)
 	}
@@ -108,25 +105,22 @@ func (l *Log) Verify(ctx context.Context) (Result, error) {
 	res := Result{Head: Genesis}
 	want, prev := int64(1), Genesis
 	for rows.Next() {
-		var w row
-		var stored string
-		if err = rows.Scan(&w.seq, &w.at, &w.project, &w.agent, &w.session, &w.tool, &w.args, &w.argsSHA256,
-			&w.decision, &w.decidedBy, &w.outcome, &w.resultSize, &w.resultSHA256, &w.durationMS,
-			&w.prevHash, &stored); err != nil {
+		var w Row
+		if w, err = scanRow(rows); err != nil {
 			return Result{}, fmt.Errorf("read receipt: %w", err)
 		}
 		res.Count++
 		if res.FirstBad == 0 {
 			switch {
-			case w.seq != want:
-				res.FirstBad, res.Reason = w.seq, fmt.Sprintf("expected sequence number %d", want)
-			case w.prevHash != prev:
-				res.FirstBad, res.Reason = w.seq, "previous hash does not match the receipt before it"
-			case w.digest() != stored:
-				res.FirstBad, res.Reason = w.seq, "hash does not match the receipt's contents"
+			case w.Seq != want:
+				res.FirstBad, res.Reason = w.Seq, fmt.Sprintf("expected sequence number %d", want)
+			case w.PrevHash != prev:
+				res.FirstBad, res.Reason = w.Seq, "previous hash does not match the receipt before it"
+			case w.Sum() != w.Hash:
+				res.FirstBad, res.Reason = w.Seq, "hash does not match the receipt's contents"
 			}
 		}
-		want, prev, res.Head = w.seq+1, stored, stored
+		want, prev, res.Head = w.Seq+1, w.Hash, w.Hash
 	}
 	if err = rows.Err(); err != nil {
 		return Result{}, fmt.Errorf("read receipts: %w", err)
@@ -143,23 +137,23 @@ type Filter struct {
 	Since time.Time
 	// AfterSeq keeps receipts with a greater sequence number, for following new ones.
 	AfterSeq int64
-	// Limit keeps the newest matches; 0 means 100.
+	// Limit keeps the newest matches; 0 means 100, and below 0 means every match.
 	Limit int
 }
 
-// List returns the newest receipts matching f, oldest first.
-func (l *Log) List(ctx context.Context, f Filter) ([]Receipt, error) {
+// Rows returns the newest receipts matching f exactly as the database stores them, oldest first.
+// derbent receipts --json prints them, so an export carries every field the hash covers (ADR 0017).
+func (l *Log) Rows(ctx context.Context, f Filter) ([]Row, error) {
 	limit := f.Limit
-	if limit <= 0 {
+	if limit == 0 {
 		limit = 100
 	}
 	since := ""
 	if !f.Since.IsZero() {
 		since = sinceBound(f.Since)
 	}
-	rows, err := l.db.QueryContext(ctx, `SELECT seq, at, project, agent, session, tool, args, args_sha256,
-		decision, decided_by, outcome, result_size, result_sha256, duration_ms, prev_hash, hash
-		FROM receipts
+	// SQLite reads a negative LIMIT as no limit.
+	rows, err := l.db.QueryContext(ctx, `SELECT `+rowColumns+` FROM receipts
 		WHERE seq > ?1 AND (?2 = '' OR agent = ?2) AND (?3 = '' OR tool GLOB ?3)
 			AND (?4 = '' OR project = ?4) AND (?5 = '' OR at >= ?5)
 		ORDER BY seq DESC LIMIT ?6`, f.AfterSeq, f.Agent, f.Tool, f.Project, since, limit)
@@ -167,25 +161,35 @@ func (l *Log) List(ctx context.Context, f Filter) ([]Receipt, error) {
 		return nil, fmt.Errorf("list receipts: %w", err)
 	}
 	defer rows.Close()
-	var out []Receipt
+	var out []Row
 	for rows.Next() {
-		var w row
-		var hash string
-		if err = rows.Scan(&w.seq, &w.at, &w.project, &w.agent, &w.session, &w.tool, &w.args, &w.argsSHA256,
-			&w.decision, &w.decidedBy, &w.outcome, &w.resultSize, &w.resultSHA256, &w.durationMS,
-			&w.prevHash, &hash); err != nil {
+		var w Row
+		if w, err = scanRow(rows); err != nil {
 			return nil, fmt.Errorf("list receipts: %w", err)
 		}
-		var r Receipt
-		if r, err = w.receipt(hash); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
+		out = append(out, w)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("list receipts: %w", err)
 	}
 	slices.Reverse(out)
+	return out, nil
+}
+
+// List returns the newest receipts matching f, oldest first.
+func (l *Log) List(ctx context.Context, f Filter) ([]Receipt, error) {
+	rows, err := l.Rows(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Receipt, 0, len(rows))
+	for _, w := range rows {
+		r, convErr := w.Receipt()
+		if convErr != nil {
+			return nil, convErr
+		}
+		out = append(out, r)
+	}
 	return out, nil
 }
 
@@ -264,59 +268,129 @@ func sinceBound(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05")
 }
 
-// receipt turns a stored row back into a Receipt.
-func (w row) receipt(hash string) (Receipt, error) {
-	at, err := time.Parse(time.RFC3339Nano, w.at)
-	if err != nil {
-		return Receipt{}, fmt.Errorf("receipt %d: time %q: %w", w.seq, w.at, err)
+// Row is a receipt exactly as the database stores it: every field the hash covers, in the form the hash
+// reads it, and the hash. derbent receipts --json prints rows and derbent verify --file reads them back,
+// so an export can be checked without the database (ADR 0017). Hashes are computed over these values, so
+// verification never depends on how a time or a duration is formatted when read back.
+type Row struct {
+	Seq          int64  `json:"seq"`
+	At           string `json:"at"` // UTC RFC 3339 with the fraction as stored
+	Project      string `json:"project"`
+	Agent        string `json:"agent"`
+	Session      string `json:"session"`
+	Tool         string `json:"tool"`
+	Args         string `json:"args"`
+	ArgsSHA256   string `json:"args_sha256"`
+	Decision     string `json:"decision"`
+	DecidedBy    string `json:"decided_by"`
+	Outcome      string `json:"outcome"`
+	ResultSize   int64  `json:"result_size"`
+	ResultSHA256 string `json:"result_sha256"`
+	DurationMS   int64  `json:"duration_ms"`
+	PrevHash     string `json:"prev_hash"`
+	Hash         string `json:"hash"`
+}
+
+// rowColumns are the receipts table's columns in the order of Row's fields.
+const rowColumns = `seq, at, project, agent, session, tool, args, args_sha256, decision, decided_by, outcome,
+	result_size, result_sha256, duration_ms, prev_hash, hash`
+
+// scanRow reads one row selected with rowColumns.
+func scanRow(rows *sql.Rows) (Row, error) {
+	var r Row
+	err := rows.Scan(&r.Seq, &r.At, &r.Project, &r.Agent, &r.Session, &r.Tool, &r.Args, &r.ArgsSHA256, &r.Decision,
+		&r.DecidedBy, &r.Outcome, &r.ResultSize, &r.ResultSHA256, &r.DurationMS, &r.PrevHash, &r.Hash)
+	return r, err
+}
+
+// rowOf is r as it will be stored, without its hash.
+func rowOf(r Receipt) Row {
+	return Row{
+		Seq: r.Seq, At: r.At.Format(time.RFC3339Nano), Project: r.Project, Agent: r.Agent, Session: r.Session,
+		Tool: r.Tool, Args: r.Args, ArgsSHA256: r.ArgsSHA256, Decision: r.Decision, DecidedBy: r.DecidedBy,
+		Outcome: r.Outcome, ResultSize: r.ResultSize, ResultSHA256: r.ResultSHA256,
+		DurationMS: r.Duration.Milliseconds(), PrevHash: r.PrevHash,
 	}
-	return Receipt{
-		Seq: w.seq, At: at, Project: w.project, Agent: w.agent, Session: w.session, Tool: w.tool, Args: w.args,
-		ArgsSHA256: w.argsSHA256, Decision: w.decision, DecidedBy: w.decidedBy, Outcome: w.outcome,
-		ResultSize: w.resultSize, ResultSHA256: w.resultSHA256, Duration: time.Duration(w.durationMS) * time.Millisecond,
-		PrevHash: w.prevHash, Hash: hash,
-	}, nil
 }
 
-// row is a receipt exactly as stored. Hashes are computed over these values, so verification never
-// depends on how a time or a duration is formatted when read back.
-type row struct {
-	seq          int64
-	at           string
-	project      string
-	agent        string
-	session      string
-	tool         string
-	args         string
-	argsSHA256   string
-	decision     string
-	decidedBy    string
-	outcome      string
-	resultSize   int64
-	resultSHA256 string
-	durationMS   int64
-	prevHash     string
-}
-
-func rowOf(r Receipt) row {
-	return row{
-		seq: r.Seq, at: r.At.Format(time.RFC3339Nano), project: r.Project, agent: r.Agent, session: r.Session,
-		tool: r.Tool, args: r.Args, argsSHA256: r.ArgsSHA256, decision: r.Decision, decidedBy: r.DecidedBy,
-		outcome: r.Outcome, resultSize: r.ResultSize, resultSHA256: r.ResultSHA256,
-		durationMS: r.Duration.Milliseconds(), prevHash: r.PrevHash,
-	}
-}
-
-// digest hashes the fields in a fixed order, each prefixed with its length, so that two different
-// rows can never feed the hash the same bytes.
-func (w row) digest() string {
+// Sum hashes the row's fields in a fixed order, each prefixed with its length, so that two different rows
+// never feed the hash the same bytes. The row's own Hash is not among them: a row is intact when Sum
+// equals it. Append, Verify and ExportCheck all use it.
+func (r Row) Sum() string {
 	h := sha256.New()
 	for _, f := range [...]string{
-		strconv.FormatInt(w.seq, 10), w.at, w.project, w.agent, w.session, w.tool, w.args, w.argsSHA256,
-		w.decision, w.decidedBy, w.outcome, strconv.FormatInt(w.resultSize, 10), w.resultSHA256,
-		strconv.FormatInt(w.durationMS, 10), w.prevHash,
+		strconv.FormatInt(r.Seq, 10), r.At, r.Project, r.Agent, r.Session, r.Tool, r.Args, r.ArgsSHA256,
+		r.Decision, r.DecidedBy, r.Outcome, strconv.FormatInt(r.ResultSize, 10), r.ResultSHA256,
+		strconv.FormatInt(r.DurationMS, 10), r.PrevHash,
 	} {
 		_, _ = fmt.Fprintf(h, "%d:%s;", len(f), f)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Receipt turns the row back into a Receipt.
+func (r Row) Receipt() (Receipt, error) {
+	at, err := time.Parse(time.RFC3339Nano, r.At)
+	if err != nil {
+		return Receipt{}, fmt.Errorf("receipt %d: time %q: %w", r.Seq, r.At, err)
+	}
+	return Receipt{
+		Seq: r.Seq, At: at, Project: r.Project, Agent: r.Agent, Session: r.Session, Tool: r.Tool, Args: r.Args,
+		ArgsSHA256: r.ArgsSHA256, Decision: r.Decision, DecidedBy: r.DecidedBy, Outcome: r.Outcome,
+		ResultSize: r.ResultSize, ResultSHA256: r.ResultSHA256, Duration: time.Duration(r.DurationMS) * time.Millisecond,
+		PrevHash: r.PrevHash, Hash: r.Hash,
+	}, nil
+}
+
+// Export is what an ExportCheck found in the lines it was given.
+type Export struct {
+	Lines int
+	// Runs are the stretches of lines whose sequence numbers follow on, each as its first and last number.
+	// A whole chain is one run; a filtered export has one per stretch it kept.
+	Runs   [][2]int64
+	Anchor string // the first line's prev_hash: the hash of the receipt before the export
+	Head   string // the last line's hash
+}
+
+// ExportCheck checks the lines of an export of derbent receipts --json one at a time, in the order they
+// were exported, without the database (ADR 0017). The zero value is ready to use.
+type ExportCheck struct {
+	res  Export
+	last Row
+}
+
+// Add checks the next line of the export and returns why it fails, or nil. Its hash must match its
+// fields, its sequence number must be greater than the line before it, and when the two follow on its
+// prev_hash must be that line's hash; receipt 1 must follow the genesis hash. A gap in the numbers starts
+// a new run and is not a failure. A line that fails is not added.
+func (c *ExportCheck) Add(r Row) error {
+	switch {
+	case r.Sum() != r.Hash:
+		return errors.New("its hash does not match its fields")
+	case r.Seq < 1:
+		return fmt.Errorf("its sequence number %d is not one a receipt can have", r.Seq)
+	case r.Seq == 1 && r.PrevHash != Genesis:
+		return errors.New("it is receipt 1, and its prev_hash is not the genesis hash")
+	case c.res.Lines > 0 && r.Seq <= c.last.Seq:
+		return fmt.Errorf("its sequence number %d does not come after %d, the line before it", r.Seq, c.last.Seq)
+	case c.res.Lines > 0 && r.Seq == c.last.Seq+1 && r.PrevHash != c.last.Hash:
+		return errors.New("its prev_hash is not the hash of the line before it")
+	}
+	switch {
+	case c.res.Lines == 0:
+		c.res.Anchor = r.PrevHash
+		c.res.Runs = append(c.res.Runs, [2]int64{r.Seq, r.Seq})
+	case r.Seq == c.last.Seq+1:
+		c.res.Runs[len(c.res.Runs)-1][1] = r.Seq
+	default:
+		c.res.Runs = append(c.res.Runs, [2]int64{r.Seq, r.Seq})
+	}
+	c.res.Lines++
+	c.last, c.res.Head = r, r.Hash
+	return nil
+}
+
+// Result is what the lines added so far show.
+func (c *ExportCheck) Result() Export {
+	return c.res
 }

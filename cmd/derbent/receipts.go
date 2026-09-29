@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,24 +17,6 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/visible"
 )
 
-// receiptLine is one receipt as `derbent receipts --json` prints it.
-type receiptLine struct {
-	Seq          int64  `json:"seq"`
-	At           string `json:"at"`
-	Project      string `json:"project"`
-	Agent        string `json:"agent"`
-	Session      string `json:"session"`
-	Tool         string `json:"tool"`
-	Args         string `json:"args"`
-	Decision     string `json:"decision"`
-	DecidedBy    string `json:"decided_by"`
-	Outcome      string `json:"outcome"`
-	ResultSize   int64  `json:"result_size"`
-	ResultSHA256 string `json:"result_sha256"`
-	DurationMS   int64  `json:"duration_ms"`
-	Hash         string `json:"hash"`
-}
-
 // runReceipts lists receipts, newest last, as a table or as JSON lines. It opens the database read-only.
 func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("receipts", flag.ContinueOnError)
@@ -44,13 +27,19 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	flags.StringVar(&f.Tool, "tool", "", "only tools matching this glob, such as github__*")
 	flags.StringVar(&f.Project, "project", "", "only this project")
 	since := flags.String("since", "", "only receipts from this long ago (1h) or this time (RFC 3339) on")
-	flags.IntVar(&f.Limit, "limit", 50, "at most this many, the newest")
+	flags.IntVar(&f.Limit, "limit", 50, "at most this many, the newest; 0 for every receipt")
 	asJSON := flags.Bool("json", false, "print JSON lines instead of a table")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() > 0 {
 		return fmt.Errorf("receipts: unexpected argument %q: filters are flags, such as --agent codex", flags.Arg(0))
+	}
+	switch {
+	case f.Limit < 0:
+		return errors.New("receipts: --limit must be 0, for every receipt, or more")
+	case f.Limit == 0:
+		f.Limit = -1 // every match, as receipt.Filter reads a negative limit
 	}
 	var err error
 	if f.Since, err = parseSince(*since, time.Now()); err != nil {
@@ -65,18 +54,17 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	defer db.Close()
-	list, err := receipt.NewLog(db).List(ctx, f)
-	if err != nil {
-		return err
-	}
+	log := receipt.NewLog(db)
 	if *asJSON {
-		for _, r := range list {
-			line, err := json.Marshal(receiptLine{
-				Seq: r.Seq, At: r.At.Format(time.RFC3339Nano), Project: r.Project, Agent: r.Agent, Session: r.Session,
-				Tool: r.Tool, Args: r.Args, Decision: r.Decision, DecidedBy: r.DecidedBy, Outcome: r.Outcome,
-				ResultSize: r.ResultSize, ResultSHA256: r.ResultSHA256, DurationMS: r.Duration.Milliseconds(), Hash: r.Hash,
-			})
-			if err != nil {
+		// Each line is a stored row, every field the hash covers as it is stored, so that derbent verify
+		// --file can check it without the database (ADR 0017).
+		var rows []receipt.Row
+		if rows, err = log.Rows(ctx, f); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			var line []byte
+			if line, err = json.Marshal(r); err != nil {
 				return err
 			}
 			if _, err = fmt.Fprintln(stdout, escapeRaw(string(line))); err != nil {
@@ -84,6 +72,10 @@ func runReceipts(ctx context.Context, args []string, stdout, stderr io.Writer) e
 			}
 		}
 		return nil
+	}
+	list, err := log.List(ctx, f)
+	if err != nil {
+		return err
 	}
 	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "SEQ\tTIME\tAGENT\tTOOL\tDECISION\tBY\tOUTCOME\tMS")
