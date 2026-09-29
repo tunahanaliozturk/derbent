@@ -566,7 +566,8 @@ exists.
   call before it reads any rule, `action`, `by` and `reason` are the verdict, and a list with nothing in it
   is `[]`, never `null`. An `--args` that is not JSON is an error that shows the text as it arrived, since
   Windows PowerShell 5.1 drops the double quotes inside an argument unless each is written as `\"`, and
-  even then splits an argument that holds a space; `--%` before `--args` passes it whole.
+  even then splits an argument that holds a space; `--%` before `--args` passes it whole, and the error
+  says to write it that way.
 
 ## Built-in tools
 
@@ -1207,7 +1208,9 @@ Not in v1, in rough order of value:
   are sequential and `handoff_take` works across projects by id, so a hostile agent can call it over one
   id after another, claim every open handoff addressed to `*`, and learn from the refusals whom each of
   the others is for and who took it. A rule that puts `handoff_take`, or every handoff tool, behind `ask`
-  for agents the user does not trust closes that.
+  for agents the user does not trust narrows that path, since each take then waits for the user; an `A`
+  session grant on `handoff_take` lets every later take from that session through, so each is answered
+  with `a`.
 - A suggested rule matches text. An `allow` for a command prefix still matches any options after it, and
   an option of an ordinary program can run another one (`go test -exec`); the asks above it cover the
   operators named in Rule suggestions, not every shell's; and the list of shells and launchers a

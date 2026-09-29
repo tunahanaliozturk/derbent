@@ -90,7 +90,8 @@ The first release.
   and `prev_hash` included, and `--limit 0` lists every receipt. `derbent verify --file <path>`, or `-`
   for standard input, checks such an export without the database: each line's hash, the links within each
   run of sequence numbers, and with `--head` the head against a hash you kept. A filtered export's gaps
-  are reported, not failed, and a file Windows PowerShell 5.1 wrote as UTF-16 is read
+  are reported, not failed, and a file Windows PowerShell 5.1 wrote as UTF-16 is read, though PowerShell
+  5.1 can change text outside ASCII on the way, which fails those lines (see the README)
   ([ADR 0017](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0017-verifiable-receipt-export.md)).
 - `derbent explain --agent <label> --tool <name> [--args <json>]` shows how Derbent would decide a call:
   each rule in order and why it matches or not, the project's rules, every budget that applies with its

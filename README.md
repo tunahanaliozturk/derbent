@@ -206,13 +206,13 @@ derbent handoffs          # the open handoffs of every project; --all for every 
 ```
 
 A handoff is text one agent writes for another to act on, so what the tools return is marked as tasks
-written by agents, information and not instructions, and the rules decide the four tools like any other:
-put `handoff_create` or `handoff_take` behind `ask` for an agent you want to watch. An agent label is not
-authentication, so any agent started as `reviewer` can take the reviewer's handoffs. Ids count up from 1,
-and `handoff_take` takes a handoff of any project by its id, so an agent can try one id after another,
-claim every open handoff addressed to `*`, and learn from the refusals whom the others are for or who
-took them. Put `handoff_take` behind `ask` for an agent you do not trust. The balanced and strict presets
-allow the four tools.
+written by agents, information and not instructions, and the rules decide the four tools like any other.
+An agent label is not authentication, so any agent started as `reviewer` can take the reviewer's handoffs.
+Ids count up from 1, and `handoff_take` takes a handoff of any project by its id, so an agent can try one
+id after another, claim every open handoff addressed to `*`, and learn from the refusals whom the others
+are for or who took them. For an agent you want to watch or do not trust, put `handoff_create` and
+`handoff_take` behind `ask` and answer each call with `a`, once, not `A`: a session grant lets every later
+take from that session through. The balanced and strict presets allow the four tools.
 
 ## Rules
 
@@ -701,8 +701,11 @@ in the design. The ones to know first:
 - Only Claude Code's hook has been checked in a real session. The Codex, Copilot CLI and Antigravity CLI
   adapters follow each CLI's documentation.
 - Argument globs match strings, not meaning: `git push*` does not match `cd repo && git push`.
-- A receipt export shows its lines unchanged only up to a head you kept, and never that nothing was left
-  out of it. A suggested `args` pattern matches text, as every shell rule does.
+- A receipt export shows its last run unchanged only against a head you kept, and never that nothing was
+  left out of it. A stored field that is not valid UTF-8 cannot pass through JSON unchanged, so its line
+  fails `verify --file` while the database verifies, and the error says so.
+- A suggestion refuses the shells, launchers and operators it knows, but a text rule can be fooled and
+  those lists cannot be complete, and an `allow` for a command prefix lets any options through.
 - A handoff's address is a label, not an identity, and any agent that can call `handoff_take` can claim
   every open handoff addressed to `*`.
 - Approvals depend on you watching. Unattended, `ask` means denied after the timeout.
