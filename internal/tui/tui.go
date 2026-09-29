@@ -520,19 +520,35 @@ func (m Model) main() string {
 	}
 	l.blank()
 	for _, s := range status {
-		l.add(faintStyle, visible.Escape(s))
+		l.add(faintStyle, s)
 	}
 	l.fit(m.height, len(status)) // long arguments in a short window leave too little room for the rest
 	return l.String()
 }
 
+// statusRows is how many lines one status may wrap over. What is left after them is cut, so a long name
+// from an agent cannot push the rest of the screen away.
+const statusRows = 3
+
 // statusLines is the bottom of the screen: the outcome of the user's last action and, while polls
-// fail, why on a line of its own above it, so a failing poll never hides what the user's key did.
+// fail, why on a line of its own above it, so a failing poll never hides what the user's key did. Each is
+// escaped and wrapped to the window, up to statusRows lines, so the end of a long one, such as a session
+// approval with the rule suggestion notice after it, is still on screen.
 func (m Model) statusLines() []string {
-	if m.pollErr == "" {
-		return []string{m.status}
+	texts := []string{m.status}
+	if m.pollErr != "" {
+		texts = []string{"error: " + m.pollErr, m.status}
 	}
-	return []string{"error: " + m.pollErr, m.status}
+	width := max(m.width, 1)
+	var out []string
+	for _, s := range texts {
+		wrapped := strings.Split(ansi.Wrap(visible.Escape(s), width, ""), "\n")
+		if len(wrapped) > statusRows {
+			wrapped = append(wrapped[:statusRows-1], clip(strings.Join(wrapped[statusRows-1:], " "), width))
+		}
+		out = append(out, wrapped...)
+	}
+	return out
 }
 
 // drawWaiting draws the calls waiting for the user, one line each, with the highlighted call's

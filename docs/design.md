@@ -326,19 +326,29 @@ copies what they want.
   `deny`. Calls that timed out or were withdrawn were never answered and do not count, and calls a
   project's rules asked about are left out, since a rule in the user's config cannot loosen a project's.
 - A tool whose calls carry a `command` argument, or `CommandLine` as Antigravity CLI's `run_command`
-  does, is a shell, and every one of its answered calls must carry one command, as a string, under the
-  same key. Its snippet adds `args = { <key> = "<prefix>*" }`, with the key its calls carry (`command` or
-  `CommandLine`), where the prefix is the longest start its commands share, cut before any `*` or `?`,
-  which a pattern reads as wildcards, and back to where a word ends. When nothing but white space is left
-  there is no suggestion for that tool, so Derbent never suggests allowing a whole shell. A tool or agent
-  name that holds a `*` or `?` gets none either.
-- Each snippet says where to put it: above the lowest-numbered rule that asked about those calls, from
-  the approvals, so first match reaches it.
+  does, is a shell, and every one of its answered calls must carry one command, as a string, under that
+  exact key. A key that holds the redaction mask `[redacted]`, which redaction writes over keys as well,
+  or a command key written in other case, such as `Command`, is a command that cannot be read: the tool
+  gets no suggestion, never an `allow` for all of it.
+- A shell's snippet adds `args = { <key> = "<prefix>*" }`, with the key its calls carry (`command` or
+  `CommandLine`). The prefix is the longest start its commands share, cut before any `*` or `?`, which a
+  pattern reads as wildcards, and before `[redacted]`, which no real call holds, then back to where a word
+  ends. There is no suggestion for the tool when nothing but white space is left, or when what is left
+  holds a shell operator (`;`, `&`, `|`, a backtick or `$(`) or a line break, after which the `*` would be
+  a command of its own, as in `cd /work/shop && *`. Derbent never suggests allowing a whole shell.
+- A group gets none when a rule could not name it: an agent that is not an agent label, or a tool name
+  that is empty or holds a `*` or `?`.
+- Each snippet says where to put it: above the lowest-numbered rule that asked about those calls, so
+  first match reaches it. The number is the one each approval recorded when it was asked, so after the
+  config's rules are reordered it can point at the wrong rule.
 - Strings in a snippet are TOML basic strings with quotes, backslashes, control characters and invisible
   or reordering characters escaped, so they read back as they were and cannot end early. The comment above
-  each snippet is escaped like any text for a terminal. `--json` prints one line per suggestion.
-- After the user approves a call in the UI, when that agent's answered calls to that tool now make an
-  `allow`, the status line says "<agent>'s <tool> approved <n> times: run derbent suggest for a rule".
+  each snippet is escaped like any text for a terminal. `--json` prints one line per suggestion, with
+  `rules` a list even when it is empty.
+- After the user approves a call in the UI, once or for the session, when that agent's answered calls to
+  that tool now make an `allow`, the status line ends with "<agent>'s <tool> approved <n> times: run
+  derbent suggest for a rule". The status line wraps over up to three lines, so the notice stays on
+  screen after a long session approval.
 
 ## Budgets
 
@@ -673,7 +683,8 @@ Unicode space separators) is shown as `␠×N`, so padding cannot push the rest 
 reads no further into the arguments than it shows, spaces included, and writes a run that goes on past
 that as `␠×N+`. The terminal bell rings when a new call starts waiting. In a window too short for
 everything, lines drop out of the middle of the main screen and the detail view, so neither is ever
-taller than the window and the header and the status line stay on screen.
+taller than the window and the header and the status line stay on screen. The status line wraps over up
+to three lines and cuts what is left, so a long name from an agent cannot push the rest away.
 
 `a`, `A` and `d` act only on the highlighted call. After it leaves the list nothing is highlighted until
 the user picks a call with up or down, and when calls arrive while nothing was waiting, the oldest is
@@ -848,15 +859,18 @@ migrates it inside `BEGIN IMMEDIATE`.
   the handoffs table.
 - **Rule suggestions.** Suggestion tests group answers by agent and tool, suggest an allow or a deny at the
   threshold and not below it or with mixed answers, leave out calls a project's rules asked about, and
-  never widen: a `*` or `?` in the commands cuts the prefix before it; a prefix of white space only, a
-  command that is not a string, a shell call without a command and a tool name with a wildcard give none;
-  and a prefix never ends inside a word or a UTF-8 character. A snippet whose tool name holds quotes, a
-  backslash, a newline and a bidirectional override reads back through the config parser as written and
-  decides as suggested, and one whose agent label, tool name and prefix hold those, a carriage return, a
-  tab, an escape sequence, invisible characters and C1 controls decodes back to them with no line or
-  table of its own. `derbent suggest` is tested as text and as JSON lines, one for each suggestion,
-  escaped, on a database from before migration 0006, and with a `--min` below 1 refused, and a UI test
-  shows the status line after the fifth approval and not after the fourth or after a denial.
+  never widen: a `*`, a `?` or redacted text in the commands cuts the prefix before it; a prefix of white
+  space only or with a shell operator or line break in it, a command that is not a string, a shell call
+  without a command, a masked or differently written command key, both command keys across calls or in
+  one call, a tool name that is empty or has a wildcard, and an agent that is not an agent label give
+  none; and a prefix never ends inside a word or a UTF-8 character. A snippet whose tool name holds
+  quotes, a backslash, a newline and a bidirectional override reads back through the config parser as
+  written and decides as suggested, and one whose agent label, tool name and prefix hold those, a carriage
+  return, a tab, an escape sequence, invisible characters and C1 controls decodes back to them with no
+  line or table of its own. `derbent suggest` is tested as text and as JSON lines, one for each suggestion, with
+  `rules` an empty list when no rule asked, escaped and decoded back, on a database from before migration
+  0006, and with a `--min` below 1 refused. A UI test shows the notice after the fifth approval, once or
+  for the session, wrapped whole into the window, and not after the fourth or after a denial.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`
@@ -1125,5 +1139,7 @@ Not in v1, in rough order of value:
   running gate withholds the tool because it could not check its pin.
 - A handoff is addressed by agent label, and any agent started as `reviewer` can take the reviewer's
   handoffs. A handoff whose agent stops after taking it stays taken, since there is no release in v1.
-- A suggested prefix pattern matches text, so `git *` also matches `git status && rm -rf build`, and one
-  denial of any command stops an `allow` for the whole tool.
+- A suggested prefix pattern matches text, so `git *` also matches `git status && rm -rf build`, and
+  `ls*`, suggested when every answered command was `ls`, also matches `lsof`. One denial of any command
+  stops an `allow` for the whole tool. The rule a snippet says to put it above is numbered as the config
+  was when each call was asked, so it can be stale after the rules are reordered.

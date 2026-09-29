@@ -347,10 +347,11 @@ type Answered struct {
 	Approved    bool
 }
 
-// Answered lists the calls the user approved or denied, oldest first: every agent's calls to every tool,
-// or only agent's calls to tool when both are given. Calls that timed out or were withdrawn were never
-// answered and are left out. A database from before migration 0006, which the commands that only read do
-// not migrate, is read as Grants reads it.
+// Answered lists the calls the user approved or denied, oldest first. A non-empty agent keeps only that
+// agent's calls and a non-empty tool only the calls to that tool, each on its own or both together; ""
+// keeps every agent or every tool. Calls that timed out or were withdrawn were never answered and are left
+// out. A database from before migration 0006, which the commands that only read do not migrate, is read as
+// Grants reads it.
 func (q *Queue) Answered(ctx context.Context, agent, tool string) ([]Answered, error) {
 	projectRule, err := q.projectRuleColumn(ctx, "project_rule")
 	if err != nil {

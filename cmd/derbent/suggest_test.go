@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -36,7 +37,8 @@ func insertAnswered(t *testing.T, path string, calls ...approval.Answered) {
 
 // The milestone's evidence for suggestions: five approvals of git commands that share "git " print an allow
 // snippet for native__Bash with that prefix, above the rule that asked, as TOML and as a JSON line, one line
-// for each suggestion. A tool name is escaped, and a database from before migration 0006 is read as well.
+// for each suggestion, whose rules are a list even when no rule asked. A tool name is escaped, in the text
+// and in a JSON line that decodes back to it, and a database from before migration 0006 is read as well.
 func TestSuggestPrintsTheSnippet(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.db")
 	db, err := store.Open(t.Context(), path)
@@ -47,7 +49,7 @@ func TestSuggestPrintsTheSnippet(t *testing.T) {
 	var calls []approval.Answered
 	for _, c := range []string{"git status", "git log --oneline -1", "git branch --show-current", "git rev-parse HEAD", "git remote -v"} {
 		calls = append(calls, approval.Answered{Agent: "claude", Tool: "native__Bash", Args: `{"command":"` + c + `"}`, Rule: 1, Approved: true})
-		calls = append(calls, approval.Answered{Agent: "codex", Tool: "github__delete_repo", Args: `{}`, Rule: 2})
+		calls = append(calls, approval.Answered{Agent: "codex", Tool: "github__delete_repo", Args: `{}`})
 	}
 	insertAnswered(t, path, calls...)
 	want := "# claude's native__Bash: approved 5 times and never denied.\n" +
@@ -66,10 +68,12 @@ func TestSuggestPrintsTheSnippet(t *testing.T) {
 		line.Arg != "command" || line.Prefix != "git " || line.Approved != 5 || line.TOML != want {
 		t.Fatalf("suggest --json: %v, %+v", err, line)
 	}
-	if err = json.Unmarshal([]byte(lines[1]), &deny); err != nil || deny.Action != "deny" || deny.Denied != 5 || deny.Arg != "" {
+	if err = json.Unmarshal([]byte(lines[1]), &deny); err != nil || deny.Action != "deny" || deny.Denied != 5 || deny.Arg != "" ||
+		deny.Rules == nil || len(deny.Rules) != 0 || !strings.Contains(lines[1], `"rules":[]`) {
 		t.Fatalf("suggest --json, second line: %v, %+v", err, deny)
 	}
-	if out := runOK(t, "suggest", "--min", "6", "--db", path); !strings.HasPrefix(out, "no suggestions: no agent's calls to one tool were approved 6 times") {
+	if out := runOK(t, "suggest", "--min", "6", "--db", path); !strings.HasPrefix(out, "no suggestions: no agent's calls to one tool were approved at least 6 times with no denial") ||
+		!strings.Contains(out, "a shell tool's calls also need") {
 		t.Fatalf("suggest --min 6: %q", out)
 	}
 	if err = run(t.Context(), []string{"suggest", "--min", "0", "--db", path}, strings.NewReader(""), io.Discard, io.Discard); err == nil {
@@ -84,12 +88,19 @@ func TestSuggestPrintsTheSnippet(t *testing.T) {
 		denied = append(denied, approval.Answered{Agent: "codex", Tool: hostile, Args: `{}`, Rule: 2})
 	}
 	insertAnswered(t, old, denied...)
-	out := runOK(t, "suggest", "--db", old)
-	if strings.ContainsAny(out, "\x1b\a\u202e"+sneaky) || !strings.Contains(out, "denied 5 times and never approved") ||
-		!strings.Contains(out, `action = "deny"`) {
-		t.Fatalf("suggest on an old database, with a hostile tool name:\n%q", out)
+	text := runOK(t, "suggest", "--db", old)
+	if strings.ContainsAny(text, "\x1b\a\u202e"+sneaky) || !strings.Contains(text, "denied 5 times and never approved") ||
+		!strings.Contains(text, `action = "deny"`) {
+		t.Fatalf("suggest on an old database, with a hostile tool name:\n%q", text)
 	}
-	if out = runOK(t, "suggest", "--json", "--db", old); strings.ContainsAny(out, "\x1b\a\u202e"+sneaky) || strings.Count(out, "\n") != 1 {
+	out := runOK(t, "suggest", "--json", "--db", old)
+	if strings.ContainsAny(out, "\x1b\a\u202e"+sneaky) || strings.Count(out, "\n") != 1 {
 		t.Fatalf("suggest --json on an old database, with a hostile tool name:\n%q", out)
+	}
+	var decoded suggestionLine
+	if err = json.Unmarshal([]byte(out), &decoded); err != nil || decoded.Agent != "codex" || decoded.Tool != hostile ||
+		decoded.Action != "deny" || decoded.Denied != 5 || decoded.Approved != 0 || !slices.Equal(decoded.Rules, []int{2}) ||
+		!strings.HasSuffix(text, "\n\n"+decoded.TOML) {
+		t.Fatalf("suggest --json on an old database decodes to %v, %+v", err, decoded)
 	}
 }

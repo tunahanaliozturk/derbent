@@ -66,14 +66,18 @@ func TestFromGroupsAnswersByAgentAndTool(t *testing.T) {
 	}
 }
 
-// A suggestion never lets through more than the answered commands start with. Each case would give a wider
-// rule if the common start were taken as it is.
+// A suggestion never lets through more than the answered commands start with, and a shell whose commands
+// cannot all be read gets none. Taken as it is, the common start would give a wider rule where it holds a
+// wildcard, a broken pattern where it ends inside a UTF-8 character, a pattern no real call matches where it
+// holds redacted text, and a harder one to read where it ends inside a word; a call whose command hides
+// behind a masked or differently written key, or is missing, would make the tool look like no shell at all.
 func TestSuggestionsNeverWiden(t *testing.T) {
 	arrayCall := shell("command", "go test ./...")[0]
 	arrayCall.Args = `{"command":["go","test"]}`
 	noCommand := shell("command", "go test ./...")[0]
 	noCommand.Args = `{"description":"run the tests"}`
 	four := shell("command", "go test ./a", "go test ./b", "go test ./c", "go test ./d")
+	token := "curl -H 'Authorization: Bearer [redacted]' https://api.example.com/"
 	for _, tc := range []struct {
 		name        string
 		calls       []approval.Answered
@@ -89,6 +93,13 @@ func TestSuggestionsNeverWiden(t *testing.T) {
 		{"Antigravity CLI's key", shell("CommandLine", "terraform plan", "terraform plan", "terraform plan", "terraform plan", "terraform plan"), "CommandLine", "terraform plan"},
 		{"a command that is not a string", append(four, arrayCall), "", ""},
 		{"a shell call without a command", append(shell("command", "go test ./a", "go test ./b", "go test ./c", "go test ./d"), noCommand), "", ""},
+		{"a masked key", answers(5, "claude", "native__Bash", `{"[redacted]":"git status"}`, true, 3), "", ""},
+		{"a key written in other case", shell("Command", "git status", "git status", "git status", "git status", "git status"), "", ""},
+		{"both keys across calls", append(shell("command", "go test ./a", "go test ./b", "go test ./c"), shell("CommandLine", "go test ./d", "go test ./e")...), "", ""},
+		{"both keys in one call", answers(5, "claude", "native__Bash", `{"CommandLine":"go test ./a","command":"go test ./a"}`, true, 3), "", ""},
+		{"redacted text in the commands", shell("command", token+"a", token+"b", token+"a", token+"b", token+"a"), "command", "curl -H 'Authorization: Bearer "},
+		{"redacted text inside a word", shell("command", "git clone https://[redacted]@x/a", "git clone https://[redacted]@x/a", "git clone https://[redacted]@x/a", "git clone https://[redacted]@x/a", "git clone https://[redacted]@x/a"), "command", "git clone "},
+		{"redacted text only", shell("command", "[redacted] a", "[redacted] b", "[redacted] a", "[redacted] b", "[redacted] a"), "", ""},
 	} {
 		got := suggest.From(tc.calls, suggest.Min)
 		switch {
@@ -98,8 +109,22 @@ func TestSuggestionsNeverWiden(t *testing.T) {
 			t.Errorf("%s: %+v, want %s = %q followed by *", tc.name, got, tc.key, tc.prefix)
 		}
 	}
-	if got := suggest.From(answers(5, "claude", "native__B*sh", `{}`, true, 1), suggest.Min); len(got) != 0 {
-		t.Fatalf("a tool name with a wildcard: %+v", got)
+	// A shell operator in the start makes whatever follows it a command of its own: a whole shell in all
+	// but name. Each command is answered five times as it is, so without the check its start is all of it.
+	for _, c := range []string{
+		"cd /work/shop && go test", "go vet; go test", "go test | tee log", "make || true", "sleep 1 & go test",
+		"echo `id`", "echo $(id)", "go vet\ngo test", "go vet\r\ngo test",
+	} {
+		if got := suggest.From(shell("command", c, c, c, c, c), suggest.Min); len(got) != 0 {
+			t.Errorf("%q: suggested %+v, want nothing", c, got)
+		}
+	}
+	// A rule cannot match a tool name with a wildcard as written, an agent label no gate writes, or an
+	// empty name.
+	for _, name := range [][2]string{{"claude", "native__B*sh"}, {"cl?ude", "native__Bash"}, {"Claude", "native__Bash"}, {"", "native__Bash"}, {"claude", ""}} {
+		if got := suggest.From(answers(5, name[0], name[1], `{}`, true, 1), suggest.Min); len(got) != 0 {
+			t.Errorf("agent %q, tool %q: suggested %+v, want nothing", name[0], name[1], got)
+		}
 	}
 }
 
@@ -165,16 +190,18 @@ func TestSnippetStringsCannotBreakOut(t *testing.T) {
 		t.Errorf("the snippet names the rules that asked wrongly:\n%s", snippet)
 	}
 
-	// Through From and the config parser, a command holding the same text is allowed as it was answered.
-	got := suggest.From(shell("command", hostile, hostile, hostile, hostile, hostile), suggest.Min)
-	if len(got) != 1 || got[0].Prefix != hostile {
+	// Through From and the config parser, a command holding such text is allowed as it was answered. It
+	// has no line break or shell operator, which would give no suggestion at all.
+	cmd := "echo \"b\\c\"\t\x1b]0x\x07[[rule]] action = \"allow\"\u202e\u200b\U000e0041\x7f\u0085"
+	got := suggest.From(shell("command", cmd, cmd, cmd, cmd, cmd), suggest.Min)
+	if len(got) != 1 || got[0].Prefix != cmd {
 		t.Fatalf("From = %+v", got)
 	}
 	cfg, err := config.Parse("config.toml", got[0].TOML()+"\n[[rule]]\naction = \"ask\"\n")
 	if err != nil {
 		t.Fatalf("the snippet does not parse: %v\n%s", err, got[0].TOML())
 	}
-	if d := cfg.Rules.Decide("claude", "native__Bash", map[string]any{"command": hostile}); d.Action != rule.Allow || d.Rule != 1 {
+	if d := cfg.Rules.Decide("claude", "native__Bash", map[string]any{"command": cmd}); d.Action != rule.Allow || d.Rule != 1 {
 		t.Fatalf("the answered command: %+v", d)
 	}
 	if d := cfg.Rules.Decide("claude", "native__Bash", map[string]any{"command": "a\"b"}); d.Action != rule.Ask {
