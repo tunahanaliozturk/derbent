@@ -114,7 +114,8 @@ func runExplain(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	case *tool == "":
 		return errors.New("explain: give the tool with --tool, as the gate names it, such as native__Bash")
 	case *argsJSON != "" && !json.Valid([]byte(*argsJSON)):
-		return fmt.Errorf(`explain: --args is not JSON: %s (as it arrived; Windows PowerShell 5.1 drops the double quotes inside an argument unless each is written as \")`,
+		return fmt.Errorf(`explain: --args is not JSON: %s (as it arrived; Windows PowerShell 5.1 drops the double quotes inside an `+
+			`argument: put --%% before --args, as the last flag, and write the JSON as "{\"command\":\"git push origin main\"}")`,
 			visible.Escape(*argsJSON))
 	}
 	cfg, cfgPath, missing, err := loadConfig(*configPath, config.LoadForHook)
@@ -187,6 +188,9 @@ func (x explainer) explain(ctx context.Context, agent, tool, argsJSON string) (e
 		e.Path = "hook"
 	case gate.OwnTool(tool) || servable || hidden:
 		e.Path = "mcp"
+		// The hook loads the config on every call; derbent mcp once, when it starts.
+		e.CannotKnow = append(e.CannotKnow, "whether a running derbent mcp gate decides with this config: each gate decides "+
+			"with the config it read when it started, so after an edit, restart the CLI")
 	default:
 		e.Path = "none"
 	}

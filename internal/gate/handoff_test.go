@@ -1,6 +1,7 @@
 package gate_test
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -103,6 +104,69 @@ func TestAHandoffPassesFromOneAgentToAnother(t *testing.T) {
 	}
 	if !slices.Equal(got, wantReceipts) {
 		t.Fatalf("receipts = %q, want %q", got, wantReceipts)
+	}
+}
+
+// handoff_list shows the current project's handoffs unless all_projects is set, open ones unless state
+// says taken, done or all, and refuses any other state as a tool error. handoff_take takes a handoff of
+// another project by its id, through the MCP tool, as ADR 0018 says.
+func TestHandoffListFiltersAndTakeCrossesProjects(t *testing.T) {
+	e := newEnv(t)
+	claude := connect(t, e.gate(t, "claude"))
+	elsewhere := e.gate(t, "reviewer")
+	elsewhere.Project = "/work/other"
+	reviewer := connect(t, elsewhere)
+	var ids []int64
+	for _, title := range []string{"Review the retry change", "Review the docs"} {
+		var created struct {
+			ID int64 `json:"id"`
+		}
+		decode(t, call(t, claude, "handoff_create", map[string]any{"to": "reviewer", "title": title, "body": "b"}), &created)
+		ids = append(ids, created.ID)
+	}
+	list := func(args map[string]any) []string {
+		t.Helper()
+		var got handoffList
+		decode(t, call(t, reviewer, "handoff_list", args), &got)
+		var out []string
+		for _, h := range got.Handoffs {
+			out = append(out, fmt.Sprintf("%d %s", h.ID, h.State))
+		}
+		return out
+	}
+	if got := list(map[string]any{}); len(got) != 0 {
+		t.Fatalf("reviewer's project has no handoffs, and the list shows %q", got)
+	}
+	if got := list(map[string]any{"all_projects": true}); len(got) != 2 {
+		t.Fatalf("all_projects = %q, want both open handoffs", got)
+	}
+	var taken struct {
+		ID      int64  `json:"id"`
+		Project string `json:"project"`
+		State   string `json:"state"`
+	}
+	decode(t, call(t, reviewer, "handoff_take", map[string]any{"id": ids[0]}), &taken)
+	if taken.ID != ids[0] || taken.Project != "/work/shop" || taken.State != "taken" {
+		t.Fatalf("a take across projects = %+v", taken)
+	}
+	for _, tc := range []struct {
+		state string
+		want  []string
+	}{
+		{"", []string{fmt.Sprintf("%d open", ids[1])}},
+		{"taken", []string{fmt.Sprintf("%d taken", ids[0])}},
+		{"done", nil},
+		{"all", []string{fmt.Sprintf("%d open", ids[1]), fmt.Sprintf("%d taken", ids[0])}},
+	} {
+		got := list(map[string]any{"all_projects": true, "state": tc.state})
+		slices.Sort(got)
+		if want := slices.Sorted(slices.Values(tc.want)); !slices.Equal(got, want) {
+			t.Errorf("state %q: %q, want %q", tc.state, got, want)
+		}
+	}
+	if res := call(t, reviewer, "handoff_list", map[string]any{"state": "closed", "all_projects": true}); !res.IsError ||
+		!strings.Contains(text(res), "state must be open, taken, done or all") {
+		t.Fatalf("an unknown state: %q", text(res))
 	}
 }
 

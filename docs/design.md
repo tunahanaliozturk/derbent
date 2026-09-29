@@ -149,7 +149,9 @@ per   = "1h"
 ## Tools
 
 - Downstream tools are listed as `<server>__<tool>`, so two servers can never collide. Server names
-  are lower-case letters, digits and dashes, so the name splits one way only. A gate tool name must be
+  are lower-case letters, digits and dashes, so the name splits one way only, and `memory`, `handoff` and
+  `native` are reserved, so no server's tools are named like Derbent's own or the CLIs' built-in ones. A
+  gate tool name must be
   1 to 64 letters, digits, underscores or dashes; a tool that does not fit, whose input schema is not
   an object, or whose definition the MCP SDK refuses to serve, such as an `x-mcp-header` on a property
   that is not a string, integer or boolean, is left out with a warning on stderr and marked by
@@ -247,9 +249,10 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   that does not rise, a receipt 1 whose `prev_hash` is not the genesis hash, and a later receipt whose
   `prev_hash` is, fail. It prints how many lines it checked, the runs, the gaps, the anchor (the first
   line's `prev_hash`) and the head (the last line's `hash`), and `--head <hash>` checks the head against a
-  hash the user kept. With a kept head and more than one run it says that only the last run is tied to
+  hash the user kept, read without the white space around it and in any case. With a kept head and more than one run it says that only the last run is tied to
   that head, and without `--head` it says that nothing ties the export to the database. The first line
-  that fails is named, and the exit status is 1. Lines of any length are read, with LF or CRLF endings, in
+  that fails is named, and the exit status is 1; a line whose hash fails and that holds U+FFFD also says
+  that a stored field that was not valid UTF-8 cannot pass through JSON unchanged. Lines of any length are read, with LF or CRLF endings, in
   UTF-8 with or without a byte order mark or in UTF-16 with one, as Windows PowerShell 5.1 writes a
   redirected command's output. A line must be one JSON object that holds each field listed above once,
   under its exact name, none of them null, and nothing else: a field the hash does not cover, a field
@@ -539,13 +542,17 @@ exists.
   decides it, which refuses a name it does not serve before any rule is read. That includes a server's
   tool under a name agents cannot be offered, one that is not 1 to 64 letters, digits, underscores and
   dashes, which the gate leaves out. Explain says what it cannot know: whether a downstream server offers
-  the tool, which definition it sends now, and whether a running gate could check its pin.
+  the tool, which definition it sends now, and whether a running gate could check its pin. For every tool
+  the MCP gate decides, Derbent's memory and handoff tools included, it also cannot know whether a running
+  `derbent mcp` decides with the config explain read: each gate reads the config when it starts, so after
+  an edit the CLI is restarted. The hook reads the config on every call.
 - Without the database, budgets, pins and grants are reported as not checked. Explain never migrates, so
   in a database from before the grants were keyed on the rule (schema version 3) or before pins (version
   5), the grant or the pin is reported as not checked until the next gate to start migrates it.
 - `rule.Set` explains a call with the same matching `Decide` uses, and explain combines the user's and the
   project's decisions with the function the gate uses, `gate.Judge`, so explain and the gate cannot
-  disagree on what the rules decide. It counts budgets from the receipts with the gate's own read, and
+  disagree on what the rules decide, given the same config: a `derbent mcp` gate started before the config
+  was edited still decides with the one it read then. It counts budgets from the receipts with the gate's own read, and
   words a rule's deny with the gate's own text. It tells a downstream tool's name with the check the hook
   uses, a server in the config followed by `__` and a name, and adds one the hook leaves out on purpose,
   `gate.ServableName`: the MCP gate serves a tool only under a name of 1 to 64 letters, digits,
@@ -878,8 +885,9 @@ migrates it inside `BEGIN IMMEDIATE`.
   run is tied to the kept head, a line taken out of the middle (a gap, not a failure), an edited and a
   reordered line, an unknown field, a field in capitals, a repeated field, a zero-valued field left out,
   a null field, text after the object, an empty file, a UTF-8 byte order mark, UTF-16 with a byte order
-  mark, CRLF line endings, a line of more than a mebibyte, and a cancel that stops the check at the next
-  line.
+  mark, CRLF line endings, a line of more than a mebibyte, a cancel that stops the check at the next
+  line, a kept head in capitals with white space around it, and a stored field that is not UTF-8, whose
+  line fails with the U+FFFD hint while an edited line gets none.
 - **Explain.** Every case in the rule tests also runs `Explain` and checks that it decides as `Decide`
   does, and a rule test checks the steps: each condition with the value it read, missing or not a string,
   and nothing read past the first match. A budget test checks the count and the wait of every budget that
@@ -891,12 +899,16 @@ migrates it inside `BEGIN IMMEDIATE`.
   hides, a name the gate does not serve or cannot, arguments that are not an object or not JSON, a project
   rules file that cannot be read, a database from before grants and pins, a missing config file, `[]` for
   every empty list, escaping, and that the database is read without a byte changed and never created. The
-  calls the gate refuses before any rule are shown with no rule read.
+  calls the gate refuses before any rule are shown with no rule read, a valid project rules file's rules
+  included, and the line on a running gate's config is shown for the MCP gate's tools and not for
+  `native__` ones.
 - **Handoffs.** Store tests create, list, take and finish handoffs, refuse a `to` no agent label can be and
   a title, body, note or tags over their limits, refuse a take of a handoff that is not open or not
   addressed to the agent and a finish by another agent, and race eight agents to take one handoff, with
   one winner. Gate tests pass a handoff from one agent to another through the MCP tools, with a receipt for
-  each call, hide a tool a rule denies, and mark what they return as information. The hook skips the four
+  each call, hide a tool a rule denies, and mark what they return as information; list with
+  `all_projects` and with `state` open, `taken`, `done` and `all`, refuse an unknown state as a tool error,
+  and take a handoff of another project by its id. The hook skips the four
   tools through the real binary, and `derbent handoffs` lists them escaped, also on a database from before
   the handoffs table.
 - **Rule suggestions.** Suggestion tests group answers by agent and tool, suggest an allow or a deny at the

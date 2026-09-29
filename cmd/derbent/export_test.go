@@ -142,6 +142,47 @@ func TestAnExportVerifiesWithoutTheDatabase(t *testing.T) {
 	}
 }
 
+// A kept head is compared without the white space around it and in any case, as it comes back from a
+// file, a note or a clipboard.
+func TestVerifyFileTakesAKeptHeadAsKept(t *testing.T) {
+	db := receiptsDB(t, 2)
+	head := headOf(t, runOK(t, "verify", "--db", db))
+	whole := runOK(t, "receipts", "--json", "--limit", "0", "--db", db)
+	if out, err := verifyBytes(t, []byte(whole), "--head", " "+strings.ToUpper(head)+"\r\n"); err != nil ||
+		!strings.Contains(out, "kept:     the head is the hash you kept\n") {
+		t.Fatalf("a kept head in capitals, with white space around it: %v\n%s", err, out)
+	}
+}
+
+// A stored field that is not valid UTF-8 comes out of JSON as U+FFFD, so its line fails its hash while the
+// database verifies (ADR 0017). The error says so, instead of leaving it to look like an edit.
+func TestVerifyFileExplainsTextThatWasNotUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = receipt.NewLog(db).Append(t.Context(), receipt.Receipt{
+		Project: "/work/shop", Agent: "claude", Session: "s", Tool: "native__Bash", Args: "{\"command\":\"echo \xff\"}",
+		Decision: "allow", DecidedBy: "rule:1", Outcome: "gated",
+	})
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runOK(t, "verify", "--db", path)
+	_, err = verifyBytes(t, []byte(runOK(t, "receipts", "--json", "--db", path)))
+	if !errors.Is(err, errExportBroken) || !strings.Contains(err.Error(), "its hash does not match its fields") ||
+		!strings.Contains(err.Error(), "U+FFFD") || !strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("err = %v, want the hash failure and the hint", err)
+	}
+	// An edited line without U+FFFD gets no such hint.
+	whole := runOK(t, "receipts", "--json", "--db", receiptsDB(t, 1))
+	if _, err = verifyBytes(t, []byte(strings.Replace(whole, "note 0", "note X", 1))); err == nil || strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("an edited line: %v", err)
+	}
+}
+
 // Windows PowerShell 5.1 writes a redirected command's output as UTF-16 with a byte order mark, and CRLF
 // line endings, and other tools start UTF-8 with a byte order mark. All of them verify.
 func TestVerifyFileReadsWhatWindowsShellsWrite(t *testing.T) {

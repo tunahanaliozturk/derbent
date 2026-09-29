@@ -267,6 +267,19 @@ func TestExplainChecksGrantsAndPinsWithoutWriting(t *testing.T) {
 			t.Errorf("%s: rules skipped %v, %d read and %d not read", tc.name, e.RulesSkipped, len(e.Rules), e.RulesNotRead)
 		}
 	}
+	// A valid project rules file is not read either when the gate refuses the call first: its rules are
+	// counted as not read.
+	project := t.TempDir()
+	if err = os.WriteFile(filepath.Join(project, config.ProjectRulesFile), []byte("[[rule]]\ntool = \"native__Bash\"\naction = \"deny\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	array := slices.Concat([]string{"--args", `["git push"]`}, tool("native__Bash"), []string{"--project", project})
+	if e := explainJSON(t, array...); !e.RulesSkipped || len(e.ProjectRules) != 0 || e.ProjectRulesNotRead != 1 || e.ProjectNote != "" || e.By != "gate" {
+		t.Errorf("a project rule and array arguments: %+v", e)
+	}
+	if out := runOK(t, append([]string{"explain"}, array...)...); !strings.Contains(out, "  project rule 1 is not read: the gate refuses the call before it reads any rule\n") {
+		t.Errorf("explain lacks the project rule not read:\n%s", out)
+	}
 	out := runOK(t, slices.Concat([]string{"explain", "--args", `["git push"]`}, tool("native__Bash"))...)
 	for _, want := range []string{
 		"  rules 1 to 4 are not read: the gate refuses the call before it reads any rule\n",
@@ -283,6 +296,32 @@ func TestExplainChecksGrantsAndPinsWithoutWriting(t *testing.T) {
 	after, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatalf("explain changed the database: err %v", err)
+	}
+}
+
+// A running derbent mcp gate decides with the config it read when it started, while the hook reads it on
+// every call. So for a tool the MCP gate decides, Derbent's own tools included, explain says it cannot know
+// whether a running gate uses the config it read, and to restart the CLI after an edit; for a native__
+// tool, and a name no gate serves, it does not.
+func TestExplainSaysARunningGateKeepsItsConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfg, []byte(explainServers), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const stale = "whether a running derbent mcp gate decides with this config: each gate decides with the config it read when it " +
+		"started, so after an edit, restart the CLI"
+	for tool, want := range map[string]bool{
+		"memory_write": true, "handoff_take": true, "echo__stable": true, "secret__x": true, "native__Bash": false, "nope": false,
+	} {
+		e := explainJSON(t, "--agent", "claude", "--tool", tool, "--config", cfg, "--db", filepath.Join(dir, "none.db"), "--project", dir)
+		if got := slices.Contains(e.CannotKnow, stale); got != want {
+			t.Errorf("%s (path %s): the line on a running gate's config is there: %v, want %v; %q", tool, e.Path, got, want, e.CannotKnow)
+		}
+	}
+	out := runOK(t, "explain", "--agent", "claude", "--tool", "memory_write", "--config", cfg, "--db", filepath.Join(dir, "none.db"), "--project", dir)
+	if !strings.Contains(out, "unknown:  "+stale+"\n") {
+		t.Fatalf("explain lacks the line on a running gate's config:\n%s", out)
 	}
 }
 
@@ -386,6 +425,8 @@ func TestExplainEscapesAndRefusesBadInput(t *testing.T) {
 		want string
 	}{
 		{[]string{"explain", "--agent", "claude", "--tool", "native__Bash", "--args", "{command:git push}", "--config", cfg}, "--args is not JSON: {command:git push}"},
+		// PowerShell 5.1 splits \"-quoted JSON at a space, so the hint is the --% form the README gives.
+		{[]string{"explain", "--agent", "claude", "--tool", "native__Bash", "--args", "{command:git push}", "--config", cfg}, `put --% before --args, as the last flag, and write the JSON as "{\"command\":\"git push origin main\"}"`},
 		{[]string{"explain", "--tool", "native__Bash", "--config", cfg}, "--agent"},
 		{[]string{"explain", "--agent", "claude", "--config", cfg}, "--tool"},
 	} {
