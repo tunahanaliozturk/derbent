@@ -68,7 +68,7 @@ var MemoryTools = [...]string{"memory_write", "memory_search", "memory_read"}
 // OwnTool reports whether name is one of the tools every gate serves itself. The pre-tool hook leaves
 // calls to them to the MCP gate, and derbent explain explains them as the MCP gate decides them.
 func OwnTool(name string) bool {
-	return slices.Contains(MemoryTools[:], name)
+	return slices.Contains(MemoryTools[:], name) || slices.Contains(HandoffTools[:], name)
 }
 
 func (g *Gate) addMemoryTools(s *mcp.Server) {
@@ -102,8 +102,8 @@ func addTool[In, Out any](g *Gate, s *mcp.Server, t *mcp.Tool, h mcp.ToolHandler
 	g.local[t.Name] = true
 }
 
-// serves reports whether name is a tool this gate offers its agent, a memory tool or a downstream one,
-// or a tool the rules hide from it, which the deny rule that hid it refuses.
+// serves reports whether name is a tool this gate offers its agent, one of Derbent's own or a
+// downstream one, or a tool the rules hide from it, which the deny rule that hid it refuses.
 func (g *Gate) serves(name string) bool {
 	g.mu.Lock()
 	_, downstream := g.owners[name]

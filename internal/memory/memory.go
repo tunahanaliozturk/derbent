@@ -171,23 +171,44 @@ func (s *Store) Read(ctx context.Context, id int64) (Entry, error) {
 }
 
 func validate(e Entry) error {
-	switch {
-	case e.Project == "" || e.Author == "":
-		return fmt.Errorf("%w: project and author are required", ErrInvalid)
-	case e.Title == "":
-		return fmt.Errorf("%w: the title is empty", ErrInvalid)
-	case utf8.RuneCountInString(e.Title) > MaxTitle:
-		return fmt.Errorf("%w: the title is longer than %d characters", ErrInvalid, MaxTitle)
-	case strings.TrimSpace(e.Body) == "":
-		return fmt.Errorf("%w: the body is empty", ErrInvalid)
-	case len(e.Body) > MaxBody:
-		return fmt.Errorf("%w: the body is larger than %d bytes", ErrInvalid, MaxBody)
-	case len(e.Tags) > MaxTags:
-		return fmt.Errorf("%w: more than %d tags", ErrInvalid, MaxTags)
+	err := CheckNote(e.Project, e.Author, e.Title, e.Body)
+	if err == nil {
+		err = CheckTags(e.Tags)
 	}
-	for _, tag := range e.Tags {
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	return nil
+}
+
+// CheckNote reports why a note cannot be kept: no project or author, an empty title or one over MaxTitle
+// characters, or a blank body or one over MaxBody bytes. The title is checked as given, so a caller trims
+// it first. Handoffs are checked by the same rule.
+func CheckNote(project, author, title, body string) error {
+	switch {
+	case project == "" || author == "":
+		return errors.New("project and author are required")
+	case title == "":
+		return errors.New("the title is empty")
+	case utf8.RuneCountInString(title) > MaxTitle:
+		return fmt.Errorf("the title is longer than %d characters", MaxTitle)
+	case strings.TrimSpace(body) == "":
+		return errors.New("the body is empty")
+	case len(body) > MaxBody:
+		return fmt.Errorf("the body is larger than %d bytes", MaxBody)
+	}
+	return nil
+}
+
+// CheckTags reports why tags cannot be kept: more than MaxTags, or a tag that is not 1 to 40 letters,
+// digits, dashes and underscores. Handoffs take tags by the same rule.
+func CheckTags(tags []string) error {
+	if len(tags) > MaxTags {
+		return fmt.Errorf("more than %d tags", MaxTags)
+	}
+	for _, tag := range tags {
 		if !tagPattern.MatchString(tag) {
-			return fmt.Errorf("%w: tag %q may hold only letters, digits, dash and underscore, up to 40 characters", ErrInvalid, tag)
+			return fmt.Errorf("tag %q may hold only letters, digits, dash and underscore, up to 40 characters", tag)
 		}
 	}
 	return nil

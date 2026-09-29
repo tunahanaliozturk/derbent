@@ -11,7 +11,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"regexp"
 	"sync"
 	"time"
 
@@ -21,13 +20,14 @@ import (
 	"github.com/tunahanaliozturk/derbent/internal/config"
 	"github.com/tunahanaliozturk/derbent/internal/downstream"
 	"github.com/tunahanaliozturk/derbent/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/handoff"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
 )
 
-var agentName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+var agentName = config.AgentLabel
 
 // firstListWait is how long the agent's first tool listing waits for downstream servers to come up. It
 // stays well below Codex's default MCP startup timeout of ten seconds, which covers initialize and the
@@ -80,10 +80,11 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	}
 	g := &gate.Gate{
 		Agent: *agent, Project: project, Session: session, Version: version,
-		Rules: cfg.Rules, Budgets: cfg.Budgets, Memory: memory.NewStore(db), Receipts: receipt.NewLog(db),
-		Redact: cfg.Redact.JSON, Approvals: approval.NewQueue(db), ApprovalTimeout: cfg.ApprovalTimeout,
-		Pins: pin.NewStore(db), Unpinned: unpinned(cfg.Servers), ProjectRules: config.NewProjectRules(root),
-		Stop: ctx, // SIGINT or SIGTERM withdraws the calls still waiting for the user
+		Rules: cfg.Rules, Budgets: cfg.Budgets, Memory: memory.NewStore(db), Handoffs: handoff.NewStore(db),
+		Receipts: receipt.NewLog(db), Redact: cfg.Redact.JSON, Approvals: approval.NewQueue(db),
+		ApprovalTimeout: cfg.ApprovalTimeout, Pins: pin.NewStore(db), Unpinned: unpinned(cfg.Servers),
+		ProjectRules: config.NewProjectRules(root),
+		Stop:         ctx, // SIGINT or SIGTERM withdraws the calls still waiting for the user
 	}
 	srv := g.Server()
 	if len(cfg.Servers) > 0 {

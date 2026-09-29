@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,11 @@ import (
 // DefaultApprovalTimeout is how long a call waits for the user when the config does not say. It sits
 // below the shortest default tool timeout of the supported CLIs (ADR 0005).
 const DefaultApprovalTimeout = 50 * time.Second
+
+// AgentLabel is the form an agent label takes: 1 to 32 lower-case letters, digits, dashes and underscores,
+// starting with a letter or a digit. derbent mcp, derbent gate and derbent explain take --agent in it, and
+// a handoff's address must have it, so a handoff never waits for an agent that cannot exist (ADR 0002).
+var AgentLabel = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
 // Config is a loaded and validated configuration.
 type Config struct {

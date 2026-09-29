@@ -1,5 +1,5 @@
-// Package gate is the MCP server one agent session talks to. It serves the memory tools, decides every
-// call with the rules, and writes a receipt for each call whatever its outcome.
+// Package gate is the MCP server one agent session talks to. It serves the memory and handoff tools,
+// decides every call with the rules, and writes a receipt for each call whatever its outcome.
 package gate
 
 import (
@@ -18,6 +18,7 @@ import (
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/config"
+	"github.com/tunahanaliozturk/derbent/internal/handoff"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/pin"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
@@ -38,7 +39,9 @@ type Gate struct {
 	// stricter (ADR 0014). Nil means the user's rules alone.
 	ProjectRules *config.ProjectRules
 	Memory       *memory.Store
-	Receipts     *receipt.Log
+	// Handoffs holds the tasks agents leave for each other (ADR 0018).
+	Handoffs *handoff.Store
+	Receipts *receipt.Log
 	// Forward sends a call to a downstream server. It may be nil when no servers are configured.
 	Forward func(ctx context.Context, server, tool string, args json.RawMessage) (*mcp.CallToolResult, error)
 	// Pins, when set, pins each downstream tool on first sight and withholds one whose definition has
@@ -64,7 +67,7 @@ type Gate struct {
 
 	server   *mcp.Server
 	started  time.Time
-	local    map[string]bool // the memory tools this gate registered, written only by Server
+	local    map[string]bool // Derbent's own tools this gate registered, written only by Server
 	mu       sync.Mutex
 	owners   map[string]string       // gate tool name to the downstream server it belongs to
 	withheld map[string]withheldTool // gate tool name to a tool kept from the agent, under mu
@@ -81,7 +84,8 @@ var knobs struct {
 }
 
 const instructions = "Derbent gates this session's tools. memory_write, memory_search and memory_read " +
-	"share notes with the other agents working on this project."
+	"share notes with the other agents working on this project, and handoff_create, handoff_list, " +
+	"handoff_take and handoff_done pass tasks between them."
 
 // Server builds the MCP server for this session.
 func (g *Gate) Server() *mcp.Server {
@@ -89,6 +93,7 @@ func (g *Gate) Server() *mcp.Server {
 		&mcp.ServerOptions{Instructions: instructions})
 	g.server, g.started = s, time.Now()
 	g.addMemoryTools(s)
+	g.addHandoffTools(s)
 	s.AddReceivingMiddleware(g.gateCalls)
 	return s
 }

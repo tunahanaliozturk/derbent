@@ -41,6 +41,26 @@
 tool   = "memory_*"
 action = "allow"
 
+# --- Derbent's handoff tools, for every agent: one agent leaves a task for another, which takes it
+# and says when it is done. They are named one by one, so the tools of a server called "handoff"
+# behind Derbent are not allowed with them.
+
+[[rule]]
+tool   = "handoff_create"
+action = "allow"
+
+[[rule]]
+tool   = "handoff_list"
+action = "allow"
+
+[[rule]]
+tool   = "handoff_take"
+action = "allow"
+
+[[rule]]
+tool   = "handoff_done"
+action = "allow"
+
 # --- Built-in tools that only read or keep notes, named exactly, so that a tool a CLI adds later is
 # not allowed by accident. Reading a .env file with them is allowed; writing one asks, below.
 

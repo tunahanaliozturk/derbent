@@ -187,7 +187,7 @@ Handoff tools (ADR 0018):
 | Tool | Input | Output |
 |---|---|---|
 | `handoff_create` | to (an agent label or `*`), title, body (up to 16 KiB), tags | id |
-| `handoff_list` | state (`open` unless given, `taken`, `done` or `all`), `mine`, `all_projects` | id, project, from, to, title, state, time |
+| `handoff_list` | state (`open` unless given, `taken`, `done` or `all`), `mine`, `all_projects` | id, project, from, to, title, state, created time |
 | `handoff_take` | id | the whole handoff |
 | `handoff_done` | id, optional note (up to 4 KiB) | id, state |
 
@@ -971,6 +971,7 @@ derbent/
 | 0015 | Setup adds MCP entries through each CLI's own mcp add where there is one and edits hook files, never replacing an entry, with copies first and the binary's absolute path. |
 | 0016 | Presets are files written once and owned by the user, never a mode Derbent keeps. |
 | 0017 | Receipt exports carry every hashed field as stored, and derbent verify --file checks them without the database, reporting gaps. |
+| 0018 | Handoffs are Derbent tools addressed by agent label or *, open then taken then done, with no reassignment or release in v1. |
 
 ## Milestones
 
