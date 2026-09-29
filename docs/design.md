@@ -327,9 +327,12 @@ copies what they want.
   project's rules asked about are left out, since a rule in the user's config cannot loosen a project's.
 - A tool whose calls carry a `command` argument, or `CommandLine` as Antigravity CLI's `run_command`
   does, is a shell, and every one of its answered calls must carry one command, as a string, under that
-  exact key. A key that holds the redaction mask `[redacted]`, which redaction writes over keys as well,
-  or a command key written in other case, such as `Command`, is a command that cannot be read: the tool
-  gets no suggestion, never an `allow` for all of it.
+  exact key. A command key written in other case, such as `Command`, is a command that cannot be read: the
+  tool gets no suggestion, never an `allow` for all of it. A key that holds the redaction mask
+  `[redacted]`, which redaction writes over keys as well, is taken the same way, since a command could
+  hide behind it, and for every tool, shell or not: a tool whose calls carry one gets no suggestion. So a
+  redaction pattern that matches a common key name, such as `path` in `file_path`, stops suggestions for
+  every tool whose calls carry that key.
 - A shell's snippet adds `args = { <key> = "<prefix>*" }`, with the key its calls carry (`command` or
   `CommandLine`). The prefix is the longest start its commands share, cut before any `*` or `?`, which a
   pattern reads as wildcards, and before `[redacted]`, which no real call holds, then back to where a word
@@ -347,8 +350,9 @@ copies what they want.
   `rules` a list even when it is empty.
 - After the user approves a call in the UI, once or for the session, when that agent's answered calls to
   that tool now make an `allow`, the status line ends with "<agent>'s <tool> approved <n> times: run
-  derbent suggest for a rule". The status line wraps over up to three lines, so the notice stays on
-  screen after a long session approval.
+  derbent suggest for a rule". The status line wraps over up to three lines, so at ordinary sizes the
+  notice stays on screen after a long session approval. In a window about 60 columns wide, or with a long
+  tool name, the status runs past three lines and the end of the notice is cut with "…".
 
 ## Budgets
 
@@ -503,7 +507,8 @@ exists.
 - The gate refuses some calls before it reads any rule: a name it does not serve, a tool its pin
   withholds, arguments that are not a JSON object, and any call in a project whose rules file cannot be
   read. For those explain reads no rule either: it says the rules are not read, and that the grant is not
-  reached. A call the rules send to the user that a used-up budget refuses first gets the same grant line.
+  reached. A call the rules send to the user that a used-up budget refuses first has its rules read, and
+  its grant line says instead that budget <n> refuses the call first.
 - A `native__` name is explained as the hook decides it. Any other name is explained as the MCP gate
   decides it, which refuses a name it does not serve before any rule is read. That includes a server's
   tool under a name agents cannot be offered, one that is not 1 to 64 letters, digits, underscores and
@@ -514,13 +519,21 @@ exists.
   5), the grant or the pin is reported as not checked until the next gate to start migrates it.
 - `rule.Set` explains a call with the same matching `Decide` uses, and explain combines the user's and the
   project's decisions with the function the gate uses, `gate.Judge`, so explain and the gate cannot
-  disagree on what the rules decide. It counts budgets from the receipts with the gate's own read, tells
-  a downstream tool's name by the same check the hook uses, and words a rule's deny with the gate's own
-  text. Every case in the rule tests checks that `Explain` decides as `Decide` does.
+  disagree on what the rules decide. It counts budgets from the receipts with the gate's own read, and
+  words a rule's deny with the gate's own text. It tells a downstream tool's name with the check the hook
+  uses, a server in the config followed by `__` and a name, and adds one the hook leaves out on purpose,
+  `gate.ServableName`: the MCP gate serves a tool only under a name of 1 to 64 letters, digits,
+  underscores and dashes, while the hook leaves every call under Derbent's own entry to the MCP gate to
+  decide and record, even one that gate then refuses. The checks the gate makes before any rule, and the
+  order of the budget and the grant after them, are written again in explain, following `gate.call` and
+  `gate.settle`, not shared with them. Every case in the rule tests checks that `Explain` decides as
+  `Decide` does.
 - Text from agents and the config is escaped. `--json` prints one object, in which `config` is always a
-  path, `config_missing` says the default file does not exist, and a list with nothing in it is `[]`,
-  never `null`. An `--args` that is not JSON is an error that shows the text as it arrived, since Windows
-  PowerShell 5.1 drops the double quotes inside an argument unless each is written as `\"`.
+  path, `config_missing` says the default file does not exist, `rules_skipped` says the gate refuses the
+  call before it reads any rule, `action`, `by` and `reason` are the verdict, and a list with nothing in it
+  is `[]`, never `null`. An `--args` that is not JSON is an error that shows the text as it arrived, since
+  Windows PowerShell 5.1 drops the double quotes inside an argument unless each is written as `\"`, and
+  even then splits an argument that holds a space; `--%` before `--args` passes it whole.
 
 ## Built-in tools
 
@@ -683,8 +696,11 @@ Unicode space separators) is shown as `␠×N`, so padding cannot push the rest 
 reads no further into the arguments than it shows, spaces included, and writes a run that goes on past
 that as `␠×N+`. The terminal bell rings when a new call starts waiting. In a window too short for
 everything, lines drop out of the middle of the main screen and the detail view, so neither is ever
-taller than the window and the header and the status line stay on screen. The status line wraps over up
-to three lines and cuts what is left, so a long name from an agent cannot push the rest away.
+taller than the window and the status stays at the bottom. The status is the outcome of the user's last
+key, with why polls fail on lines of their own above it while they do. Each part wraps over up to three
+lines and is cut with "…" after that, so a long name from an agent cannot push the rest away, and the
+status can take six rows. The header stays on screen at ordinary sizes, but only while the window has
+more rows than the status: in a window of six rows or fewer, a six-row status pushes it off.
 
 `a`, `A` and `d` act only on the highlighted call. After it leaves the list nothing is highlighted until
 the user picks a call with up or down, and when calls arrive while nothing was waiting, the oldest is
@@ -1138,7 +1154,11 @@ Not in v1, in rough order of value:
   which definition it sends now; it reports the pin as the database records it, and cannot know whether a
   running gate withholds the tool because it could not check its pin.
 - A handoff is addressed by agent label, and any agent started as `reviewer` can take the reviewer's
-  handoffs. A handoff whose agent stops after taking it stays taken, since there is no release in v1.
+  handoffs. A handoff whose agent stops after taking it stays taken, since there is no release in v1. Ids
+  are sequential and `handoff_take` works across projects by id, so a hostile agent can call it over one
+  id after another, claim every open handoff addressed to `*`, and learn from the refusals whom each of
+  the others is for and who took it. A rule that puts `handoff_take`, or every handoff tool, behind `ask`
+  for agents the user does not trust closes that.
 - A suggested prefix pattern matches text, so `git *` also matches `git status && rm -rf build`, and
   `ls*`, suggested when every answered command was `ls`, also matches `lsof`. One denial of any command
   stops an `allow` for the whole tool. The rule a snippet says to put it above is numbered as the config
