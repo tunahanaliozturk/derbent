@@ -249,15 +249,16 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   that does not rise, a receipt 1 whose `prev_hash` is not the genesis hash, and a later receipt whose
   `prev_hash` is, fail. It prints how many lines it checked, the runs, the gaps, the anchor (the first
   line's `prev_hash`) and the head (the last line's `hash`), and `--head <hash>` checks the head against a
-  hash the user kept, read without the white space around it and in any case. With a kept head and more than one run it says that only the last run is tied to
-  that head, and without `--head` it says that nothing ties the export to the database. The first line
-  that fails is named, and the exit status is 1; a line whose hash fails and that holds U+FFFD also says
-  that a stored field that was not valid UTF-8 cannot pass through JSON unchanged. Lines of any length are read, with LF or CRLF endings, in
-  UTF-8 with or without a byte order mark or in UTF-16 with one, as Windows PowerShell 5.1 writes a
-  redirected command's output. A line must be one JSON object that holds each field listed above once,
-  under its exact name, none of them null, and nothing else: a field the hash does not cover, a field
-  given twice, left out or null, and text after the object are refused. Blank lines are skipped, and a
-  file with no receipt lines fails.
+  hash the user kept, read without the white space around it and in any case; a `--head` that is set but
+  blank is refused. With a kept head and more than one run it says that only the last run is tied to that
+  head, and without `--head` it says that nothing ties the export to the database. The first line that
+  fails is named, and the exit status is 1; a line whose hash fails and that holds U+FFFD also says that a
+  stored field that was not valid UTF-8 cannot pass through JSON unchanged. Lines of any length are read,
+  with LF or CRLF endings, in UTF-8 with or without a byte order mark or in UTF-16 with one, as Windows
+  PowerShell 5.1 writes a redirected command's output. A line must be one JSON object that holds each
+  field listed above once, under its exact name, none of them null, and nothing else: a field the hash
+  does not cover, a field given twice, left out or null, and text after the object are refused. Blank
+  lines are skipped, and a file with no receipt lines fails.
 - A line whose hash matches its fields shows that it was not changed only when its run ends at a kept
   head. The hash takes no key, so anyone holding an export can edit a line and compute its hash again: a
   run cut off by a gap, and any export checked without a kept head, shows only that its lines agree with
@@ -334,7 +335,8 @@ copies what they want.
   carry. Every one of a shell's answered calls must carry one command, as a string, under that exact key:
   a call with none, with `{}` or `null` for arguments, or with a command key written in other case, such as
   `Command`, is a command that cannot be read, and the tool gets no suggestion, never an `allow` for all
-  of it. A key that holds the redaction mask `[redacted]`, which redaction writes over keys as well, is
+  of it. A shell known by name must carry the key it runs, `CommandLine` for `native__run_command` and
+  `command` for the others: a rule on the other key would constrain nothing the tool runs. A key that holds the redaction mask `[redacted]`, which redaction writes over keys as well, is
   taken the same way, since a command could hide behind it, and for every tool, shell or not: a tool whose
   calls carry one gets no suggestion. So a redaction pattern that matches a common key name, such as `path`
   in `file_path`, stops suggestions for every tool whose calls carry that key. Copilot CLI's
@@ -352,13 +354,15 @@ copies what they want.
   `cmd`, `python`, `node`, `sudo`, `env`, `xargs`, `nice`, `timeout`, `ssh`, `npx`, `Start-Process`, `iex`
   and the others ADR 0019 lists), read without quotes, a leading `\`, its directory, its case, a Windows
   extension or a version, or could name any program because it holds `$`, `%`, a backtick, a quote inside
-  it, `[`, `{` or `^`.
+  it, `[`, `{`, `^`, or one of the curly quotes U+2018 to U+201E, which PowerShell reads as quotes even
+  inside a command name.
 - A shell's `allow` for a prefix comes after nine `ask` tables for the same agent and tool,
   `<prefix>*;*`, `<prefix>*&*`, `<prefix>*|*`, `` <prefix>*`* ``, `<prefix>*(*`, `<prefix>*<*`,
   `<prefix>*>*`, `<prefix>*\n*` and `<prefix>*\r*`, so a command that starts with the prefix and chains,
   pipes, redirects or substitutes another still asks. A comment says the `allow` still matches any options
-  after the prefix, such as `--force`, and that the calls it matches no longer reach the rules at and below
-  the one it goes above. An `allow` for a tool that is not a shell says it allows every call to the tool,
+  after the prefix, such as `--force`, that the calls it matches no longer reach the rules at and below
+  the one it goes above, and to answer the asks with `a`, once, not `A`, since a session grant lets later
+  calls that match the same ask through (ADR 0011). An `allow` for a tool that is not a shell says it allows every call to the tool,
   whatever its arguments. These are text rules, and the lists cannot be complete: an option of an
   ordinary program can run another one (`go test -exec`), and a shell can spell a program in ways the
   lists do not know. Suggestions refuse the forms named here, not every way to a whole shell.
@@ -552,15 +556,15 @@ exists.
 - `rule.Set` explains a call with the same matching `Decide` uses, and explain combines the user's and the
   project's decisions with the function the gate uses, `gate.Judge`, so explain and the gate cannot
   disagree on what the rules decide, given the same config: a `derbent mcp` gate started before the config
-  was edited still decides with the one it read then. It counts budgets from the receipts with the gate's own read, and
-  words a rule's deny with the gate's own text. It tells a downstream tool's name with the check the hook
-  uses, a server in the config followed by `__` and a name, and adds one the hook leaves out on purpose,
-  `gate.ServableName`: the MCP gate serves a tool only under a name of 1 to 64 letters, digits,
-  underscores and dashes, while the hook leaves every call under Derbent's own entry to the MCP gate to
-  decide and record, even one that gate then refuses. The checks the gate makes before any rule, and the
-  order of the budget and the grant after them, are written again in explain, following `gate.call` and
-  `gate.settle`, not shared with them. Every case in the rule tests checks that `Explain` decides as
-  `Decide` does.
+  was edited still decides with the one it read then. It counts budgets from the receipts with the gate's
+  own read, and words a rule's deny with the gate's own text. It tells a downstream tool's name with the
+  check the hook uses, a server in the config followed by `__` and a name, and adds one the hook leaves
+  out on purpose, `gate.ServableName`: the MCP gate serves a tool only under a name of 1 to 64 letters,
+  digits, underscores and dashes, while the hook leaves every call under Derbent's own entry to the MCP
+  gate to decide and record, even one that gate then refuses. The checks the gate makes before any rule,
+  and the order of the budget and the grant after them, are written again in explain, following
+  `gate.call` and `gate.settle`, not shared with them. Every case in the rule tests checks that `Explain`
+  decides as `Decide` does.
 - Text from agents and the config is escaped. `--json` prints one object, in which `config` is always a
   path, `config_missing` says the default file does not exist, `rules_skipped` says the gate refuses the
   call before it reads any rule, `action`, `by` and `reason` are the verdict, and a list with nothing in it
@@ -887,8 +891,9 @@ migrates it inside `BEGIN IMMEDIATE`.
   reordered line, an unknown field, a field in capitals, a repeated field, a zero-valued field left out,
   a null field, text after the object, an empty file, a UTF-8 byte order mark, UTF-16 with a byte order
   mark, CRLF line endings, a line of more than a mebibyte, a cancel that stops the check at the next
-  line, a kept head in capitals with white space around it, and a stored field that is not UTF-8, whose
-  line fails with the U+FFFD hint while an edited line gets none.
+  line, a kept head in capitals with white space around it, a `--head` set but blank, which is refused,
+  and a stored field that is not UTF-8, whose line fails with the U+FFFD hint while an edited line gets
+  none.
 - **Explain.** Every case in the rule tests also runs `Explain` and checks that it decides as `Decide`
   does, and a rule test checks the steps: each condition with the value it read, missing or not a string,
   and nothing read past the first match. A budget test checks the count and the wait of every budget that
@@ -919,11 +924,12 @@ migrates it inside `BEGIN IMMEDIATE`.
   without a command, a masked or differently written command key, both command keys across calls or in
   one call, a tool name that is empty or has a wildcard, and an agent that is not an agent label give
   none; and a prefix never ends inside a word or a UTF-8 character. A shell known by name with `{}`,
-  `null` or no command key gives none, and so do `native__write_bash` and `native__write_powershell`. A
-  table test gives one row to each shell, interpreter and launcher on the list, in the first word and in
-  a later one, and to `/bin/sh -c`, `FOO=1 sh -c`, `C:\Windows\System32\cmd.exe /c`, `python3.12 a.py`,
-  `nice sudo sh -c`, a variable, an escaped letter, a glob, a brace expansion, a one-word prefix, `>`,
-  `<(` and PowerShell's `( )`, each refused as an exact command and as a prefix, while
+  `null`, no command key or only the key it does not run gives none, and so do `native__write_bash` and
+  `native__write_powershell`. A table test gives one row to each shell, interpreter and launcher on the
+  list, in the first word and in a later one, and to `/bin/sh -c`, `FOO=1 sh -c`,
+  `C:\Windows\System32\cmd.exe /c`, `python3.12 a.py`, `nice sudo sh -c`, a variable, an escaped letter,
+  a glob, a brace expansion, each of the seven curly quotes PowerShell reads, a one-word prefix, `>`, `<(`
+  and PowerShell's `( )`, each refused as an exact command and as a prefix, while
   `git status --short` five times gives that command exact and `go test ./internal/a` and
   `go test ./internal/b` give `go test *`. A prefix snippet pasted above the rule that asked in the
   balanced preset allows `git push origin feature --force`, as its comment says, while `; curl x | sh`,
@@ -932,11 +938,12 @@ migrates it inside `BEGIN IMMEDIATE`.
   quotes, a backslash, a newline and a bidirectional override reads back through the config parser as
   written and decides as suggested, and one whose agent label, tool name and prefix hold those, a carriage
   return, a tab, an escape sequence, invisible characters and C1 controls decodes back to them with no
-  line or table of its own. `derbent suggest` is tested as text and as JSON lines, one for each suggestion, with
-  `rules` an empty list when no rule asked and `toml` the whole snippet with its asks, escaped and decoded
-  back, on a database from before migration 0006, with the restart line only when a snippet is for a tool
-  that is not `native__`, and with a `--min` below 1 refused. A UI test shows the notice after the fifth approval, once or
-  for the session, wrapped whole into the window, and not after the fourth or after a denial.
+  line or table of its own. `derbent suggest` is tested as text and as JSON lines, one for each
+  suggestion, with `rules` an empty list when no rule asked and `toml` the whole snippet with its asks,
+  escaped and decoded back, on a database from before migration 0006, with the restart line only when a
+  snippet is for a tool that is not `native__`, and with a `--min` below 1 refused. A UI test shows the
+  notice after the fifth approval, once or for the session, wrapped whole into the window, and not after
+  the fourth or after a denial.
 - **Config and database paths.** A `--config` that does not exist makes the hook deny the call and
   `derbent mcp` and `derbent config check` fail, naming the path; without `--config` a missing default
   file allows every call and `derbent mcp` says so on stderr. A test copies a database and its `-wal`

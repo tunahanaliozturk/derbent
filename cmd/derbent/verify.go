@@ -42,9 +42,14 @@ func runVerify(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 	if err = flags.Parse(args); err != nil {
 		return err
 	}
+	headSet := false
+	flags.Visit(func(f *flag.Flag) { headSet = headSet || f.Name == "head" })
 	switch {
 	case flags.NArg() > 0:
 		return fmt.Errorf("verify: unexpected argument %q", flags.Arg(0))
+	case headSet && strings.TrimSpace(*kept) == "":
+		// Read as no --head, it would pass an export that nothing ties to the database.
+		return errors.New("verify: --head is blank; give the head hash you kept, or leave --head out")
 	case *file != "" && *dbPath != "":
 		return errors.New("verify: give --file or --db, not both")
 	case *file != "":

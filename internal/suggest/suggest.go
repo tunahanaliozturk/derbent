@@ -28,12 +28,16 @@ const Min = 5
 // a shell, and a rule for it is suggested only with the command, or the start its commands share.
 var commandKeys = [...]string{"command", "CommandLine"}
 
-// shellTools are the four CLIs' shell tools, which are shells by name whatever their calls carry: a call
-// whose command cannot be read, even one with no arguments at all, gives the group no suggestion.
+// shellTools are the four CLIs' shell tools, each with the one key it runs, which are shells by name
+// whatever their calls carry: a call whose command cannot be read, even one with no arguments at all, or
+// that carries only the other key, which the tool does not run, gives the group no suggestion.
 // typedTools are Copilot CLI's tools that type text into a shell that is already running, where it can be
 // a command or the answer to a prompt; they never get a suggestion.
 var (
-	shellTools = [...]string{"native__Bash", "native__bash", "native__PowerShell", "native__powershell", "native__Monitor", "native__run_command"}
+	shellTools = map[string]string{
+		"native__Bash": "command", "native__bash": "command", "native__PowerShell": "command", "native__powershell": "command",
+		"native__Monitor": "command", "native__run_command": "CommandLine",
+	}
 	typedTools = [...]string{"native__write_bash", "native__write_powershell"}
 )
 
@@ -41,13 +45,14 @@ var (
 // command with one of them in any word, as program spells it, gets no suggestion. The list cannot be
 // complete: a text rule can be fooled, and an option of an ordinary program can run another one.
 var launchers = [...]string{
-	"sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "busybox", "pwsh", "powershell", "cmd", "wsl",
-	"python", "py", "node", "deno", "bun", "perl", "ruby", "php", "lua", "rscript", "osascript", "awk", "gawk",
-	"mawk", "tclsh", "expect", "sudo", "doas", "su", "runas", "gsudo", "pkexec", "env", "xargs", "eval", "exec",
-	"command", "builtin", ".", "source", "nohup", "nice", "ionice", "chrt", "taskset", "time", "timeout", "watch",
-	"setsid", "stdbuf", "flock", "script", "unshare", "nsenter", "chroot", "systemd-run", "ssh", "npx", "bunx",
-	"pnpx", "uvx", "pipx", "start", "start-process", "invoke-expression", "iex", "invoke-command", "call",
-	"mshta", "rundll32", "cscript", "wscript",
+	"sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "busybox", "ash", "mksh", "yash", "nu", "xonsh",
+	"pwsh", "powershell", "cmd", "wsl", "python", "pythonw", "py", "pypy", "pypy3", "ipython", "node", "nodejs",
+	"ts-node", "tsx", "deno", "bun", "perl", "ruby", "php", "lua", "rscript", "osascript", "awk", "gawk", "mawk",
+	"tclsh", "expect", "sudo", "doas", "su", "runas", "gsudo", "pkexec", "env", "xargs", "eval", "exec", "command",
+	"builtin", ".", "source", "nohup", "nice", "ionice", "chrt", "taskset", "time", "timeout", "watch", "setsid",
+	"stdbuf", "flock", "script", "unshare", "nsenter", "chroot", "systemd-run", "ssh", "npx", "bunx", "pnpx", "uvx",
+	"pipx", "start", "start-process", "start-job", "saps", "invoke-expression", "iex", "invoke-command", "icm", "ii",
+	"call", "mshta", "rundll32", "cscript", "wscript",
 }
 
 // operators are what can end a command and start another, feed it, or run one inside it: the separators
@@ -123,10 +128,11 @@ func suggestFor(agent, tool string, calls []approval.Answered, least int) (Sugge
 		return Suggestion{}, false
 	}
 	key, cmds, shell, readable := shellCommands(calls)
+	runs, known := shellTools[tool]
 	switch {
-	case !shell && !slices.Contains(shellTools[:], tool):
+	case !shell && !known:
 		return s, true
-	case !readable:
+	case !readable || (known && key != runs):
 		return Suggestion{}, false
 	}
 	s.Key = key
@@ -245,10 +251,11 @@ var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 // separator to Windows and an escape to a Unix shell, where s\h runs sh, so when name is not a launcher the
 // word is read once more with every \ dropped. ok is false when the word still holds a character that can
 // make it any program: $ and % for a variable, a backtick, a quote inside it, a glob's [, a brace
-// expansion's { and cmd's ^ escape.
+// expansion's { and cmd's ^ escape. PowerShell also reads the curly quotes U+2018 to U+201E as quotes, even
+// inside a command name, so any of them refuses the word wherever it stands.
 func program(word string) (name string, ok bool) {
 	w := strings.TrimPrefix(strings.Trim(word, `"'`), `\`)
-	if strings.ContainsAny(w, "$%`\"'[{^") {
+	if strings.ContainsAny(w, "$%`\"'[{^\u2018\u2019\u201a\u201b\u201c\u201d\u201e") {
 		return "", false
 	}
 	name = base(w[strings.LastIndexAny(w, `/\`)+1:])
@@ -309,7 +316,9 @@ func (s Suggestion) TOML() string {
 		fmt.Fprintf(&b, "# This allows every call to %s, whatever its arguments; %s no longer see them.\n", visible.Escape(s.Tool), below)
 	default:
 		b.WriteString("# The allow at the end also matches any options after the prefix, such as --force.\n" +
-			"# The asks above it stop chained, piped, redirected and substituted commands.\n")
+			"# The asks above it stop chained, piped, redirected and substituted commands.\n" +
+			// A covers every later call the same rule asks about, for the session (ADR 0011).
+			"# Answer those asks with a (once), not A: a session grant lets later calls matching that ask through.\n")
 		fmt.Fprintf(&b, "# Calls the allow matches no longer reach %s.\n", below)
 		for _, op := range operators {
 			s.table(&b, pattern+string(op)+"*", rule.Ask)

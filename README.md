@@ -423,6 +423,7 @@ could add another command after that start (shortened here: there are nine):
 # Put it above rule 1 in your config, so first match reaches it before rule 1, which asked.
 # The allow at the end also matches any options after the prefix, such as --force.
 # The asks above it stop chained, piped, redirected and substituted commands.
+# Answer those asks with a (once), not A: a session grant lets later calls matching that ask through.
 # Calls the allow matches no longer reach the rules at and below rule 1.
 [[rule]]
 agent  = "claude"
@@ -437,11 +438,12 @@ args   = { command = "go test *" }
 action = "allow"
 ```
 
-A shell gets no suggestion when a command cannot be read, or when the command or the start holds an
-operator such as `&&`, `;`, `|`, `>` or `$(`, has only one word (`git *` runs any command through
-`git -c alias.x='!cmd' x`), or names a shell, an interpreter or a launcher in any of its words, such as
-`sh`, `python`, `sudo`, `env`, `xargs`, `nice` or `Start-Process`, however it is spelled (`/bin/sh`,
-`CMD.EXE`, `python3.12`). These are text checks, and their lists cannot be complete: an option of an
+A shell gets no suggestion when a command cannot be read or is not under the key that shell runs
+(`CommandLine` for Antigravity CLI's `native__run_command`, `command` for the others), or when the command
+or the start holds an operator such as `&&`, `;`, `|`, `>` or `$(`, has only one word (`git *` runs any
+command through `git -c alias.x='!cmd' x`), or names a shell, an interpreter or a launcher in any of its
+words, such as `sh`, `python`, `sudo`, `env`, `xargs`, `nice` or `Start-Process`, however it is spelled
+(`/bin/sh`, `CMD.EXE`, `python3.12`, or with PowerShell's curly quotes inside it). These are text checks, and their lists cannot be complete: an option of an
 ordinary program can run another one, as `go test -exec` does, and the `allow` lets any options through.
 Read a snippet before you paste it, and narrow it.
 

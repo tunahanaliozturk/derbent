@@ -66,6 +66,7 @@ func TestSuggestPrintsTheSnippet(t *testing.T) {
 		"# Put it above rule 1 in your config, so first match reaches it before rule 1, which asked.\n" +
 		"# The allow at the end also matches any options after the prefix, such as --force.\n" +
 		"# The asks above it stop chained, piped, redirected and substituted commands.\n" +
+		"# Answer those asks with a (once), not A: a session grant lets later calls matching that ask through.\n" +
 		"# Calls the allow matches no longer reach the rules at and below rule 1.\n"
 	for _, op := range []string{";", "&", "|", "`", "(", "<", ">", `\n`, `\r`} {
 		want += "[[rule]]\nagent  = \"claude\"\ntool   = \"native__Bash\"\nargs   = { command = \"go test *" + op + "*\" }\naction = \"ask\"\n"
