@@ -21,9 +21,11 @@ rule that lets far more through than the user ever looked at, a shell most of al
   `native__powershell`, `native__Monitor` or `native__run_command`, whatever its calls carry. A shell gets
   no suggestion when a call's command is missing, not a string, or behind a key the rules would not read as
   it: one redaction masked, or `command` or `CommandLine` in other case. Without the names, a shell whose
-  calls carry `{}` or `null` would look like any other tool and get an `allow` for all of it. Copilot CLI's
-  `native__write_bash` and `native__write_powershell` type text into a shell that is already running, and
-  never get a suggestion.
+  calls carry `{}` or `null` would look like any other tool and get an `allow` for all of it. A shell known
+  by name must carry the key it runs, `CommandLine` for `native__run_command` and `command` for the others;
+  a call that carries only the other key gives no suggestion, since a rule on an argument the tool does
+  not run constrains nothing. Copilot CLI's `native__write_bash` and `native__write_powershell` type text
+  into a shell that is already running, and never get a suggestion.
 - When every answered command is the same, with no `*`, `?` or `[redacted]` in it, the snippet matches
   that command and nothing else, with no `*`. This is narrower than the design first said, a prefix
   followed by `*`: the user approved that command, not what could follow it. Otherwise the snippet matches
@@ -43,13 +45,17 @@ rule that lets far more through than the user ever looked at, a shell most of al
     `.exe`, `.cmd`, `.bat` or `.com`, and without a version, so `C:\Windows\System32\cmd.exe`,
     `/bin/sh` and `python3.12` all count, and once more with every `\` dropped, since `s\h` runs `sh`;
   - has a word that could name any program: one that still holds `$` or `%` (a variable), a backtick, a
-    quote inside it, `[` (a glob), `{` (a brace expansion) or `^` (cmd's escape).
+    quote inside it, `[` (a glob), `{` (a brace expansion), `^` (cmd's escape), or one of the curly
+    quotes U+2018 to U+201E, which PowerShell reads as quotes even inside a command name.
 - A shell's `allow` for a start comes after an `ask` for the same agent and tool for each operator:
   `<start>*;*`, `<start>*&*` and so on. `*` matches any run of characters, line breaks included, so each ask
   catches its operator anywhere after the start, and a command that starts as approved but chains, pipes,
   redirects or substitutes another one still asks. A comment above the tables says what is left: the
   `allow` still matches any options after the start, such as `--force`, and calls it matches no longer
-  reach the rules at and below the rule it goes above. An exact command needs no asks. An `allow` for a
+  reach the rules at and below the rule it goes above. It also says to answer the asks with `a`, once,
+  not `A`: a session grant covers every later call the same rule asks about (ADR 0011), so an `A` on the
+  `;` ask would let every chained command after the start through for the session. An exact command
+  needs no asks. An `allow` for a
   tool that is not a shell lets every call through, whatever its arguments, and its comment says so.
 - A group whose agent is not an agent label, or whose tool name is empty or holds a `*` or `?`, gets no
   suggestion: no rule could name it as it is.

@@ -152,6 +152,13 @@ func TestVerifyFileTakesAKeptHeadAsKept(t *testing.T) {
 		!strings.Contains(out, "kept:     the head is the hash you kept\n") {
 		t.Fatalf("a kept head in capitals, with white space around it: %v\n%s", err, out)
 	}
+	// A --head that is set but blank is a mistake, never an export checked with no kept head.
+	for _, blank := range []string{"", " \t\r\n"} {
+		if out, err := verifyBytes(t, []byte(whole), "--head", blank); err == nil || errors.Is(err, errExportBroken) ||
+			!strings.Contains(err.Error(), "--head is blank") {
+			t.Errorf("--head %q: %v\n%s", blank, err, out)
+		}
+	}
 }
 
 // A stored field that is not valid UTF-8 comes out of JSON as U+FFFD, so its line fails its hash while the

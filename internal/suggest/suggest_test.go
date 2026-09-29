@@ -93,7 +93,7 @@ func TestSuggestionsNeverWiden(t *testing.T) {
 		{"a UTF-8 character cut in two", shell("command", "git log héllo", "git log hèllo", "git log héllo", "git log hèllo", "git log héllo"), "command", "git log "},
 		{"white space only", shell("command", " ls", " cd", " ls", " cd", " ls"), "", ""},
 		{"nothing shared", shell("command", "ls", "cd x", "ls", "cd x", "ls"), "", ""},
-		{"Antigravity CLI's key", shell("CommandLine", "terraform plan", "terraform plan", "terraform plan", "terraform plan", "terraform plan"), "CommandLine", "terraform plan"},
+		{"Antigravity CLI's key", answers(5, "claude", "native__run_command", `{"CommandLine":"terraform plan"}`, true, 3), "CommandLine", "terraform plan"},
 		{"a command that is not a string", append(four, arrayCall), "", ""},
 		{"a shell call without a command", append(shell("command", "go test ./a", "go test ./b", "go test ./c", "go test ./d"), noCommand), "", ""},
 		{"a masked key", answers(5, "claude", "native__Bash", `{"[redacted]":"git status"}`, true, 3), "", ""},
@@ -144,6 +144,21 @@ func TestAShellIsKnownByItsName(t *testing.T) {
 			}
 		}
 	}
+	// A known shell runs only its own key: command, or CommandLine for Antigravity CLI's run_command. A rule
+	// on the other key would constrain nothing the tool runs.
+	for tool, args := range map[string]string{
+		"native__run_command": `{"command":"go test ./a"}`, "native__Bash": `{"CommandLine":"go test ./a"}`,
+		"native__PowerShell": `{"CommandLine":"go test ./a"}`,
+	} {
+		if got := suggest.From(answers(5, "claude", tool, args, true, 3), suggest.Min); len(got) != 0 {
+			t.Errorf("%s with %s: suggested %+v, want nothing", tool, args, got)
+		}
+	}
+	for tool, key := range map[string]string{"native__run_command": "CommandLine", "native__Bash": "command"} {
+		if got := suggest.From(answers(5, "claude", tool, `{"`+key+`":"go test ./a"}`, true, 3), suggest.Min); len(got) != 1 || got[0].Key != key {
+			t.Errorf("%s with %s: %+v, want one suggestion on %s", tool, key, got, key)
+		}
+	}
 	for _, tool := range []string{"native__write_bash", "native__write_powershell"} {
 		for _, args := range []string{`{"input":"ls"}`, `{"command":"go test ./a"}`} {
 			if got := suggest.From(answers(5, "copilot", tool, args, true, 3), suggest.Min); len(got) != 0 {
@@ -172,15 +187,20 @@ func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
 		"script run", "unshare run", "nsenter run", "chroot run", "systemd-run run", "ssh run", "npx run",
 		"bunx run", "pnpx run", "uvx run", "pipx run", "start run", "Start-Process run", "Invoke-Expression run",
 		"iex run", "Invoke-Command run", "call run", "mshta run", "rundll32 run", "cscript run", "wscript run",
+		"ash run", "mksh run", "yash run", "nu run", "xonsh run", "pythonw run", "nodejs run", "pypy run", "pypy3 run",
+		"ipython run", "ts-node run", "tsx run", "icm run", "saps run", "ii run", "Start-Job run",
 		"go env", "go 'bash'", `go "node"`,
 		// The brief's spellings.
 		"/bin/sh -c", "FOO=1 sh -c", `C:\Windows\System32\cmd.exe /c`, "nice sudo sh -c",
 		// Words that could name any program: a variable, a quote inside a word, an escaped letter, a
 		// glob, a brace expansion and cmd's caret.
 		"$HOME/tool run", "%COMSPEC% /c", "s''h -c", `s\h -c`, "/bin/[s]h -c", "{sh,-c,id} run", "c^m^d /c",
+		// PowerShell reads these seven as quotes too, even inside a command name.
+		"i\u2018\u2018ex run", "pw\u201c\u201csh run", "i\u2019\u2019ex run", "i\u201a\u201aex run", "i\u201b\u201bex run",
+		"i\u201d\u201dex run", "i\u201e\u201eex run",
 		// One word, also after an assignment.
 		"git", "find", "make", "npm", "docker", "rsync", "tar", "FOO=1 git",
-		// Operators, redirects and PowerShell's (…), which runs what it holds.
+		// Operators, redirects and PowerShell's ( ), which runs what it holds.
 		"echo a > f", "diff <( a )", "sort < f", "go test (Remove-Item x)", "echo a; echo", "echo a && echo",
 		"echo a | cat", "echo `id`", "echo $(id)",
 	} {
@@ -250,6 +270,7 @@ func TestAShellAllowAsksAboutWhatFollows(t *testing.T) {
 	for _, want := range []string{
 		"# The allow at the end also matches any options after the prefix, such as --force.\n" +
 			"# The asks above it stop chained, piped, redirected and substituted commands.\n" +
+			"# Answer those asks with a (once), not A: a session grant lets later calls matching that ask through.\n" +
 			fmt.Sprintf("# Calls the allow matches no longer reach the rules at and below rule %d.\n[[rule]]\n", asked.Rule),
 		`args   = { command = "git push origin feature *;*" }`, `args   = { command = "git push origin feature *(*" }`,
 		`args   = { command = "git push origin feature *\n*" }`, `args   = { command = "git push origin feature *\r*" }`,
