@@ -28,8 +28,8 @@ tool   = "memory_*"
 action = "allow"
 
 # --- Derbent's handoff tools, for every agent: one agent leaves a task for another, which takes it
-# and says when it is done. They are named one by one, so the tools of a server called "handoff"
-# behind Derbent are not allowed with them.
+# and says when it is done. The four tools are named one by one. No server behind Derbent can be
+# called "handoff": the name is reserved, as memory and native are.
 
 [[rule]]
 tool   = "handoff_create"
