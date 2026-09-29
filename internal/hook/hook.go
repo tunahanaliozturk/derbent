@@ -89,8 +89,8 @@ func (p Protocol) Answer(a gate.HookAnswer) []byte {
 // the rest of the name, and the server the CLI named, if it names one, is server. For CLIs that name no
 // server one gap remains: a foreign entry whose name and tool join, under the CLI's naming, into this
 // prefix followed by a name served accepts still looks like Derbent's own. That can collide with a
-// server in Derbent's config (an entry called derbent__github in Codex) or with a memory tool (an entry
-// called derbent_memory with a tool called write, under Antigravity's naming).
+// server in Derbent's config (an entry called derbent__github in Codex) or with a memory or handoff tool
+// (an entry called derbent_memory with a tool called write, under Antigravity's naming).
 func (p Protocol) Own(server string, c Call, served func(tool string) bool) bool {
 	if c.Server != "" && c.Server != server {
 		return false

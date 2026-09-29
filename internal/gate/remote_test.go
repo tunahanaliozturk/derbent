@@ -47,7 +47,7 @@ func toolNames(t *testing.T, cs *mcp.ClientSession) []string {
 	}
 	var names []string
 	for _, tool := range res.Tools {
-		if !strings.HasPrefix(tool.Name, "memory_") {
+		if !gate.OwnTool(tool.Name) {
 			names = append(names, tool.Name)
 		}
 	}
@@ -307,7 +307,7 @@ func TestToolListWaitsForServersStartingUp(t *testing.T) {
 	}
 	var got []string
 	for _, tool := range l.res.Tools {
-		if !strings.HasPrefix(tool.Name, "memory_") {
+		if !gate.OwnTool(tool.Name) {
 			got = append(got, tool.Name)
 		}
 	}
@@ -342,7 +342,7 @@ func TestToolListWaitsForASlowServerOnlySoLong(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(began); took > 5*time.Second || len(res.Tools) != 3 {
-		t.Fatalf("listed %d tools after %s; want the memory tools after at most the wait", len(res.Tools), took)
+	if took := time.Since(began); took > 5*time.Second || len(res.Tools) != len(gate.MemoryTools)+len(gate.HandoffTools) {
+		t.Fatalf("listed %d tools after %s; want Derbent's own tools after at most the wait", len(res.Tools), took)
 	}
 }

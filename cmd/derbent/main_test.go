@@ -1169,8 +1169,9 @@ func TestHookDeniedByARule(t *testing.T) {
 	}
 }
 
-// The hook leaves Derbent's own tools, the memory tools and those of the servers in its config, to the
-// MCP gate, which decides and records them. A name Derbent does not serve is decided as a native tool.
+// The hook leaves Derbent's own tools, the memory and handoff tools and those of the servers in its
+// config, to the MCP gate, which decides and records them. A name Derbent does not serve is decided as a
+// native tool.
 func TestHookSkipsDerbentsOwnTools(t *testing.T) {
 	dir := t.TempDir()
 	cfg := hookConfig + "\n[servers.echo]\ncommand = ['echo-server']\n"
@@ -1178,7 +1179,7 @@ func TestHookSkipsDerbentsOwnTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	var own []string
-	for _, tool := range gate.MemoryTools {
+	for _, tool := range slices.Concat(gate.MemoryTools[:], gate.HandoffTools[:]) {
 		own = append(own, "mcp__derbent__"+tool)
 	}
 	for _, tool := range append(own, "mcp__derbent__echo__echo") {

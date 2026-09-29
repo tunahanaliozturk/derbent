@@ -251,6 +251,7 @@ func TestExplainChecksGrantsAndPinsWithoutWriting(t *testing.T) {
 		{"no pin yet", "allow", "rule:4", "not needed", "no pin yet", "whether server echo offers a tool called other", false, tool("echo__other")},
 		{"a server that pins nothing", "allow", "rule:4", "not needed", "not pinned: the server's table says pin = false", "", false, tool("plain__x")},
 		{"a name no server owns that a rule hides", "deny", "rule:2", "not needed", "not a downstream tool", "", false, tool("secret__x")},
+		{"a handoff tool, one of Derbent's own", "allow", "rule:4", "not needed", "not a downstream tool", "", false, tool("handoff_take")},
 		{"a name it does not serve", "deny", "gate", first, "not a downstream tool", "", true, tool("nope")},
 		{"a name agents cannot be offered", "deny", "gate", first, "never pinned", "", true, tool("echo__bad.name")},
 		{"a name over 64 characters", "deny", "gate", first, "never pinned", "", true, tool("echo__" + strings.Repeat("x", 59))},

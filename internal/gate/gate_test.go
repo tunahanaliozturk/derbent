@@ -19,6 +19,7 @@ import (
 
 	"github.com/tunahanaliozturk/derbent/internal/approval"
 	"github.com/tunahanaliozturk/derbent/internal/gate"
+	"github.com/tunahanaliozturk/derbent/internal/handoff"
 	"github.com/tunahanaliozturk/derbent/internal/memory"
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/rule"
@@ -33,6 +34,7 @@ type env struct {
 	db        *sql.DB
 	receipts  *receipt.Log
 	memory    *memory.Store
+	handoffs  *handoff.Store
 	approvals *approval.Queue
 }
 
@@ -43,7 +45,10 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return &env{db: db, receipts: receipt.NewLog(db), memory: memory.NewStore(db), approvals: approval.NewQueue(db)}
+	return &env{
+		db: db, receipts: receipt.NewLog(db), memory: memory.NewStore(db), handoffs: handoff.NewStore(db),
+		approvals: approval.NewQueue(db),
+	}
 }
 
 func (e *env) gate(t *testing.T, agent string, specs ...rule.Spec) *gate.Gate {
@@ -57,7 +62,7 @@ func (e *env) gate(t *testing.T, agent string, specs ...rule.Spec) *gate.Gate {
 	}
 	return &gate.Gate{
 		Agent: agent, Project: "/work/shop", Session: agent + "-session", Version: "test",
-		Rules: set, Memory: e.memory, Receipts: e.receipts,
+		Rules: set, Memory: e.memory, Handoffs: e.handoffs, Receipts: e.receipts,
 		Approvals: e.approvals, ApprovalTimeout: 10 * time.Second,
 	}
 }
@@ -132,7 +137,7 @@ func receipts(t *testing.T, db *sql.DB) []receiptRow {
 	return out
 }
 
-func TestListsMemoryTools(t *testing.T) {
+func TestListsItsOwnTools(t *testing.T) {
 	cs := connect(t, newEnv(t).gate(t, "claude"))
 	res, err := cs.ListTools(t.Context(), nil)
 	if err != nil {
@@ -143,9 +148,17 @@ func TestListsMemoryTools(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	want := slices.Sorted(slices.Values(gate.MemoryTools[:]))
-	if len(want) != 3 || !slices.Equal(names, want) {
-		t.Fatalf("tools = %v, want gate.MemoryTools %v", names, want)
+	want := slices.Sorted(slices.Values(slices.Concat(gate.MemoryTools[:], gate.HandoffTools[:])))
+	if len(want) != 7 || !slices.Equal(names, want) {
+		t.Fatalf("tools = %v, want the memory and handoff tools %v", names, want)
+	}
+	for _, name := range want {
+		if !gate.OwnTool(name) {
+			t.Errorf("OwnTool(%q) = false", name)
+		}
+	}
+	if gate.OwnTool("handoff__x") || gate.OwnTool("memory_other") {
+		t.Error("OwnTool takes a name that is not one of Derbent's tools")
 	}
 }
 

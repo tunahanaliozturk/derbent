@@ -1,8 +1,8 @@
 # Derbent preset: strict
 #
-# Reading is allowed, and so are Derbent's memory tools and the GitHub server's known read tools.
-# Everything else asks you first: every shell command, every file edit and every tool of a
-# downstream server. Every call is recorded (derbent receipts). An ask nobody answers is denied when
+# Reading is allowed, and so are Derbent's memory and handoff tools and the GitHub server's known
+# read tools. Everything else asks you first: every shell command, every file edit and every tool of
+# a downstream server. Every call is recorded (derbent receipts). An ask nobody answers is denied when
 # [approvals] timeout runs out, 50 seconds unless you set it, so keep `derbent` open in a terminal.
 #
 # Derbent wrote this file once and never changes it (ADR 0016): it is yours to edit. Rules are tried
@@ -25,6 +25,26 @@
 
 [[rule]]
 tool   = "memory_*"
+action = "allow"
+
+# --- Derbent's handoff tools, for every agent: one agent leaves a task for another, which takes it
+# and says when it is done. They are named one by one, so the tools of a server called "handoff"
+# behind Derbent are not allowed with them.
+
+[[rule]]
+tool   = "handoff_create"
+action = "allow"
+
+[[rule]]
+tool   = "handoff_list"
+action = "allow"
+
+[[rule]]
+tool   = "handoff_take"
+action = "allow"
+
+[[rule]]
+tool   = "handoff_done"
 action = "allow"
 
 # --- Built-in tools that only read or keep notes, named exactly, so that a tool a CLI adds later is

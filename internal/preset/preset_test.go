@@ -65,6 +65,8 @@ func TestPresetsDecideTheSampleCalls(t *testing.T) {
 		watch, balanced, strict rule.Action
 	}{
 		{"memory_search", map[string]any{"query": "deploy"}, allow, allow, allow},
+		{"handoff_take", map[string]any{"id": 1}, allow, allow, allow},
+		{"handoff__delete_all", nil, allow, allow, ask}, // a server called handoff is not Derbent's
 		{"native__Bash", map[string]any{"command": "cd repo && git push origin main"}, allow, ask, ask},
 		{"native__Bash", map[string]any{"command": "ls"}, allow, allow, ask},
 		{"native__Bash", map[string]any{"command": "rm -rf build"}, allow, ask, ask},
