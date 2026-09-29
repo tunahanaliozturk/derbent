@@ -361,8 +361,8 @@ type ExportCheck struct {
 
 // Add checks the next line of the export and returns why it fails, or nil. Its hash must match its
 // fields, its sequence number must be greater than the line before it, and when the two follow on its
-// prev_hash must be that line's hash; receipt 1 must follow the genesis hash. A gap in the numbers starts
-// a new run and is not a failure. A line that fails is not added.
+// prev_hash must be that line's hash; receipt 1 must follow the genesis hash, and no other receipt may. A
+// gap in the numbers starts a new run and is not a failure. A line that fails is not added.
 func (c *ExportCheck) Add(r Row) error {
 	switch {
 	case r.Sum() != r.Hash:
@@ -371,6 +371,8 @@ func (c *ExportCheck) Add(r Row) error {
 		return fmt.Errorf("its sequence number %d is not one a receipt can have", r.Seq)
 	case r.Seq == 1 && r.PrevHash != Genesis:
 		return errors.New("it is receipt 1, and its prev_hash is not the genesis hash")
+	case r.Seq > 1 && r.PrevHash == Genesis:
+		return fmt.Errorf("it is receipt %d, and its prev_hash is the genesis hash, which only receipt 1 follows", r.Seq)
 	case c.res.Lines > 0 && r.Seq <= c.last.Seq:
 		return fmt.Errorf("its sequence number %d does not come after %d, the line before it", r.Seq, c.last.Seq)
 	case c.res.Lines > 0 && r.Seq == c.last.Seq+1 && r.PrevHash != c.last.Hash:
