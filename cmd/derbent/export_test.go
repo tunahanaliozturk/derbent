@@ -130,8 +130,10 @@ func TestAnExportVerifiesWithoutTheDatabase(t *testing.T) {
 		// A field left out decodes as its zero value, which is what these two hold, so the hash still matches.
 		"a zero duration left out": {strings.Replace(l[0], `,"duration_ms":0`, "", 1), nil, notAReceipt + `: it lacks "duration_ms"`},
 		"an empty result left out": {strings.Replace(l[0], `,"result_sha256":""`, "", 1), nil, notAReceipt + `: it lacks "result_sha256"`},
-		"a wrong head":             {whole, []string{"--head", strings.Repeat("0", 63) + "1"}, "its head is not the hash you kept"},
-		"an empty file":            {"\n", nil, "holds no receipts"},
+		// null decodes as the zero value too, so jq would show null while the hash covers "".
+		"a null field":  {strings.Replace(l[0], `"result_sha256":""`, `"result_sha256":null`, 1), nil, notAReceipt + `: it holds null for "result_sha256"`},
+		"a wrong head":  {whole, []string{"--head", strings.Repeat("0", 63) + "1"}, "its head is not the hash you kept"},
+		"an empty file": {"\n", nil, "holds no receipts"},
 	} {
 		out, err = verifyBytes(t, []byte(tc.text), tc.extra...)
 		if !errors.Is(err, errExportBroken) || !strings.Contains(err.Error(), tc.want) {
@@ -228,6 +230,11 @@ func TestReceiptsLimitZeroListsEveryReceipt(t *testing.T) {
 	export := filepath.Join(t.TempDir(), "export.jsonl")
 	if err := os.WriteFile(export, []byte(whole), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	head := headOf(t, runOK(t, "verify", "--db", db))
+	if out := runOK(t, "verify", "--file", export, "--head", head); !strings.Contains(out, "receipts: 101 lines, 1 run\n") ||
+		!strings.Contains(out, "runs:     1-101\n") || !strings.Contains(out, "kept:     the head is the hash you kept\n") {
+		t.Fatalf("verify --file on the whole export:\n%s", out)
 	}
 	for _, tc := range []struct {
 		args []string
