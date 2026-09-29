@@ -235,6 +235,15 @@ func Judge(user, project rule.Set, agent, tool string, args map[string]any) Judg
 	return j
 }
 
+// Denial is what the agent is told when j denies its call to tool. The gate and derbent explain both
+// word it here, so explain shows the refusal the agent would read.
+func (j Judgement) Denial(tool string) string {
+	if j.Project {
+		return fmt.Sprintf("%s is not allowed in this project (rule %d of %s)", tool, j.Rule, config.ProjectRulesFile)
+	}
+	return fmt.Sprintf("%s is not allowed for this agent (rule %d)", tool, j.Rule)
+}
+
 // judge is Judge with this gate's rules and its project's, which it reads again for each call.
 func (g *Gate) judge(name string, args map[string]any) (Judgement, error) {
 	if knobs.skipRules {
@@ -266,10 +275,7 @@ func (g *Gate) settle(ctx context.Context, name string, args map[string]any, isO
 		return settled{by: "gate", text: name + " was refused: " + err.Error()}
 	}
 	if v.Action == rule.Deny {
-		if v.Project {
-			return settled{by: v.By, text: fmt.Sprintf("%s is not allowed in this project (rule %d of %s)", name, v.Rule, config.ProjectRulesFile)}
-		}
-		return settled{by: v.By, text: fmt.Sprintf("%s is not allowed for this agent (rule %d)", name, v.Rule)}
+		return settled{by: v.By, text: v.Denial(name)}
 	}
 	// A deny stays a deny. Otherwise a used-up budget refuses the call without asking the user: once the
 	// calls an agent stuck in a loop had let through use it up, its further calls stop here (ADR 0012).

@@ -488,19 +488,29 @@ exists.
   or the working directory, is in; then every budget that applies, with its count in the window; then,
   for a downstream tool, its pin as the database records it; then, for a call that asks and with
   `--session`, whether a session grant covers it; and last the verdict and what would decide it:
-  `rule:<n>`, `project:<n>`, `budget:<n>`, `pin`, `gate` or `grant:<id>`.
+  `rule:<n>`, `project:<n>`, `budget:<n>`, `pin`, `gate` or `grant:<id>`. For a deny by a rule or a
+  budget, the verdict carries the text the gate gives the agent.
+- The gate refuses some calls before it reads any rule: a name it does not serve, a tool its pin
+  withholds, arguments that are not a JSON object, and any call in a project whose rules file cannot be
+  read. For those explain reads no rule either: it says the rules are not read, and that the grant is not
+  reached. A call the rules send to the user that a used-up budget refuses first gets the same grant line.
 - A `native__` name is explained as the hook decides it. Any other name is explained as the MCP gate
-  decides it, which refuses a name it does not serve before any rule is read. Explain says what it cannot
-  know: whether a downstream server offers the tool, and which definition it sends now.
-- Without the database, budgets, pins and grants are reported as not checked.
+  decides it, which refuses a name it does not serve before any rule is read. That includes a server's
+  tool under a name agents cannot be offered, one that is not 1 to 64 letters, digits, underscores and
+  dashes, which the gate leaves out. Explain says what it cannot know: whether a downstream server offers
+  the tool, which definition it sends now, and whether a running gate could check its pin.
+- Without the database, budgets, pins and grants are reported as not checked. Explain never migrates, so
+  in a database from before the grants were keyed on the rule (schema version 3) or before pins (version
+  5), the grant or the pin is reported as not checked until the next gate to start migrates it.
 - `rule.Set` explains a call with the same matching `Decide` uses, and explain combines the user's and the
   project's decisions with the function the gate uses, `gate.Judge`, so explain and the gate cannot
-  disagree on what the rules decide. It counts budgets from the receipts with the gate's own read, and
-  tells a downstream tool's name by the same check the hook uses. Every case in the rule tests
-  checks that `Explain` decides as `Decide` does.
-- Text from agents and the config is escaped. `--json` prints one object. An `--args` that is not JSON is
-  an error that shows the text as it arrived, since Windows PowerShell 5.1 drops the double quotes inside
-  an argument unless each is written as `\"`.
+  disagree on what the rules decide. It counts budgets from the receipts with the gate's own read, tells
+  a downstream tool's name by the same check the hook uses, and words a rule's deny with the gate's own
+  text. Every case in the rule tests checks that `Explain` decides as `Decide` does.
+- Text from agents and the config is escaped. `--json` prints one object, in which `config` is always a
+  path, `config_missing` says the default file does not exist, and a list with nothing in it is `[]`,
+  never `null`. An `--args` that is not JSON is an error that shows the text as it arrived, since Windows
+  PowerShell 5.1 drops the double quotes inside an argument unless each is written as `\"`.
 
 ## Built-in tools
 
@@ -821,10 +831,14 @@ migrates it inside `BEGIN IMMEDIATE`.
   does, and a rule test checks the steps: each condition with the value it read, missing or not a string,
   and nothing read past the first match. A budget test checks the count and the wait of every budget that
   applies. End-to-end tests run `derbent explain` before each of a series of hook calls, allowed, denied
-  and refused by a budget, and find its verdict in the receipt the call then gets. They check a project
-  rule that makes a call stricter, a session grant, a changed pin, a name the gate does not serve,
-  arguments that are not an object or not JSON, escaping, and that the database is read without a byte
-  changed and never created.
+  and refused by a budget, and find its verdict in the receipt the call then gets, and a rule's deny in
+  the hook's answer. They check a project rule that makes a call stricter, a session grant, a rule matched
+  on an argument it could not read, which no grant covers, a budget that refuses an ask first, a changed
+  pin, a changed pin a rule hides, an unchanged pin, `pin = false`, a name no server owns that a rule
+  hides, a name the gate does not serve or cannot, arguments that are not an object or not JSON, a project
+  rules file that cannot be read, a database from before grants and pins, a missing config file, `[]` for
+  every empty list, escaping, and that the database is read without a byte changed and never created. The
+  calls the gate refuses before any rule are shown with no rule read.
 - **Handoffs.** Store tests create, list, take and finish handoffs, refuse a `to` no agent label can be and
   a title, body, note or tags over their limits, refuse a take of a handoff that is not open or not
   addressed to the agent and a finish by another agent, and race eight agents to take one handoff, with
@@ -1103,7 +1117,8 @@ Not in v1, in rough order of value:
   PowerShell 5.1 re-encodes a redirected command's output through the console's code page, which can
   change text outside ASCII; cmd, Git Bash and PowerShell 7.4 or later keep the bytes.
 - `derbent explain` starts no servers, so it cannot tell whether a downstream server offers a tool or
-  which definition it sends now; it reports the pin as the database records it.
+  which definition it sends now; it reports the pin as the database records it, and cannot know whether a
+  running gate withholds the tool because it could not check its pin.
 - A handoff is addressed by agent label, and any agent started as `reviewer` can take the reviewer's
   handoffs. A handoff whose agent stops after taking it stays taken, since there is no release in v1.
 - A suggested prefix pattern matches text, so `git *` also matches `git status && rm -rf build`, and one

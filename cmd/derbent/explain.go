@@ -29,17 +29,22 @@ import (
 
 // explanation is how Derbent would decide one call, as derbent explain prints it and --json writes it.
 type explanation struct {
-	Agent   string `json:"agent"`
-	Tool    string `json:"tool"`
-	Args    string `json:"args"`
-	Config  string `json:"config"`
-	Project string `json:"project"`
+	Agent  string `json:"agent"`
+	Tool   string `json:"tool"`
+	Args   string `json:"args"`
+	Config string `json:"config"`
+	// ConfigMissing is set when Config is the default file and it does not exist: every call is allowed.
+	ConfigMissing bool   `json:"config_missing"`
+	Project       string `json:"project"`
 	// Path is how such a call reaches Derbent: "hook" for a native__ tool, which a CLI's pre-tool hook
 	// sends; "mcp" for a tool the MCP gate serves, or refuses by the rule that hides it; "none" for a name
 	// it does not serve.
-	Path                string        `json:"path"`
-	Rules               []rule.Step   `json:"rules"`
-	RulesNotRead        int           `json:"rules_not_read"`
+	Path         string      `json:"path"`
+	Rules        []rule.Step `json:"rules"`
+	RulesNotRead int         `json:"rules_not_read"`
+	// RulesSkipped is set when the gate refuses the call before it reads any rule, so neither the user's
+	// rules nor the project's are read.
+	RulesSkipped        bool          `json:"rules_skipped"`
 	ProjectFile         string        `json:"project_file"`
 	ProjectRules        []rule.Step   `json:"project_rules"`
 	ProjectRulesNotRead int           `json:"project_rules_not_read"`
@@ -74,8 +79,16 @@ type explainer struct {
 	projectErr error
 	db         *sql.DB
 	dbPath     string
+	version    int // the database's schema version, which explain reads as it is and never migrates
 	session    string
 }
+
+// The schema versions whose migrations made what explain reads from the database. OpenExisting takes an
+// older database as it is; the next gate to start migrates it.
+const (
+	grantsVersion = 3 // 0003_rule_grants.sql: grants keyed on the rule that asked
+	pinsVersion   = 5 // 0005_pins.sql: the pins table
+)
 
 // runExplain shows how Derbent would decide one call, rule by rule, and changes nothing: it starts no
 // servers, and reads the database read-only, only when it exists.
@@ -135,17 +148,17 @@ func runExplain(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	default:
 		defer db.Close()
 		x.db = db
+		if err = db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&x.version); err != nil {
+			return fmt.Errorf("read the schema version of %s: %w", x.dbPath, err)
+		}
 	}
 	e, err := x.explain(ctx, *agent, *tool, *argsJSON)
 	if err != nil {
 		return err
 	}
-	e.Config, e.Project, e.ProjectFile = cfgPath, key, filepath.Join(root, config.ProjectRulesFile)
-	if missing {
-		e.Config += " (not found: every call is allowed)"
-	}
+	e.Config, e.ConfigMissing, e.Project, e.ProjectFile = cfgPath, missing, key, filepath.Join(root, config.ProjectRulesFile)
 	if *asJSON {
-		line, marshalErr := json.Marshal(e)
+		line, marshalErr := json.Marshal(e.withEmptyLists())
 		if marshalErr != nil {
 			return marshalErr
 		}
@@ -156,53 +169,49 @@ func runExplain(ctx context.Context, args []string, stdout, stderr io.Writer) er
 }
 
 // explain works out how a call from agent to tool with argsJSON would be decided, in the order the gate
-// decides it (gate.call and gate.settle): a name the MCP gate does not serve and a withheld tool before any
-// rule, then arguments that are not an object and a project rules file that cannot be read, then the
-// rules, a used-up budget, and for a call that asks, a session grant.
+// decides it (gate.call and gate.settle): a name the MCP gate does not serve and a withheld tool, then
+// arguments that are not an object and a project rules file that cannot be read, all before any rule; then
+// the rules, a used-up budget, and for a call that asks, a session grant.
 func (x explainer) explain(ctx context.Context, agent, tool, argsJSON string) (explanation, error) {
 	e := explanation{Agent: agent, Tool: tool, Grant: "not needed: the call does not ask"}
 	args, compact, isObject := gate.DecodeArgs(json.RawMessage(argsJSON))
 	e.Args = compact
 	server, name, configured := downstreamTool(x.cfg, tool)
+	// The gate serves a server's tool only under a name agents accept, and leaves out the rest (gate.LeftOut).
+	// The hook's servedBy does not ask this: a call under Derbent's own entry is the MCP gate's to decide
+	// and record, even one it then refuses.
+	servable := configured && gate.ServableName(tool)
 	hidden := x.cfg.Rules.Hidden(agent, tool)
 	switch {
 	case strings.HasPrefix(tool, "native__"):
 		e.Path = "hook"
-	case gate.OwnTool(tool) || configured || hidden:
+	case gate.OwnTool(tool) || servable || hidden:
 		e.Path = "mcp"
 	default:
 		e.Path = "none"
-	}
-
-	steps := x.cfg.Rules.Explain(agent, tool, args).Steps
-	e.Rules, e.RulesNotRead = steps, x.cfg.Rules.Len()-len(steps)
-	switch {
-	case x.projectErr != nil:
-		e.ProjectNote = x.projectErr.Error()
-	case x.project.Len() == 0:
-		e.ProjectNote = "no project rules: the project adds nothing"
-	default:
-		px := x.project.Explain(agent, tool, args)
-		e.ProjectRules, e.ProjectRulesNotRead = px.Steps, x.project.Len()-len(px.Steps)
-		if px.Decision.Rule == 0 {
-			e.ProjectNote = "no project rule matches: the project adds nothing"
-		}
 	}
 	over, err := x.budgets(ctx, &e, agent, tool)
 	if err != nil {
 		return explanation{}, err
 	}
-	withheld, err := x.pinState(ctx, &e, server, name, configured, hidden)
-	if err != nil {
-		return explanation{}, err
-	}
-	if configured {
+	withheld := false
+	switch {
+	case servable:
+		if withheld, err = x.pinState(ctx, &e, server, name, hidden); err != nil {
+			return explanation{}, err
+		}
 		e.CannotKnow = append(e.CannotKnow, fmt.Sprintf("whether server %s offers a tool called %s, and which definition it sends now: "+
 			"explain starts no servers, and the gate refuses a tool its server does not offer before any rule is read", server, name))
+	case configured:
+		e.Pin = "never pinned: the gate leaves out a tool whose name agents cannot be offered"
+	default:
+		e.Pin = "not a downstream tool: only downstream tools are pinned"
 	}
 
-	j := gate.Judge(x.cfg.Rules, x.project, agent, tool, args)
 	switch {
+	case e.Path == "none" && configured:
+		e.verdict(rule.Deny, "gate", tool+" is not a name the gate can serve: it serves a tool under a name of 1 to 64 letters, "+
+			"digits, underscores or dashes, and leaves the rest out, so a call to it is refused before any rule is read")
 	case e.Path == "none":
 		e.verdict(rule.Deny, "gate", tool+" is not a tool the gate serves, so a call to it is refused before any rule is read; "+
 			"the hook names a CLI's own tools native__<tool>")
@@ -212,9 +221,22 @@ func (x explainer) explain(ctx context.Context, agent, tool, argsJSON string) (e
 		e.verdict(rule.Deny, "gate", "its arguments are not a JSON object, so it is refused before any rule is read")
 	case x.projectErr != nil:
 		e.verdict(rule.Deny, "gate", x.projectErr.Error())
+	}
+	skipped := e.By != ""
+	x.readRules(&e, agent, tool, args, skipped)
+	if skipped {
+		e.Grant = "not reached: the gate refuses the call before it reads any rule"
+		return e, nil
+	}
+
+	j := gate.Judge(x.cfg.Rules, x.project, agent, tool, args)
+	switch {
 	case j.Action == rule.Deny:
-		e.verdict(rule.Deny, j.By, "")
+		e.verdict(rule.Deny, j.By, j.Denial(tool))
 	case over != nil:
+		if j.Action == rule.Ask {
+			e.Grant = fmt.Sprintf("not reached: budget %d refuses the call first", over.N)
+		}
 		e.verdict(rule.Deny, "budget:"+strconv.Itoa(over.N), over.Message(agent))
 	case j.Action == rule.Ask:
 		return e, x.grant(ctx, &e, agent, tool, j)
@@ -224,7 +246,33 @@ func (x explainer) explain(ctx context.Context, agent, tool, argsJSON string) (e
 	return e, nil
 }
 
-// verdict records what decides the call and, for a refusal or an ask, what the agent would be told.
+// readRules records how the user's rules and the project's meet the call, each read as Decide reads it,
+// or, when skipped, that the gate refuses the call before it reads any rule.
+func (x explainer) readRules(e *explanation, agent, tool string, args map[string]any, skipped bool) {
+	if skipped {
+		e.RulesSkipped, e.RulesNotRead = true, x.cfg.Rules.Len()
+	} else {
+		e.Rules = x.cfg.Rules.Explain(agent, tool, args).Steps
+		e.RulesNotRead = x.cfg.Rules.Len() - len(e.Rules)
+	}
+	switch {
+	case x.projectErr != nil:
+		e.ProjectNote = x.projectErr.Error()
+	case x.project.Len() == 0:
+		e.ProjectNote = "no project rules: the project adds nothing"
+	case skipped:
+		e.ProjectRulesNotRead = x.project.Len()
+	default:
+		px := x.project.Explain(agent, tool, args)
+		e.ProjectRules, e.ProjectRulesNotRead = px.Steps, x.project.Len()-len(px.Steps)
+		if px.Decision.Rule == 0 {
+			e.ProjectNote = "no project rule matches: the project adds nothing"
+		}
+	}
+}
+
+// verdict records what decides the call and why. For a rule's deny and a budget, reason is what the gate
+// tells the agent.
 func (e *explanation) verdict(action rule.Action, by, reason string) {
 	e.Action, e.By, e.Reason = action, by, reason
 }
@@ -258,19 +306,22 @@ func (x explainer) budgets(ctx context.Context, e *explanation, agent, tool stri
 	return nil, nil
 }
 
-// pinState records what the database holds about a downstream tool's pin, and reports whether the gate
-// would withhold the tool: it changed since it was pinned and no rule hides it, since a rule that hides a
-// tool refuses it whether it changed or not (see gate.SyncTools).
-func (x explainer) pinState(ctx context.Context, e *explanation, server, name string, configured, hidden bool) (bool, error) {
-	switch {
-	case !configured:
-		e.Pin = "not a downstream tool: only downstream tools are pinned"
-		return false, nil
-	case !slices.ContainsFunc(x.cfg.Servers, func(s config.Server) bool { return s.Name == server && s.Pin }):
+// pinState records what the database holds about the pin of a downstream tool the gate can serve, and
+// reports whether the gate would withhold the tool: it changed since it was pinned and no rule hides it,
+// since a rule that hides a tool refuses it whether it changed or not (see gate.SyncTools).
+func (x explainer) pinState(ctx context.Context, e *explanation, server, name string, hidden bool) (bool, error) {
+	if !slices.ContainsFunc(x.cfg.Servers, func(s config.Server) bool { return s.Name == server && s.Pin }) {
 		e.Pin = "not pinned: the server's table says pin = false"
 		return false, nil
+	}
+	e.CannotKnow = append(e.CannotKnow, "whether a running gate could check this tool's pin: a gate that could not withholds the tool, "+
+		"refuses its calls, and says why only on its stderr")
+	switch {
 	case x.db == nil:
 		e.Pin = "not checked: no database at " + x.dbPath
+		return false, nil
+	case x.version < pinsVersion:
+		e.Pin = x.olderThan(pinsVersion, "pins")
 		return false, nil
 	}
 	p, err := pin.NewStore(x.db).Get(ctx, server, name)
@@ -291,6 +342,12 @@ func (x explainer) pinState(ctx context.Context, e *explanation, server, name st
 	return false, nil
 }
 
+// olderThan says that what arrived in schema version v is not checked in a database older than that.
+func (x explainer) olderThan(v int, what string) string {
+	return fmt.Sprintf("not checked: the database's schema is version %d, and %s arrived in version %d; "+
+		"the next gate to start migrates it", x.version, what, v)
+}
+
 // grant works out whether a session grant covers a call the rules send to the user, as the gate's ask looks
 // one up, and records the verdict: the grant, or the wait for the user.
 func (x explainer) grant(ctx context.Context, e *explanation, agent, tool string, j gate.Judgement) error {
@@ -301,6 +358,8 @@ func (x explainer) grant(ctx context.Context, e *explanation, agent, tool string
 		e.Grant = "not checked: give --session, the CLI's session id or the MCP gate's as derbent receipts shows it"
 	case x.db == nil:
 		e.Grant = "not checked: no database at " + x.dbPath
+	case x.version < grantsVersion:
+		e.Grant = x.olderThan(grantsVersion, "grants keyed on the rule")
 	default:
 		id, granted, err := approval.NewQueue(x.db).Granted(ctx, agent, x.session, tool, j.Key)
 		if err != nil {
@@ -332,19 +391,27 @@ func writeExplanation(w io.Writer, e explanation) error {
 	add("call:     %s calls %s with %s", e.Agent, e.Tool, e.Args)
 	add("project:  %s", e.Project)
 	add("path:     %s", pathText[e.Path])
-	add("your rules, from %s:", e.Config)
+	missing := ""
+	if e.ConfigMissing {
+		missing = " (not found: every call is allowed)"
+	}
+	why := "the first match decides"
+	if e.RulesSkipped {
+		why = "the gate refuses the call before it reads any rule"
+	}
+	add("your rules, from %s%s:", e.Config, missing)
 	for _, s := range e.Rules {
 		add("  %s", stepLine("rule", s))
 	}
 	if e.RulesNotRead > 0 {
-		add("  %s", notRead("rule", len(e.Rules)+1, e.RulesNotRead))
+		add("  %s", notRead("rule", len(e.Rules)+1, e.RulesNotRead, why))
 	}
 	add("project rules, from %s:", e.ProjectFile)
 	for _, s := range e.ProjectRules {
 		add("  %s", stepLine("project rule", s))
 	}
 	if e.ProjectRulesNotRead > 0 {
-		add("  %s", notRead("project rule", len(e.ProjectRules)+1, e.ProjectRulesNotRead))
+		add("  %s", notRead("project rule", len(e.ProjectRules)+1, e.ProjectRulesNotRead, why))
 	}
 	if e.ProjectNote != "" {
 		add("  %s", e.ProjectNote)
@@ -374,12 +441,36 @@ func writeExplanation(w io.Writer, e explanation) error {
 	return nil
 }
 
-// notRead says that n rules from first on are not read.
-func notRead(label string, first, n int) string {
+// notRead says that n rules from first on are not read, and why.
+func notRead(label string, first, n int, why string) string {
 	if n == 1 {
-		return fmt.Sprintf("%s %d is not read: the first match decides", label, first)
+		return fmt.Sprintf("%s %d is not read: %s", label, first, why)
 	}
-	return fmt.Sprintf("%ss %d to %d are not read: the first match decides", label, first, first+n-1)
+	return fmt.Sprintf("%ss %d to %d are not read: %s", label, first, first+n-1, why)
+}
+
+// withEmptyLists returns e with every list it has nothing in, a step's args included, made empty rather
+// than nil, so --json writes [] and never null.
+func (e explanation) withEmptyLists() explanation {
+	e.Rules, e.ProjectRules = stepsWithArgs(e.Rules), stepsWithArgs(e.ProjectRules)
+	e.Budgets, e.CannotKnow = orEmpty(e.Budgets), orEmpty(e.CannotKnow)
+	return e
+}
+
+func stepsWithArgs(steps []rule.Step) []rule.Step {
+	out := make([]rule.Step, len(steps))
+	for i, s := range steps {
+		s.Args = orEmpty(s.Args)
+		out[i] = s
+	}
+	return out
+}
+
+func orEmpty[T any](list []T) []T {
+	if list == nil {
+		return []T{}
+	}
+	return list
 }
 
 // stepLine says how one rule met the call, such as `rule 3 (ask): tool native__Bash matches, command
