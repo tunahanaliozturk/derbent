@@ -84,14 +84,21 @@ func (b Budgets) Window(agent, tool string) time.Duration {
 	return longest
 }
 
-// Reached returns the budget that applies to agent calling tool, is used up and refuses the call for
-// longest, the first in config order on a tie. A budget is used up when at least Calls of passed, the
-// calls agent had let through, went to tools its glob matches within its window before now. Every budget
-// that applies is checked, unlike rules, where the first match decides, and the longest wait is the one
-// that holds: the call is refused until every used-up budget has room again.
-func (b Budgets) Reached(agent, tool string, passed []Passed, now time.Time) (Reached, bool) {
-	var longest Reached
-	found := false
+// Use is how one budget that applies to a call stands: how many of the calls the agent had let through
+// count against it within its window, and, when it is used up, how long until one more call fits.
+type Use struct {
+	N     int // the budget's 1-based position in the config
+	Spec  BudgetSpec
+	Count int
+	Full  bool
+	Wait  time.Duration // until enough calls leave the window for one more; 0 while there is room
+}
+
+// Uses returns every budget that applies to agent calling tool, in config order, with the calls of passed
+// that count against it before now. Every budget that applies is counted, unlike rules, where the first
+// match decides. derbent explain prints them, and Reached picks from them.
+func (b Budgets) Uses(agent, tool string, passed []Passed, now time.Time) []Use {
+	var out []Use
 	for i, bu := range b.list {
 		if !bu.agent.match(agent) || !bu.tool.match(tool) {
 			continue
@@ -102,14 +109,26 @@ func (b Budgets) Reached(agent, tool string, passed []Passed, now time.Time) (Re
 				inside = append(inside, p.At)
 			}
 		}
-		if len(inside) < bu.spec.Calls {
-			continue
+		u := Use{N: i + 1, Spec: bu.spec, Count: len(inside)}
+		if len(inside) >= bu.spec.Calls {
+			// One more call fits once all but Calls-1 of them have left the window.
+			slices.SortFunc(inside, time.Time.Compare)
+			u.Full, u.Wait = true, inside[len(inside)-bu.spec.Calls].Add(bu.per).Sub(now)
 		}
-		// One more call fits once all but Calls-1 of them have left the window.
-		slices.SortFunc(inside, time.Time.Compare)
-		wait := inside[len(inside)-bu.spec.Calls].Add(bu.per).Sub(now)
-		if !found || wait > longest.Wait {
-			longest, found = Reached{N: i + 1, Spec: bu.spec, Wait: wait}, true
+		out = append(out, u)
+	}
+	return out
+}
+
+// Reached returns the budget that applies to agent calling tool, is used up and refuses the call for
+// longest, the first in config order on a tie: the call is refused until every used-up budget has room
+// again.
+func (b Budgets) Reached(agent, tool string, passed []Passed, now time.Time) (Reached, bool) {
+	var longest Reached
+	found := false
+	for _, u := range b.Uses(agent, tool, passed, now) {
+		if u.Full && (!found || u.Wait > longest.Wait) {
+			longest, found = Reached{N: u.N, Spec: u.Spec, Wait: u.Wait}, true
 		}
 	}
 	return longest, found

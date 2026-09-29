@@ -2,6 +2,7 @@ package rule_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -115,5 +116,31 @@ func TestCompileBudgetsRejects(t *testing.T) {
 	}
 	if b, err := rule.CompileBudgets(nil); err != nil || b.Len() != 0 {
 		t.Fatalf("no budgets: %d, %v", b.Len(), err)
+	}
+}
+
+// Uses reports every budget that applies to a call, in config order, with the calls in its window, and
+// for one that is used up the wait until the next call fits. Reached picks the longest wait from it.
+func TestBudgetUsesCountEveryBudgetThatApplies(t *testing.T) {
+	bash := "native__Bash"
+	specs := []rule.BudgetSpec{
+		{Agent: "*", Tool: bash, Calls: 2, Per: "1h"},
+		{Agent: "codex", Tool: "native__*", Calls: 5, Per: "1h"},
+		{Agent: "claude", Tool: "native__*", Calls: 3, Per: "10m"},
+	}
+	b := mustBudgets(t, specs...)
+	calls := []rule.Passed{passed(bash, 50*time.Minute), passed(bash, time.Minute), passed("native__Read", 2*time.Minute)}
+	want := []rule.Use{
+		{N: 1, Spec: specs[0], Count: 2, Full: true, Wait: 10 * time.Minute},
+		{N: 3, Spec: specs[2], Count: 2},
+	}
+	if got := b.Uses("claude", bash, calls, now); !slices.Equal(got, want) {
+		t.Fatalf("Uses = %+v, want %+v", got, want)
+	}
+	if r, reached := b.Reached("claude", bash, calls, now); !reached || r.N != 1 || r.Wait != 10*time.Minute {
+		t.Fatalf("Reached = %+v, %v", r, reached)
+	}
+	if got := b.Uses("codex", "memory_write", calls, now); len(got) != 0 {
+		t.Fatalf("Uses for a tool no budget covers = %+v", got)
 	}
 }

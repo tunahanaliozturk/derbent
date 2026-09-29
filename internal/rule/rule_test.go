@@ -2,6 +2,7 @@ package rule_test
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/tunahanaliozturk/derbent/internal/rule"
@@ -23,6 +24,17 @@ func decided(action rule.Action, n int) rule.Decision {
 // unread is a decision whose rule matched because an args condition could not read the value.
 func unread(action rule.Action, n int) rule.Decision {
 	return rule.Decision{Action: action, Rule: n, Unread: true}
+}
+
+// decide is set.Decide, and fails the test when set.Explain reaches another decision, so every case in
+// these tests also checks that the two agree.
+func decide(t *testing.T, set rule.Set, agent, tool string, args map[string]any) rule.Decision {
+	t.Helper()
+	got := set.Decide(agent, tool, args)
+	if e := set.Explain(agent, tool, args); e.Decision != got {
+		t.Errorf("Explain(%s, %s, %v) decided %+v, Decide %+v", agent, tool, args, e.Decision, got)
+	}
+	return got
 }
 
 func TestDecide(t *testing.T) {
@@ -49,7 +61,7 @@ func TestDecide(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := set.Decide(tc.agent, tc.tool, tc.args); got != tc.want {
+			if got := decide(t, set, tc.agent, tc.tool, tc.args); got != tc.want {
 				t.Fatalf("Decide = %+v, want %+v", got, tc.want)
 			}
 		})
@@ -62,7 +74,7 @@ func TestNonStringArgumentNeverMatchesAnAllow(t *testing.T) {
 		rule.Spec{Tool: "memory_search", Action: rule.Deny},
 		rule.Spec{Action: rule.Allow},
 	)
-	if got := set.Decide("claude", "memory_search", map[string]any{"query": 42}); got != decided(rule.Deny, 2) {
+	if got := decide(t, set, "claude", "memory_search", map[string]any{"query": 42}); got != decided(rule.Deny, 2) {
 		t.Fatalf("Decide = %+v, want the allow skipped and the deny to decide", got)
 	}
 }
@@ -85,7 +97,7 @@ func TestPatternsAreLiteralExceptStarAndQuestionMark(t *testing.T) {
 		"a.b":   rule.Allow,
 	}
 	for tool, want := range tests {
-		if got := set.Decide("x", tool, nil).Action; got != want {
+		if got := decide(t, set, "x", tool, nil).Action; got != want {
 			t.Errorf("Decide(%q) = %s, want %s", tool, got, want)
 		}
 	}
@@ -128,7 +140,7 @@ func TestAllowWithArgsKeepsToolListed(t *testing.T) {
 
 func TestZeroSetDeniesAndHides(t *testing.T) {
 	var set rule.Set
-	if got := set.Decide("a", "t", nil); got != decided(rule.Deny, 0) {
+	if got := decide(t, set, "a", "t", nil); got != decided(rule.Deny, 0) {
 		t.Fatalf("Decide = %+v, want deny by no rule", got)
 	}
 	if !set.Hidden("a", "t") {
@@ -173,7 +185,7 @@ func TestAsk(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := set.Decide("codex", tc.tool, tc.args); got != tc.want {
+			if got := decide(t, set, "codex", tc.tool, tc.args); got != tc.want {
 				t.Fatalf("Decide = %+v, want %+v", got, tc.want)
 			}
 		})
@@ -278,16 +290,16 @@ func TestCompileProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := set.Decide("claude", "native__Bash", map[string]any{"command": "terraform apply"}); got != decided(rule.Ask, 1) {
+	if got := decide(t, set, "claude", "native__Bash", map[string]any{"command": "terraform apply"}); got != decided(rule.Ask, 1) {
 		t.Fatalf("terraform = %+v", got)
 	}
-	if got := set.Decide("claude", "native__Bash", map[string]any{"command": "ls"}); got.Rule != 0 {
+	if got := decide(t, set, "claude", "native__Bash", map[string]any{"command": "ls"}); got.Rule != 0 {
 		t.Fatalf("a call no project rule matches = %+v, want Rule 0", got)
 	}
 	if set.Key(2) == "" || set.Key(2) == set.Key(1) {
 		t.Fatal("project rules need fingerprints of their own")
 	}
-	if empty, err := rule.CompileProject(nil); err != nil || empty.Decide("claude", "x", nil).Rule != 0 {
+	if empty, err := rule.CompileProject(nil); err != nil || decide(t, empty, "claude", "x", nil).Rule != 0 {
 		t.Fatalf("an empty project list: %v", err)
 	}
 	for name, specs := range map[string][]rule.Spec{
@@ -297,5 +309,44 @@ func TestCompileProject(t *testing.T) {
 		if _, err := rule.CompileProject(specs); !errors.Is(err, rule.ErrInvalid) {
 			t.Errorf("%s: err = %v, want ErrInvalid", name, err)
 		}
+	}
+}
+
+// Explain reads the rules in order up to the first that matches and no further, and for each says how
+// its agent, tool and args conditions met the call: every args condition in name order, with the value it
+// read, or that the value was missing or not a string.
+func TestExplainSaysHowEachRuleMetTheCall(t *testing.T) {
+	set := mustCompile(t,
+		rule.Spec{Tool: "memory_*", Action: rule.Allow},
+		rule.Spec{Agent: "codex", Tool: "native__Bash", Action: rule.Deny},
+		rule.Spec{Tool: "native__Bash", Args: map[string]string{"cwd": "/work/*", "command": "go test*"}, Action: rule.Allow},
+		rule.Spec{Tool: "native__Bash", Args: map[string]string{"cwd": "/work/*", "command": "git push*"}, Action: rule.Ask},
+		rule.Spec{Action: rule.Allow},
+	)
+	e := set.Explain("claude", "native__Bash", map[string]any{"command": "git push origin main", "cwd": []any{"/work/shop"}})
+	want := []rule.Step{
+		{Rule: 1, Action: rule.Allow, Tool: "memory_*", AgentMatches: true},
+		{Rule: 2, Action: rule.Deny, Agent: "codex", Tool: "native__Bash", ToolMatches: true},
+		{Rule: 3, Action: rule.Allow, Tool: "native__Bash", AgentMatches: true, ToolMatches: true, Args: []rule.Arg{
+			{Name: "command", Pattern: "go test*", Value: "git push origin main", Read: rule.ArgDiffers},
+			{Name: "cwd", Pattern: "/work/*", Read: rule.ArgUnreadable},
+		}},
+		{Rule: 4, Action: rule.Ask, Tool: "native__Bash", AgentMatches: true, ToolMatches: true, Args: []rule.Arg{
+			{Name: "command", Pattern: "git push*", Value: "git push origin main", Read: rule.ArgMatches},
+			{Name: "cwd", Pattern: "/work/*", Read: rule.ArgUnreadable},
+		}, Matches: true, Unread: true},
+	}
+	if !reflect.DeepEqual(e.Steps, want) {
+		t.Fatalf("Steps =\n%+v\nwant\n%+v", e.Steps, want)
+	}
+	if e.Decision != unread(rule.Ask, 4) {
+		t.Fatalf("Decision = %+v, want an ask by rule 4 through an argument it could not read", e.Decision)
+	}
+	missing := set.Explain("claude", "native__Bash", map[string]any{"cwd": "/work/shop"})
+	if got := missing.Steps[2].Args[0]; got != (rule.Arg{Name: "command", Pattern: "go test*", Read: rule.ArgMissing}) {
+		t.Fatalf("a missing command read as %+v", got)
+	}
+	if missing.Decision != decided(rule.Allow, 5) || len(missing.Steps) != 5 {
+		t.Fatalf("Decision = %+v after %d steps, want rule 5 after 5", missing.Decision, len(missing.Steps))
 	}
 }

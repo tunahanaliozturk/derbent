@@ -482,20 +482,22 @@ loads the config as the hook does, starts no servers, and opens the database rea
 exists.
 
 - It prints each of the user's rules in order with why it matches or not: the agent glob, the tool glob,
-  and each `args` condition with the value it read, or that the value was missing or not a string. It
-  stops at the first match and says the rules below it are not read. Then it prints the project's rules
-  the same way, from the `.derbent.toml` of the checkout `--project`, or the working directory, is in;
-  then every budget that applies, with its count in the window; then, for a downstream tool, its pin as
-  the database records it; then, with `--session`, whether a session grant covers the call; and last the
-  verdict and what would decide it: `rule:<n>`, `project:<n>`, `budget:<n>`, `pin`, `gate` or
-  `grant:<id>`.
+  and, when both match, each `args` condition in name order with the value it read, or that the value
+  was missing or not a string. It stops at the first match and says the rules below it are not read.
+  Then it prints the project's rules the same way, from the `.derbent.toml` of the checkout `--project`,
+  or the working directory, is in; then every budget that applies, with its count in the window; then,
+  for a downstream tool, its pin as the database records it; then, for a call that asks and with
+  `--session`, whether a session grant covers it; and last the verdict and what would decide it:
+  `rule:<n>`, `project:<n>`, `budget:<n>`, `pin`, `gate` or `grant:<id>`.
 - A `native__` name is explained as the hook decides it. Any other name is explained as the MCP gate
   decides it, which refuses a name it does not serve before any rule is read. Explain says what it cannot
   know: whether a downstream server offers the tool, and which definition it sends now.
 - Without the database, budgets, pins and grants are reported as not checked.
 - `rule.Set` explains a call with the same matching `Decide` uses, and explain combines the user's and the
-  project's decisions with the function the gate uses, so explain and the gate cannot disagree on what
-  the rules decide. Every case in the rule tests checks that `Explain` decides as `Decide` does.
+  project's decisions with the function the gate uses, `gate.Judge`, so explain and the gate cannot
+  disagree on what the rules decide. It counts budgets from the receipts with the gate's own read, and
+  tells a downstream tool's name by the same check the hook uses. Every case in the rule tests
+  checks that `Explain` decides as `Decide` does.
 - Text from agents and the config is escaped. `--json` prints one object. An `--args` that is not JSON is
   an error that shows the text as it arrived, since Windows PowerShell 5.1 drops the double quotes inside
   an argument unless each is written as `\"`.
