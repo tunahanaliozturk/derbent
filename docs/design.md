@@ -48,9 +48,9 @@ differently gets an ADR under `docs/adr/`, listed under Decisions.
 
 Each agent CLI starts `derbent mcp --agent <name>` as a stdio MCP server, exactly as it starts any
 other server. That process reads the config, starts the downstream servers as MCP clients, lists their
-tools together with the memory tools, applies the rules to each call, forwards allowed calls, and
-appends a receipt. Running `derbent` with no arguments in another terminal opens the UI, which reads
-and writes the same database.
+tools together with Derbent's own memory and handoff tools, applies the rules to each call, forwards
+allowed calls, and appends a receipt. Running `derbent` with no arguments in another terminal opens the
+UI, which reads and writes the same database.
 
 There is no daemon (ADR 0001). The gate processes and the UI coordinate only through SQLite in WAL mode,
 so there is nothing to start first or keep alive, and a crash takes down one agent's gate, not everyone's.
@@ -249,7 +249,8 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   last line's `hash`), and `--head <hash>` checks the head against a hash the user kept. The first line
   that fails is named, and the exit status is 1. Lines of any length are read, in UTF-8 with or without
   a byte order mark or in UTF-16 with one, as Windows PowerShell 5.1 writes a redirected command's
-  output, and a line with a field the hash does not cover is refused.
+  output, and a line with a field the hash does not cover is refused. Blank lines are skipped, and a file
+  with no receipt lines fails.
 - An export shows that each line is intact, that the lines of each run follow one another in the chain,
   and with a kept head that it reaches that head. It cannot show that nothing was left out: a line removed
   from the middle looks like a filter's gap, and lines cut from either end go unseen without a kept head.
@@ -319,10 +320,11 @@ copies what they want.
   left out, since a rule in the user's config cannot loosen a project's.
 - A tool whose calls carry a `command` argument, or `CommandLine` as Antigravity CLI's `run_command`
   does, is a shell, and every one of its answered calls must carry it as a string. Its snippet adds
-  `args = { command = "<prefix>*" }`, where the prefix is the longest start its commands share, cut before
-  any `*` or `?`, which a pattern reads as wildcards, and back to where a word ends. When nothing but white
-  space is left there is no suggestion for that tool, so Derbent never suggests allowing a whole shell. A
-  tool or agent name that holds a `*` or `?` gets none either.
+  `args = { <key> = "<prefix>*" }`, with the key its calls carry (`command` or `CommandLine`), where the
+  prefix is the longest start its commands share, cut before any `*` or `?`, which a pattern reads as
+  wildcards, and back to where a word ends. When nothing but white space is left there is no suggestion
+  for that tool, so Derbent never suggests allowing a whole shell. A tool or agent name that holds a `*`
+  or `?` gets none either.
 - Each snippet says where to put it: above the lowest-numbered rule that asked about those calls, from
   the approvals, so first match reaches it.
 - Strings in a snippet are TOML basic strings with quotes, backslashes, control characters and invisible
@@ -485,8 +487,8 @@ exists.
   know: whether a downstream server offers the tool, and which definition it sends now.
 - Without the database, budgets, pins and grants are reported as not checked.
 - `rule.Set` explains a call with the same matching `Decide` uses, and explain combines the user's and the
-  project's decisions with the function the gate uses, so explain and the gate cannot disagree. Every case
-  in the rule tests checks that `Explain` decides as `Decide` does.
+  project's decisions with the function the gate uses, so explain and the gate cannot disagree on what
+  the rules decide. Every case in the rule tests checks that `Explain` decides as `Decide` does.
 - Text from agents and the config is escaped. `--json` prints one object. An `--args` that is not JSON is
   an error that shows the text as it arrived, since Windows PowerShell 5.1 drops the double quotes inside
   an argument unless each is written as `\"`.
@@ -1033,8 +1035,8 @@ Not in v1, in rough order of value:
 - For CLIs whose hook input does not name the MCP server (Codex, Copilot CLI, Antigravity CLI, and Claude
   Code before 2.1.274), a foreign MCP entry whose name and tool join, under the CLI's naming, into
   Derbent's prefix followed by a name the gate serves looks like Derbent's own: the hook skips its calls,
-  so they get no decision and no receipt. The name can collide with a configured server, such as an
-  entry called `derbent__github` in Codex, or with a memory tool, such as an entry called
+  so they get no decision and no receipt. The name can collide with a configured server, such as an entry
+  called `derbent__github` in Codex, or with a memory or handoff tool, such as an entry called
   `derbent_memory` with a tool called `write` under Antigravity CLI's assumed naming.
 - What exit status 2 does in Copilot CLI and Antigravity CLI is not documented. A hook that exits with
   status 2 there might not block the call: `--agent copilot-work` without `--cli`, for example, is an
