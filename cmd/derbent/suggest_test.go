@@ -1,0 +1,95 @@
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"io"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/tunahanaliozturk/derbent/internal/approval"
+	"github.com/tunahanaliozturk/derbent/internal/store"
+)
+
+// insertAnswered writes calls into the approvals table of the database at path as answered approvals. It
+// names no project_rule column, so it writes a database from before migration 0006 as well.
+func insertAnswered(t *testing.T, path string, calls ...approval.Answered) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, c := range calls {
+		state := "denied"
+		if c.Approved {
+			state = "approved"
+		}
+		if _, err = db.ExecContext(t.Context(), `INSERT INTO approvals
+			(created_ms, deadline_ms, project, agent, session, tool, args, rule, state, decided_ms)
+			VALUES (1, 2, '/work/shop', ?, 's', ?, ?, ?, ?, 3)`, c.Agent, c.Tool, c.Args, c.Rule, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// The milestone's evidence for suggestions: five approvals of git commands that share "git " print an allow
+// snippet for native__Bash with that prefix, above the rule that asked, as TOML and as a JSON line, one line
+// for each suggestion. A tool name is escaped, and a database from before migration 0006 is read as well.
+func TestSuggestPrintsTheSnippet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	var calls []approval.Answered
+	for _, c := range []string{"git status", "git log --oneline -1", "git branch --show-current", "git rev-parse HEAD", "git remote -v"} {
+		calls = append(calls, approval.Answered{Agent: "claude", Tool: "native__Bash", Args: `{"command":"` + c + `"}`, Rule: 1, Approved: true})
+		calls = append(calls, approval.Answered{Agent: "codex", Tool: "github__delete_repo", Args: `{}`, Rule: 2})
+	}
+	insertAnswered(t, path, calls...)
+	want := "# claude's native__Bash: approved 5 times and never denied.\n" +
+		"# Put it above rule 1 in your config, so first match reaches it before rule 1, which asked.\n" +
+		"[[rule]]\nagent  = \"claude\"\ntool   = \"native__Bash\"\nargs   = { command = \"git *\" }\naction = \"allow\"\n"
+	if out := runOK(t, "suggest", "--db", path); !strings.HasPrefix(out, "# Rules your answers point to.") || !strings.Contains(out, want) ||
+		!strings.Contains(out, "# codex's github__delete_repo: denied 5 times and never approved.\n") {
+		t.Fatalf("suggest printed:\n%s\nwant it to hold:\n%s", out, want)
+	}
+	lines := strings.Split(strings.TrimSuffix(runOK(t, "suggest", "--json", "--db", path), "\n"), "\n")
+	var line, deny suggestionLine
+	if len(lines) != 2 {
+		t.Fatalf("suggest --json printed %d lines, want one for each of the 2 suggestions: %q", len(lines), lines)
+	}
+	if err = json.Unmarshal([]byte(lines[0]), &line); err != nil ||
+		line.Arg != "command" || line.Prefix != "git " || line.Approved != 5 || line.TOML != want {
+		t.Fatalf("suggest --json: %v, %+v", err, line)
+	}
+	if err = json.Unmarshal([]byte(lines[1]), &deny); err != nil || deny.Action != "deny" || deny.Denied != 5 || deny.Arg != "" {
+		t.Fatalf("suggest --json, second line: %v, %+v", err, deny)
+	}
+	if out := runOK(t, "suggest", "--min", "6", "--db", path); !strings.HasPrefix(out, "no suggestions: no agent's calls to one tool were approved 6 times") {
+		t.Fatalf("suggest --min 6: %q", out)
+	}
+	if err = run(t.Context(), []string{"suggest", "--min", "0", "--db", path}, strings.NewReader(""), io.Discard, io.Discard); err == nil {
+		t.Fatal("--min 0 was accepted")
+	}
+
+	old := filepath.Join(t.TempDir(), "old.db")
+	databaseAtVersion(t, old, 5) // before 0006, which added approvals.project_rule
+	hostile := "gh\x1b]0;x\x07issue\u202e" + sneaky
+	var denied []approval.Answered
+	for range 5 {
+		denied = append(denied, approval.Answered{Agent: "codex", Tool: hostile, Args: `{}`, Rule: 2})
+	}
+	insertAnswered(t, old, denied...)
+	out := runOK(t, "suggest", "--db", old)
+	if strings.ContainsAny(out, "\x1b\a\u202e"+sneaky) || !strings.Contains(out, "denied 5 times and never approved") ||
+		!strings.Contains(out, `action = "deny"`) {
+		t.Fatalf("suggest on an old database, with a hostile tool name:\n%q", out)
+	}
+	if out = runOK(t, "suggest", "--json", "--db", old); strings.ContainsAny(out, "\x1b\a\u202e"+sneaky) || strings.Count(out, "\n") != 1 {
+		t.Fatalf("suggest --json on an old database, with a hostile tool name:\n%q", out)
+	}
+}
