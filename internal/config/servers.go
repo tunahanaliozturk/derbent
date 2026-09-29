@@ -38,8 +38,9 @@ var (
 	envRef     = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}`)
 )
 
-// reservedServers are prefixes the gate uses for its own tools.
-var reservedServers = []string{"memory", "native"}
+// reservedServers are prefixes of the gate's own tools, memory_ and handoff_, and of the CLIs' built-in
+// tools, native__, so no server's tools can be named like them.
+var reservedServers = []string{"memory", "handoff", "native"}
 
 // servers validates the [servers] tables and resolves their environment references. It returns the
 // servers sorted by name and every value that came from an environment variable in env or headers, so

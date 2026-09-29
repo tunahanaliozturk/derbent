@@ -65,6 +65,8 @@ func TestParseRejectsBadServers(t *testing.T) {
 		"env reference in a command": {"[servers.a]\ncommand = [\"srv\", \"--token=${env:DERBENT_TEST_TOKEN}\"]\n", "pass secrets to the server in env"},
 		"underscore in name":         {"[servers.git_hub]\ncommand = [\"x\"]\n", "git_hub"},
 		"reserved name":              {"[servers.native]\ncommand = [\"x\"]\n", "reserved"},
+		"memory, reserved":           {"[servers.memory]\ncommand = [\"x\"]\n", "reserved"},
+		"handoff, reserved":          {"[servers.handoff]\ncommand = [\"x\"]\n", "reserved"},
 		"bad redact pattern":         {"[receipts]\nredact = ['(']\n", "redact"},
 		"unknown server key":         {"[servers.a]\ncommand = [\"x\"]\ncwd = \"/tmp\"\n", "cwd"},
 	}

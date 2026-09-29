@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/tunahanaliozturk/derbent/internal/receipt"
 	"github.com/tunahanaliozturk/derbent/internal/store"
@@ -47,7 +48,8 @@ func runVerify(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 	case *file != "" && *dbPath != "":
 		return errors.New("verify: give --file or --db, not both")
 	case *file != "":
-		return verifyFile(ctx, *file, *kept, stdin, stdout)
+		// A hash is lower-case hex; one kept in a file or copied from a page can come back padded or in capitals.
+		return verifyFile(ctx, *file, strings.ToLower(strings.TrimSpace(*kept)), stdin, stdout)
 	case *kept != "":
 		// The database's head moves on with every call, so an older kept hash is no longer the head.
 		return errors.New("verify: --head goes with --file; for the database, compare the head it prints with the one you kept")
@@ -108,7 +110,7 @@ func verifyFile(ctx context.Context, name, kept string, stdin io.Reader, stdout 
 					errExportBroken, n, visible.Escape(err.Error()))
 			}
 			if err = check.Add(row); err != nil {
-				return fmt.Errorf("%w at line %d (receipt %d): %w", errExportBroken, n, row.Seq, err)
+				return fmt.Errorf("%w at line %d (receipt %d): %w%s", errExportBroken, n, row.Seq, err, notUTF8(row))
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
@@ -157,6 +159,17 @@ func verifyFile(ctx context.Context, name, kept string, stdin io.Reader, stdout 
 	b.WriteString("export:   every line's hash matches its fields, and the lines of each run are linked\n")
 	_, err = io.WriteString(stdout, b.String())
 	return err
+}
+
+// notUTF8 is what an error about row adds when its hash does not match its fields and it holds U+FFFD, which
+// JSON writes in place of bytes that are not UTF-8: a stored field like that cannot pass through JSON
+// unchanged, so the line fails while the database verifies (ADR 0017). It is "" for any other line.
+func notUTF8(row receipt.Row) string {
+	if row.Sum() == row.Hash || !strings.ContainsRune(fmt.Sprint(row), utf8.RuneError) { // %v prints every field as it is
+		return ""
+	}
+	return "; it holds U+FFFD, which JSON writes for bytes that are not valid UTF-8: a stored field that was not " +
+		"valid UTF-8 cannot pass through JSON unchanged, so its line fails here even when derbent verify passes on the database"
 }
 
 // exportText returns r's text as UTF-8. Windows PowerShell 5.1 writes a program's output redirected with >
