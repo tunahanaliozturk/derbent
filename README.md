@@ -7,8 +7,8 @@
 
 One guarded pass for all your coding agents.
 
-A derbent was a guarded post on an Ottoman mountain pass: its keepers decided who went through and kept a
-record of everyone who did. Derbent does the same for your coding agents' tool calls.
+In Turkish history, a derbent was a guarded post on a mountain pass: its keepers decided who went through
+and kept a record of everyone who did. Derbent does the same for your coding agents' tool calls.
 
 Claude Code, Codex, GitHub Copilot CLI and Antigravity CLI connect to Derbent as one MCP server, and your
 other MCP servers sit behind it. Each CLI's pre-tool hook sends its built-in tools, such as the shell and
