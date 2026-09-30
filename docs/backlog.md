@@ -44,8 +44,9 @@ characters) and 15 (a reviewer agent).
 ### 1. Hook latency on managed Windows machines
 
 On one Windows 11 Enterprise machine (10.0.26100) with Microsoft Defender Antivirus real-time protection
-and Microsoft Defender for Endpoint running, every start of a new, unsigned binary of 2.6 MB or more from the
-temp directory took over a second. Each row is 12 to 15 launches after 3 warm-up launches, timed from process start to exit.
+and Microsoft Defender for Endpoint running, every start of a new, unsigned binary of 2.6 MB or more
+from the temp directory took over a second. Each row is 12 to 15 launches after 3 warm-up launches, timed
+from process start to exit.
 The Go binaries were built with Go 1.27.1 as `go build -trimpath -ldflags="-s -w -buildid="` with CGO off,
 `derbent` from commit 5d66222, and run from the user's temp directory:
 
@@ -90,7 +91,8 @@ Built. What follows is the idea as it was written down.
 hook input: invalid character ... looking for beginning of value", the character being the mark itself.
 A .NET Framework program that writes the hook input through `Process.StandardInput` sends one when the
 console input encoding is UTF-8, which is how it was found. Whether any of the four CLIs sends one is
-not known. The hook fails closed, so this is safe, but it would stop every built-in tool. Strip a leading `EF BB BF` before decoding the JSON.
+not known. The hook fails closed, so this is safe, but it would stop every built-in tool. Strip a
+leading `EF BB BF` before decoding the JSON.
 
 ### 3. `derbent init` and `derbent doctor`
 
