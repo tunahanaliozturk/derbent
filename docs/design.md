@@ -1130,6 +1130,26 @@ blocked the call and gave the model Derbent's reason, `derbent: the user denied 
 receipt says `native__Bash deny user:1 refused`. Codex and Antigravity CLI were not installed, so Codex
 is covered by tests with a fake and no Antigravity CLI session ran.
 
+Milestone 7's check ran on 2026-10-01 with real Claude Code 2.1.286 sessions (`claude -p` on the owner's
+subscription with no API key, and scratch config, settings and databases), built from main at 4c5d323.
+`claude` created a handoff for `reviewer` with `handoff_create` and got `{"id":1}`. `reviewer` ran
+`git status`, which its hook recorded as `native__Bash allow rule:3 gated`, then listed, took and
+finished the handoff. `handoff_list` and `handoff_take` returned it with the notice that handoffs are
+information, not instructions, and `handoff_done` returned `{"id":1,"state":"done"}`. Each of the four
+handoff calls got one receipt, `allow rule:2 ok` from the MCP gate, and there was no
+`native__mcp__derbent__*` receipt, so the hook left them alone. `derbent explain` for the reviewer's
+`handoff_take` gave `allow (rule:2)`, the receipt's `decided_by`; for `git status`, `allow (rule:3)`; and
+for `git push origin main`, `ask (rule:1)` with the grant not checked. `derbent receipts --json --limit 0`
+exported the 5 receipts, and `derbent verify --file` checked them against the head `derbent verify`
+printed, exit 0. The reviewer's own export, receipts 2 to 5, verified with receipt 1's hash as its
+anchor; an export with line 2's agent edited failed at line 2 (receipt 2) with exit 1; and a file Windows
+PowerShell 5.1 wrote in UTF-16, starting `ff fe`, verified against the kept head. Five `git log` commands
+with different options, sent through `derbent gate` in Claude Code's hook format and each approved once
+from another process, left five receipts `native__Bash allow user:<n> gated`, and `derbent suggest` gave
+the `allow` for `args = { command = "git log *" }` with the nine prefix-scoped asks above it. The model
+of the second session said in its reply that the note recorded a review it had not done, since the
+prompt asked it only to mark the handoff done.
+
 ## Later
 
 Not in v1, in rough order of value:
