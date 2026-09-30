@@ -2,10 +2,10 @@
 
 ## Memory
 
-Every agent now has `memory_write`, `memory_search` and `memory_read`, and a note one agent writes in a
+Every agent gets `memory_write`, `memory_search` and `memory_read`, and a note one agent writes in a
 repository can be found by the others in the same repository. Search is full-text, and results mark
 each note with its author and as a note, not an instruction. `handoff_create`, `handoff_list`,
-`handoff_take` and `handoff_done` let one agent leave a task for another (see [Handoffs](#handoffs)).
+`handoff_take` and `handoff_done` let one agent leave a task for another.
 
 ## Handoffs
 
