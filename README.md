@@ -14,7 +14,7 @@ Claude Code, Codex, GitHub Copilot CLI and Antigravity CLI connect to Derbent as
 other MCP servers sit behind it. Each CLI's pre-tool hook sends its built-in tools, such as the shell and
 file edits, through the same gate. Every call is decided by your rules and written down.
 
-![Four coding agent CLIs send MCP calls to derbent mcp and built-in tool calls to the derbent gate hook; both write a receipt to derbent.db, which the derbent terminal UI reads to show and approve calls, and allowed calls go on to your MCP servers or the CLI's own tool](docs/assets/diagrams/how-it-works.png)
+![Four coding agent CLIs send MCP calls to derbent mcp and built-in tool calls to the derbent gate hook; both write a receipt to derbent.db, which the derbent terminal UI reads to show and approve calls, allowed MCP calls go on to your MCP servers, and a built-in call that is not denied runs in the CLI, which still applies its own permission check to a rule allow](docs/assets/diagrams/how-it-works.png)
 
 It is one binary for Windows, macOS and Linux. There is no daemon and no network listener: a SQLite file
 is the only shared state ([ADR 0001](docs/adr/0001-no-daemon.md)).
@@ -26,8 +26,8 @@ is the only shared state ([ADR 0001](docs/adr/0001-no-daemon.md)).
 - **Approvals.** A call your rules ask about waits until you press `a` in the terminal UI, or is denied
   after 50 seconds by default.
 - **Receipts.** Every call gets a hash-chained receipt, and `derbent verify` names the first receipt
-  that was edited, moved, inserted or removed. Keep the head hash it prints to catch the newest ones
-  being deleted too.
+  where the chain breaks after one was edited, moved, inserted or removed. Keep the head hash it prints
+  to catch the newest ones being deleted too.
 - **Shared memory and handoffs.** Agents keep notes per repository and can leave tasks for each other.
 - **Guards for the long run:** budgets for agents stuck in a loop, pins that hold back a server's tool
   when its definition changes, and project rules a repository can use to be stricter.
