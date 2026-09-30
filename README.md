@@ -24,12 +24,13 @@ is the only shared state ([ADR 0001](docs/adr/0001-no-daemon.md)).
 - **One gate for four CLIs.** The same rules apply to MCP tools and to built-in tools such as the shell.
 - **Rules that allow, deny or ask**, by agent, tool and argument. The first match wins.
 - **Approvals.** A call your rules ask about waits until you press `a` in the terminal UI, or is denied
-  after 50 seconds.
+  after 50 seconds by default.
 - **Receipts.** Every call gets a hash-chained receipt, and `derbent verify` names the first receipt
-  that was edited, moved, inserted or removed.
+  that was edited, moved, inserted or removed. Keep the head hash it prints to catch the newest ones
+  being deleted too.
 - **Shared memory and handoffs.** Agents keep notes per repository and can leave tasks for each other.
 - **Guards for the long run:** budgets for agents stuck in a loop, pins that hold back a server's tool
-  when its description changes, and project rules a repository can use to be stricter.
+  when its definition changes, and project rules a repository can use to be stricter.
 
 ## Install
 
@@ -63,46 +64,34 @@ derbent                          # open the terminal UI in a terminal of its own
 ```
 
 `derbent init` shows every change and asks once before it makes any. It copies each file it changes
-first and never replaces an entry you already have. With `--dry-run` it only shows the changes. Here is
-the part for Claude Code and the config, from a real run with the paths shortened:
+first and never replaces an entry you already have. With `--dry-run` it only shows the changes. Two of
+them, from a real run with the paths shortened:
 
 ```text
 claude: ~/.claude.json
   copied first to ~/.claude.json.derbent-backup-20260930T205424Z
   runs:
     claude mcp add --scope user derbent -- ~/bin/derbent mcp --agent claude
-claude: ~/.claude/settings.json
-  copied first to ~/.claude/settings.json.derbent-backup-20260930T205424Z
-  adds:
-    {
-      "hooks": [
-        {
-          "args": [
-            "gate",
-            "--agent",
-            "claude"
-          ],
-          "command": "~/bin/derbent",
-          "type": "command"
-        }
-      ],
-      "matcher": "*"
-    }
 derbent: ~/.config/derbent/config.toml
   a new file
   adds the balanced preset (derbent init --preset balanced --print shows it)
 ```
 
-Start your agents as usual. Their calls now appear in the UI, and calls the rules ask about wait there for
-you. Only Claude Code has been checked in real sessions; the entries for the other three CLIs follow
-their documentation (see [Built-in tools](docs/built-in-tools.md)).
+It also adds the `derbent gate` hook to each CLI's settings; [Install and set up](docs/install.md) shows
+every entry. Start your agents as usual. Their calls now appear in the UI, and calls the rules ask about
+wait there for you. Only Claude Code has been checked in real sessions; the entries for the other three
+CLIs follow their documentation (see [Built-in tools](docs/built-in-tools.md)).
+
+To put your other MCP servers behind the gate, so each agent needs only the one `derbent` entry, see
+[Downstream servers](docs/servers.md).
 
 ## How a call is decided
 
 ![A tool call is checked against your rules, where the first match wins, then against the project's rules, which can only make it stricter, then against budgets; the result is allow, ask, which waits for you, or deny, and every call gets one receipt](docs/assets/diagrams/how-a-call-is-decided.png)
 
 Rules live in `config.toml` in your user config directory (`%AppData%\derbent\` on Windows,
-`~/.config/derbent/` on Linux, `~/Library/Application Support/derbent/` on macOS):
+`~/.config/derbent/` on Linux, `~/Library/Application Support/derbent/` on macOS). A downstream MCP
+server's tools are named `<server>__<tool>`, and a CLI's built-in tools `native__<tool>`:
 
 ```toml
 [[rule]]
@@ -129,8 +118,8 @@ To see how a call would be decided before it happens:
 derbent explain --agent claude --tool native__Bash --args '{"command":"git push origin main"}'
 ```
 
-It prints each rule and why it matches or not, down to the first match, and ends with `ask (rule:3)` for
-this call under the rules above. [Rules](docs/rules.md) covers globs, the three presets (`watch`,
+It prints each rule and why it matches or not, down to the first match, then the project's rules,
+budgets, pin and grant, and ends with `verdict:  ask (rule:3)` for this call under the rules above. [Rules](docs/rules.md) covers globs, the three presets (`watch`,
 `balanced`, `strict`), project rules, budgets and rule suggestions.
 
 ## Receipts
@@ -178,8 +167,9 @@ from [docs/benchmark-results](docs/benchmark-results/README.md):
 | Starting the binary and exiting | 4.316 ms | 46.91 ms |
 | Hook call, `derbent gate`, allowed | 7.381 ms | 83.03 ms |
 
-The gate adds about half a millisecond to an MCP call. A hook call costs about 3 ms more than starting the
-binary on Linux and 36 ms more on Windows, where most of its cost is the process start. The numbers come
+The gate adds 521 µs to an MCP call on Linux and 680 µs on Windows, for the extra stdio hop, the rule
+decision, the project rules check and the receipt written to SQLite. A hook call costs about 3 ms more
+than starting the binary on Linux and 36 ms more on Windows, where most of its cost is the process start. The numbers come
 from one run on shared runners; the results page has p99, calls per second and the caveats.
 
 ## Limits
@@ -197,12 +187,12 @@ The ones to know first:
 - A receipt export shows its last run unchanged only against a head you kept, and never that nothing was
   left out of it.
 - A suggestion refuses the shells, launchers and operators it knows, but a text rule can be fooled and
-  those lists cannot be complete.
+  those lists cannot be complete, and an `allow` for a command prefix lets any options through.
 - A handoff's address is a label, not an identity: any agent that can call `handoff_take` can claim every
   open handoff addressed to `*`.
 - Approvals depend on you watching. Unattended, `ask` means denied after the timeout.
-- Pins trust the first definition they see, including a new tool that an update adds to a pinned server.
-  A budget can be passed by the calls in flight at the same moment.
+- Pins trust the first definition they see, including a new tool that an update adds to a pinned server,
+  so name the tools you allow for a server whose updates you do not review. A budget can be passed by the calls in flight at the same moment.
 - CI runs the tests on Windows and Linux and only builds on macOS.
 
 ## Docs

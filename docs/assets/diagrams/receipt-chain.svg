@@ -8,21 +8,21 @@
     <rect x="24" y="40" width="250" height="150" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
     <text x="44" y="68" font-size="16" font-weight="600">receipt #1</text>
     <text x="44" y="94">claude  memory_write</text>
-    <text x="44" y="114">allow rule:3  ok</text>
+    <text x="44" y="114">allow rule:4  ok</text>
     <text x="44" y="134" fill="#5B6470">args (masked), result size and hash</text>
     <text x="44" y="170" fill="#0F8B8D" font-weight="600">prev_hash: genesis</text>
 
     <rect x="354" y="40" width="250" height="150" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
     <text x="374" y="68" font-size="16" font-weight="600">receipt #2</text>
     <text x="374" y="94">claude  native__Bash</text>
-    <text x="374" y="114">allow user:4  gated (you approved)</text>
+    <text x="374" y="114">allow user:4 (you approved)  gated</text>
     <text x="374" y="134" fill="#5B6470">args (masked), result size and hash</text>
     <text x="374" y="170" fill="#0F8B8D" font-weight="600">prev_hash: hash of #1</text>
 
     <rect x="684" y="40" width="250" height="150" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
     <text x="704" y="68" font-size="16" font-weight="600">receipt #3</text>
     <text x="704" y="94">codex  github__issue_write</text>
-    <text x="704" y="114">deny rule:2  refused</text>
+    <text x="704" y="114">deny user:5 (you denied)  refused</text>
     <text x="704" y="134" fill="#5B6470">args (masked), result size and hash</text>
     <text x="704" y="170" fill="#0F8B8D" font-weight="600">prev_hash: hash of #2</text>
   </g>
@@ -39,8 +39,8 @@
 
   <rect x="330" y="238" width="300" height="92" rx="8" fill="#0F8B8D"/>
   <text x="480" y="268" text-anchor="middle" font-size="16" font-weight="600" fill="#FFFFFF">derbent verify</text>
-  <text x="480" y="292" text-anchor="middle" font-size="13" fill="#FFFFFF">recomputes every hash; names the first</text>
-  <text x="480" y="310" text-anchor="middle" font-size="13" fill="#FFFFFF">receipt that was edited, moved or removed</text>
+  <text x="480" y="292" text-anchor="middle" font-size="13" fill="#FFFFFF">recomputes every hash; names the first receipt</text>
+  <text x="480" y="310" text-anchor="middle" font-size="13" fill="#FFFFFF">edited, moved, inserted or removed</text>
 
   <rect x="684" y="238" width="250" height="92" rx="8" fill="#0F8B8D"/>
   <text x="809" y="268" text-anchor="middle" font-size="16" font-weight="600" fill="#FFFFFF">head hash</text>
