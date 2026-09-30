@@ -40,9 +40,10 @@
   <text x="818" y="230" text-anchor="middle" font-size="17" font-weight="600" fill="#FFFFFF">derbent</text>
   <text x="818" y="252" text-anchor="middle" font-size="13" fill="#FFFFFF">terminal UI: approve, watch</text>
 
-  <rect x="700" y="334" width="236" height="76" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
-  <text x="818" y="366" text-anchor="middle" font-size="16" fill="#0B0F14">the CLI runs its tool</text>
-  <text x="818" y="390" text-anchor="middle" font-size="13" fill="#5B6470">shell, file edits, ...</text>
+  <rect x="700" y="334" width="236" height="92" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+  <text x="818" y="362" text-anchor="middle" font-size="16" fill="#0B0F14">the CLI runs its tool</text>
+  <text x="818" y="386" text-anchor="middle" font-size="13" fill="#5B6470">a rule allow still meets the</text>
+  <text x="818" y="404" text-anchor="middle" font-size="13" fill="#5B6470">CLI's own permission check</text>
 
   <!-- Arrows -->
   <g stroke="#0B0F14" stroke-width="1.5" fill="none">
@@ -59,7 +60,8 @@
     <text x="276" y="344">built-in</text>
     <text x="276" y="362">tool calls</text>
     <text x="639" y="88">allowed calls</text>
-    <text x="639" y="362">allow or deny</text>
+    <text x="639" y="362">not denied</text>
+    <text x="639" y="394" fill="#C62828">deny: it never runs</text>
     <text x="639" y="225">approvals</text>
     <text x="470" y="172" text-anchor="start">receipt</text>
     <text x="470" y="306" text-anchor="start">receipt</text>

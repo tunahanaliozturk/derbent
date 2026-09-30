@@ -39,8 +39,8 @@
 
   <rect x="330" y="238" width="300" height="92" rx="8" fill="#0F8B8D"/>
   <text x="480" y="268" text-anchor="middle" font-size="16" font-weight="600" fill="#FFFFFF">derbent verify</text>
-  <text x="480" y="292" text-anchor="middle" font-size="13" fill="#FFFFFF">recomputes every hash; names the first receipt</text>
-  <text x="480" y="310" text-anchor="middle" font-size="13" fill="#FFFFFF">edited, moved, inserted or removed</text>
+  <text x="480" y="292" text-anchor="middle" font-size="13" fill="#FFFFFF">recomputes every hash and names the first</text>
+  <text x="480" y="310" text-anchor="middle" font-size="13" fill="#FFFFFF">receipt where the chain breaks</text>
 
   <rect x="684" y="238" width="250" height="92" rx="8" fill="#0F8B8D"/>
   <text x="809" y="268" text-anchor="middle" font-size="16" font-weight="600" fill="#FFFFFF">head hash</text>
