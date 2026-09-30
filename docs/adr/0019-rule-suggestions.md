@@ -43,7 +43,8 @@ rule that lets far more through than the user ever looked at, a shell most of al
     `Start-Process` or `iex` (the whole list is in `internal/suggest`). A word is read as a shell finds the
     program: without the quotes around it or a leading `\`, without its directory, in any case, without
     `.exe`, `.cmd`, `.bat` or `.com`, and without a version, so `C:\Windows\System32\cmd.exe`,
-    `/bin/sh` and `python3.12` all count, and once more with every `\` dropped, since `s\h` runs `sh`;
+    `/bin/sh` and `python3.12` all count, and once more with every `\` dropped, since `s\h` runs `sh`; the
+    first word is also read as cmd.exe reads it, up to the first `/`, `,` or `=`, so `cmd/c` counts;
   - has a word that could name any program: one that still holds `$` or `%` (a variable), a backtick, a
     quote inside it, `[` (a glob), `{` (a brace expansion), `^` (cmd's escape), or one of the curly
     quotes U+2018 to U+201E, which PowerShell reads as quotes even inside a command name.

@@ -189,6 +189,10 @@ func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
 		"iex run", "Invoke-Command run", "call run", "mshta run", "rundll32 run", "cscript run", "wscript run",
 		"ash run", "mksh run", "yash run", "nu run", "xonsh run", "pythonw run", "nodejs run", "pypy run", "pypy3 run",
 		"ipython run", "ts-node run", "tsx run", "icm run", "saps run", "ii run", "Start-Job run",
+		"Invoke-Item run", "sajb run",
+		// cmd.exe ends a program's name at / , or =, so each of these runs cmd or PowerShell.
+		"cmd/c dir", "cmd,/c dir", "cmd=/c dir", "powershell/c dir", `C:\Windows\System32\cmd.exe/c dir`,
+		"FOO=1 cmd/c dir", "cmd=/c dir x y",
 		"go env", "go 'bash'", `go "node"`,
 		// The brief's spellings.
 		"/bin/sh -c", "FOO=1 sh -c", `C:\Windows\System32\cmd.exe /c`, "nice sudo sh -c",
@@ -226,6 +230,9 @@ func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
 	}{
 		{shell("command", "git status --short", "git status --short", "git status --short", "git status --short", "git status --short"), "git status --short", true},
 		{shell("command", "go test ./internal/a", "go test ./internal/b", "go test ./internal/a", "go test ./internal/b", "go test ./internal/a"), "go test ", false},
+		// A later word is no program name to cmd.exe, so a path through a directory named cmd is fine.
+		{shell("command", "go vet cmd/a", "go vet cmd/b", "go vet cmd/a", "go vet cmd/b", "go vet cmd/a"), "go vet ", false},
+		{shell("command", "./build.sh test a", "./build.sh test b", "./build.sh test a", "./build.sh test b", "./build.sh test a"), "./build.sh test ", false},
 	} {
 		if got := suggest.From(tc.calls, suggest.Min); len(got) != 1 || got[0].Prefix != tc.prefix || got[0].Exact != tc.exact {
 			t.Errorf("%s: %+v, want %q, exact %v", tc.calls[1].Args, got, tc.prefix, tc.exact)

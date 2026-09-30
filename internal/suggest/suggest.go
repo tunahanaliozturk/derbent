@@ -51,8 +51,8 @@ var launchers = [...]string{
 	"tclsh", "expect", "sudo", "doas", "su", "runas", "gsudo", "pkexec", "env", "xargs", "eval", "exec", "command",
 	"builtin", ".", "source", "nohup", "nice", "ionice", "chrt", "taskset", "time", "timeout", "watch", "setsid",
 	"stdbuf", "flock", "script", "unshare", "nsenter", "chroot", "systemd-run", "ssh", "npx", "bunx", "pnpx", "uvx",
-	"pipx", "start", "start-process", "start-job", "saps", "invoke-expression", "iex", "invoke-command", "icm", "ii",
-	"call", "mshta", "rundll32", "cscript", "wscript",
+	"pipx", "start", "start-process", "start-job", "sajb", "saps", "invoke-expression", "iex", "invoke-command", "icm",
+	"invoke-item", "ii", "call", "mshta", "rundll32", "cscript", "wscript",
 }
 
 // operators are what can end a command and start another, feed it, or run one inside it: the separators
@@ -236,10 +236,26 @@ func refused(p string) bool {
 			return true
 		}
 	}
+	if len(words) > 0 && cmdLauncher(words[0]) {
+		return true // cmd.exe has no NAME=value, so its program is the first word as written
+	}
 	for len(words) > 0 && assignment.MatchString(words[0]) {
 		words = words[1:]
 	}
-	return len(words) < 2
+	return (len(words) > 0 && cmdLauncher(words[0])) || len(words) < 2
+}
+
+// cmdLauncher reports whether cmd.exe, which ends a program's name at the first / , or =, reads word as a
+// launcher: cmd/c, cmd,/c and cmd=/c all run cmd with /c. Only a command's first word names its program,
+// so a later word, such as the path in go vet cmd/derbent, is left to program.
+func cmdLauncher(word string) bool {
+	w := strings.TrimPrefix(strings.Trim(word, `"'`), `\`)
+	i := strings.IndexAny(w, "/,=")
+	if i <= 0 {
+		return false // no such character, or a Unix path from the root, which program reads
+	}
+	name := base(w[strings.LastIndex(w[:i], `\`)+1 : i])
+	return name != "." && slices.Contains(launchers[:], name)
 }
 
 // assignment is a shell's NAME=value before a command, which sets a variable for it.
