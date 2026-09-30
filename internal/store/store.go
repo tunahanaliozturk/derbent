@@ -20,34 +20,58 @@ import (
 var migrations embed.FS
 
 // Open opens the database at path, creating it and its directory if needed, and applies any
-// migrations it has not seen. Pragmas are set in the DSN so that every pooled connection gets them. An
-// existing file is first opened read-only, as OpenExisting opens it, so another program's SQLite file,
-// or a schema newer than this binary knows, is refused before the WAL pragma or a migration writes to
-// it. Opening a current database still takes no write lock.
+// migrations it has not seen. The per-connection pragmas are set in the DSN so that every pooled
+// connection gets them. Before anything writes, the file is checked as OpenExisting checks it, so another
+// program's SQLite file, or a schema newer than this binary knows, is refused before the WAL pragma or a
+// migration writes to it. Opening a current database takes no write lock.
+//
+// The check runs on the read-write connection rather than on a separate read-only open: a read-only
+// open of a WAL database whose last writer has closed retries with short sleeps, which cost 10 ms of a
+// 17 ms hook call on Windows, and every hook call opens the database afresh.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
-	if _, statErr := os.Stat(path); statErr == nil {
-		probe, err := OpenExisting(ctx, path)
-		if err != nil {
-			return nil, err
-		}
-		if err = probe.Close(); err != nil {
-			return nil, fmt.Errorf("open database %s: %w", path, err)
-		}
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
-	dsn := fileURI(path) +
-		"?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
+	// journal_mode is not in the DSN: set there, it would switch another program's file to WAL as the
+	// connection opens, before checkSchema could refuse it. WAL is kept in the file once set, so every
+	// later connection opens in it.
+	dsn := fileURI(path) + "?_pragma=busy_timeout(30000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
-	if err := migrate(ctx, db); err != nil {
+	if err = checkSchema(ctx, db, path); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = useWAL(ctx, db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open database %s: %w", path, err)
+	}
+	if err = migrate(ctx, db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
 	return db, nil
+}
+
+// useWAL switches the database to write-ahead logging unless it is in it already, which it is after its
+// first open, so a current database is only read here.
+func useWAL(ctx context.Context, db *sql.DB) error {
+	var mode string
+	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil {
+		return fmt.Errorf("read journal mode: %w", err)
+	}
+	if strings.EqualFold(mode, "wal") {
+		return nil
+	}
+	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&mode); err != nil {
+		return fmt.Errorf("set journal mode: %w", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		return fmt.Errorf("set journal mode: SQLite kept %q instead of wal", mode)
+	}
+	return nil
 }
 
 // OpenExistingWritable opens the database at path as Open does, migrating it if needed, but never
@@ -102,26 +126,32 @@ func openReadOnly(ctx context.Context, path, params string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
-	var version, objects int
-	if err = db.QueryRowContext(ctx, "SELECT (SELECT user_version FROM pragma_user_version), (SELECT count(*) FROM sqlite_master)").
-		Scan(&version, &objects); err != nil {
+	if err = checkSchema(ctx, db, path); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("open database %s: read schema version: %w", path, err)
+		return nil, err
+	}
+	return db, nil
+}
+
+// checkSchema refuses another program's file, one with tables but no Derbent schema version, and a
+// schema newer than this binary knows. It only reads: an empty or new file passes.
+func checkSchema(ctx context.Context, db *sql.DB, path string) error {
+	var version, objects int
+	if err := db.QueryRowContext(ctx, "SELECT (SELECT user_version FROM pragma_user_version), (SELECT count(*) FROM sqlite_master)").
+		Scan(&version, &objects); err != nil {
+		return fmt.Errorf("open database %s: read schema version: %w", path, err)
 	}
 	if version == 0 && objects > 0 {
-		db.Close()
-		return nil, fmt.Errorf("open database %s: it is not a Derbent database: it has tables but no Derbent schema version", path)
+		return fmt.Errorf("open database %s: it is not a Derbent database: it has tables but no Derbent schema version", path)
 	}
 	names, err := fs.Glob(migrations, "migrations/*.sql")
 	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("list migrations: %w", err)
+		return fmt.Errorf("list migrations: %w", err)
 	}
 	if version > len(names) {
-		db.Close()
-		return nil, fmt.Errorf("open database %s: schema version %d is newer than this binary knows (%d): upgrade derbent", path, version, len(names))
+		return fmt.Errorf("open database %s: schema version %d is newer than this binary knows (%d): upgrade derbent", path, version, len(names))
 	}
-	return db, nil
+	return nil
 }
 
 // uriEscaper escapes the characters that end or encode part of an SQLite file URI, so a directory
