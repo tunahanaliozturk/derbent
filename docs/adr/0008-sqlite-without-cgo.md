@@ -13,12 +13,13 @@ builds the binary and a harder cross-compile.
 ## Decision
 
 Use `modernc.org/sqlite`, a translation of SQLite to Go. Its build includes FTS5, which the memory
-tools need. Pragmas (WAL, a thirty-second busy timeout, `synchronous = NORMAL`, foreign keys) are set in
-the DSN so every pooled connection gets them. Writes that read before they write run inside
-`BEGIN IMMEDIATE`, which takes the write lock up front. SQLite's busy handler is not fair: while other
-processes keep taking the lock, a waiting writer can miss it for seconds. CI caught a five-second timeout
-running out with four processes appending under the race detector, so the timeout is thirty seconds,
-still below the tool call timeouts of the agent CLIs.
+tools need. The per-connection pragmas (a thirty-second busy timeout, `synchronous = NORMAL`,
+foreign keys) are set in the DSN so every pooled connection gets them. WAL is set once, after the file
+is checked, and stays in the file. Writes that read before they write run inside `BEGIN IMMEDIATE`,
+which takes the write lock up front. SQLite's busy handler is not fair: while other processes keep
+taking the lock, a waiting writer can miss it for seconds. CI caught a five-second timeout running out
+with four processes appending under the race detector, so the timeout is thirty seconds, still below
+the tool call timeouts of the agent CLIs.
 
 ## Consequences
 

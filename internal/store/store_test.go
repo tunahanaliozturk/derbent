@@ -178,6 +178,132 @@ func TestOpenRefusesAnotherProgramsDatabase(t *testing.T) {
 	}
 }
 
+// copyFiles copies each of names from dir to a new directory and returns it.
+func copyFiles(t *testing.T, dir string, names ...string) string {
+	t.Helper()
+	to := t.TempDir()
+	for _, name := range names {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(to, name), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return to
+}
+
+// assertUnchanged fails when any of names in dir differs from what it held in before.
+func assertUnchanged(t *testing.T, dir string, before map[string][]byte) {
+	t.Helper()
+	for name, want := range before {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || !bytes.Equal(got, want) {
+			t.Errorf("%s changed (err %v): %d bytes before, %d after", name, err, len(want), len(got))
+		}
+	}
+}
+
+func snapshot(t *testing.T, dir string, names ...string) map[string][]byte {
+	t.Helper()
+	m := map[string][]byte{}
+	for _, name := range names {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m[name] = b
+	}
+	return m
+}
+
+// Another program's WAL database copied while it was open has rows only in its -wal. A read-write
+// connection would fold them into the file when it closes; Open must refuse the file and leave both as
+// they were.
+func TestOpenRefusesAnotherProgramsWALDatabaseWithoutCheckpointingIt(t *testing.T) {
+	src := t.TempDir()
+	other, err := sql.Open("sqlite", filepath.Join(src, "other.db")+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	other.SetMaxOpenConns(1)
+	for _, q := range []string{`PRAGMA wal_autocheckpoint = 0`, `CREATE TABLE notes (body TEXT)`, `INSERT INTO notes VALUES ('kept in the wal')`} {
+		if _, err = other.ExecContext(t.Context(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := copyFiles(t, src, "other.db", "other.db-wal")
+	before := snapshot(t, dir, "other.db", "other.db-wal")
+	db, err := store.Open(t.Context(), filepath.Join(dir, "other.db"))
+	if err == nil || !strings.Contains(err.Error(), "not a Derbent database") {
+		if db != nil {
+			db.Close()
+		}
+		t.Fatalf("err = %v, want the file refused as not a Derbent database", err)
+	}
+	assertUnchanged(t, dir, before)
+}
+
+// A rollback-journal database copied in the middle of a write has a hot -journal. A read-write
+// connection would roll it back into the file; Open must refuse the file and leave both as they were.
+func TestOpenRefusesAnotherProgramsDatabaseWithAHotJournalWithoutRollingItBack(t *testing.T) {
+	src := t.TempDir()
+	other, err := sql.Open("sqlite", filepath.Join(src, "other.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	conn, err := other.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for _, q := range []string{
+		`PRAGMA cache_size = 1`, `CREATE TABLE notes (body TEXT)`,
+		`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200) INSERT INTO notes SELECT hex(randomblob(500)) FROM n`,
+		`BEGIN`, `UPDATE notes SET body = hex(randomblob(500))`, // spills pages to the file mid-transaction
+	} {
+		if _, err = conn.ExecContext(t.Context(), q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	defer conn.ExecContext(context.WithoutCancel(t.Context()), "ROLLBACK") //nolint:errcheck // cleanup
+	dir := copyFiles(t, src, "other.db", "other.db-journal")
+	before := snapshot(t, dir, "other.db", "other.db-journal")
+	db, err := store.Open(t.Context(), filepath.Join(dir, "other.db"))
+	if err == nil {
+		db.Close()
+		t.Fatal("Open took a database with another program's hot journal")
+	}
+	assertUnchanged(t, dir, before)
+}
+
+// Parallel tool calls can fire several hooks while the MCP gate starts on a new install, so several
+// processes open a new database at once. Every one must succeed.
+func TestOpenANewDatabaseFromManyConnectionsAtOnce(t *testing.T) {
+	for round := range 5 {
+		path := filepath.Join(t.TempDir(), "p.db")
+		const n = 8
+		errs := make(chan error, n)
+		for range n {
+			go func() {
+				db, err := store.Open(t.Context(), path)
+				if err == nil {
+					err = db.Close()
+				}
+				errs <- err
+			}()
+		}
+		for range n {
+			if err := <-errs; err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+	}
+}
+
 // Check refuses what Open refuses, and leaves a database as it was: the file byte for byte, and no -wal
 // or -shm file beside one that had none, which OpenExisting's read-only open would leave.
 func TestCheckRefusesWhatOpenRefusesAndWritesNothing(t *testing.T) {
