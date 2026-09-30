@@ -4,13 +4,16 @@ Date: 2026-09-28. Status: ideas, not decisions. An item that gets built moves in
 and a choice someone could reasonably make differently gets an ADR in the change that builds it. Milestone
 7 and the Later list in design.md are not repeated here.
 
+Updated 2026-10-01: items 2, 3 and 4 are built (the design's Setup and Built-in tools sections, ADRs
+0015 and 0016), and `derbent doctor` times a hook start, as item 1 asks. The rest of item 1 is open.
+Milestone 7, with handoffs and rule suggestions, is built too.
+
 ## Order
 
 1. Items 1 to 4, before Derbent is announced more widely: without them a new user on a managed Windows
    machine, or one who never writes a config, meets Derbent at its worst.
 2. Items 5, 6, 8 and 10: small changes that close the gaps the Known limits in design.md name.
-3. Items 9 and 15, the two that no single agent CLI can offer, ahead of the handoffs and rule suggestions
-   of milestone 7.
+3. Items 9 and 15, the two that no single agent CLI can offer.
 4. The rest as they are needed.
 
 The items that make the clearest write-ups are 5 (shell commands parsed), 9 (taint), 11 (invisible
@@ -19,9 +22,9 @@ characters) and 15 (a reviewer agent).
 | # | Item | What it gives |
 |---|---|---|
 | 1 | Hook latency on managed Windows machines | Usable on machines with an endpoint scanner |
-| 2 | A byte order mark on hook input | No silent stop of every built-in tool |
-| 3 | `derbent init` and `derbent doctor` | Setup in one command, misconfiguration named |
-| 4 | Rule presets | A useful config on the first run |
+| 2 | A byte order mark on hook input (built) | No silent stop of every built-in tool |
+| 3 | `derbent init` and `derbent doctor` (built) | Setup in one command, misconfiguration named |
+| 4 | Rule presets (built) | A useful config on the first run |
 | 5 | Shell commands parsed, not globbed | `git push*` also catches `cd repo && git push` |
 | 6 | Paths compared after they are resolved | `../../.ssh` cannot slip past a path rule |
 | 7 | Risk classes | Rules by what a tool does, not by its name |
@@ -78,6 +81,8 @@ Overhead), so CI does not show this.
 
 ### 2. A byte order mark on hook input
 
+Built. What follows is the idea as it was written down.
+
 `derbent gate` denies input that starts with a UTF-8 byte order mark (U+FEFF), with the reason "unusable
 hook input: invalid character ... looking for beginning of value", the character being the mark itself.
 A .NET Framework program that writes the hook input through `Process.StandardInput` sends one when the
@@ -85,6 +90,8 @@ console input encoding is UTF-8, which is how it was found. Whether any of the f
 is safe, but it would stop every built-in tool. Strip a leading `EF BB BF` before decoding the JSON.
 
 ### 3. `derbent init` and `derbent doctor`
+
+Built. What follows is the idea as it was written down.
 
 Setup takes two entries per CLI in two files, and several mistakes fail silently or far from their cause.
 
@@ -98,6 +105,8 @@ Setup takes two entries per CLI in two files, and several mistakes fail silently
   (item 1).
 
 ### 4. Rule presets
+
+Built. What follows is the idea as it was written down.
 
 Without a config every call is allowed, and a first config is a blank page. `derbent init --preset
 <name>` would write a commented starting config that the user then owns:
