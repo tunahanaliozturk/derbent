@@ -40,6 +40,31 @@ func TestOpenCreatesDirectoryAndSchema(t *testing.T) {
 	}
 }
 
+// journal_mode is set once, not in the DSN, so a connection the pool opens later must still be in WAL
+// mode, and every connection must still get the DSN's pragmas.
+func TestEveryPooledConnectionIsInWALWithForeignKeys(t *testing.T) {
+	db := open(t, filepath.Join(t.TempDir(), "p.db"))
+	var conns []*sql.Conn
+	for range 3 {
+		conn, err := db.Conn(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		conns = append(conns, conn)
+	}
+	for i, conn := range conns {
+		var mode string
+		var fk int
+		if err := conn.QueryRowContext(t.Context(), `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+			t.Errorf("connection %d: journal_mode = %q, err %v", i, mode, err)
+		}
+		if err := conn.QueryRowContext(t.Context(), `PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
+			t.Errorf("connection %d: foreign_keys = %d, err %v", i, fk, err)
+		}
+		conn.Close()
+	}
+}
+
 // A path is a path, not a URI: # and % must not cut it short or be decoded.
 func TestOpenKeepsPathCharactersThatURIsTreatSpecially(t *testing.T) {
 	for _, dir := range []string{"a#b", "c%41d", "e?f=g"} {
