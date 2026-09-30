@@ -296,10 +296,16 @@ func TestOpenANewDatabaseFromManyConnectionsAtOnce(t *testing.T) {
 				errs <- err
 			}()
 		}
+		// Every result is read before failing, so no goroutine still uses the directory when TempDir's
+		// cleanup removes it.
+		var failed []error
 		for range n {
 			if err := <-errs; err != nil {
-				t.Fatalf("round %d: %v", round, err)
+				failed = append(failed, err)
 			}
+		}
+		if len(failed) > 0 {
+			t.Fatalf("round %d: %d of %d opens failed, first: %v", round, len(failed), n, failed[0])
 		}
 	}
 }
