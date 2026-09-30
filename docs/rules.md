@@ -163,8 +163,9 @@ A shell gets no suggestion when a command cannot be read or is not under the key
 or the start holds an operator such as `&&`, `;`, `|`, `>` or `$(`, has only one word (`git *` runs any
 command through `git -c alias.x='!cmd' x`), or names a shell, an interpreter or a launcher in any of its
 words, such as `sh`, `python`, `sudo`, `env`, `xargs`, `nice` or `Start-Process`, however it is spelled
-(`/bin/sh`, `CMD.EXE`, `python3.12`, or with PowerShell's curly quotes inside it). These are text checks, and their lists cannot be complete: an option of an
-ordinary program can run another one, as `go test -exec` does, and the `allow` lets any options through.
+(`/bin/sh`, `CMD.EXE`, `python3.12`, `cmd/c` as cmd.exe reads it, or with PowerShell's curly quotes
+inside it). These are text checks, and their lists cannot be complete: an option of an ordinary program
+can run another one, as `go test -exec` does, and the `allow` lets any options through.
 Read a snippet before you paste it, and narrow it.
 
 An `allow` for a tool that is not a shell lets every call through, whatever its arguments, and its comment

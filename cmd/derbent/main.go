@@ -17,7 +17,7 @@ var version = "dev"
 
 var errUsage = errors.New("usage: derbent [--db path] | derbent mcp --agent <name> | derbent pending | " +
 	"derbent approve [--session] <id> | derbent deny <id> | derbent grants | derbent revoke <id>|--all | " +
-	"derbent suggest [--min N] | derbent pins [show|accept] | derbent handoffs [--all] | derbent receipts | derbent verify [--file path [--head hash]] | derbent explain --agent <name> --tool <name> [--args <json>] | derbent config check | derbent gate --agent <name> | derbent init [--cli <list>] [--preset <name>] [--yes] [--dry-run] | derbent doctor [--cli <list>] [--config path] | derbent version")
+	"derbent suggest [--min N] | derbent pins [show|accept] | derbent handoffs [--all] | derbent receipts | derbent verify [--file path [--head hash]] | derbent explain --agent <name> --tool <name> [--args <json>] | derbent config check | derbent gate --agent <name> | derbent init [--cli <list>] [--preset <name> [--print]] [--yes] [--dry-run] | derbent doctor [--cli <list>] [--config path] | derbent version")
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

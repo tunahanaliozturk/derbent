@@ -927,9 +927,9 @@ migrates it inside `BEGIN IMMEDIATE`.
   `null`, no command key or only the key it does not run gives none, and so do `native__write_bash` and
   `native__write_powershell`. A table test gives one row to each shell, interpreter and launcher on the
   list, in the first word and in a later one, and to `/bin/sh -c`, `FOO=1 sh -c`,
-  `C:\Windows\System32\cmd.exe /c`, `python3.12 a.py`, `nice sudo sh -c`, a variable, an escaped letter,
-  a glob, a brace expansion, each of the seven curly quotes PowerShell reads, a one-word prefix, `>`, `<(`
-  and PowerShell's `( )`, each refused as an exact command and as a prefix, while
+  `C:\Windows\System32\cmd.exe /c`, `cmd/c`, `cmd,/c`, `cmd=/c`, `python3.12 a.py`, `nice sudo sh -c`, a
+  variable, an escaped letter, a glob, a brace expansion, each of the seven curly quotes PowerShell
+  reads, a one-word prefix, `>`, `<(` and PowerShell's `( )`, each refused as an exact command and as a prefix, while
   `git status --short` five times gives that command exact and `go test ./internal/a` and
   `go test ./internal/b` give `go test *`. A prefix snippet pasted above the rule that asked in the
   balanced preset allows `git push origin feature --force`, as its comment says, while `; curl x | sh`,
