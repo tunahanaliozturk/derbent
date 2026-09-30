@@ -41,8 +41,8 @@ protocol, bad flags, or an answer that cannot be written exit with status 2.
 - A hook the CLI times out on decides nothing. Claude Code documents that the call then goes through its
   normal permission flow; the other CLIs do not document it, and Derbent assumes the same. Claude Code and
   Codex give a hook 600 seconds by default. Copilot CLI and Antigravity CLI give it 30 seconds, below
-  the 50-second approval timeout, so their hook entries must set a longer timeout; the README's examples
-  use 120 seconds.
+  the 50-second approval timeout, so their hook entries must set a longer timeout; the examples in
+  docs/install.md use 120 seconds.
 - Rules for built-in tools are per CLI, since the CLIs name the same kind of tool differently
   (`native__Bash`, `native__bash`, `native__run_command`) and pass different argument names (`command`,
   `CommandLine`).

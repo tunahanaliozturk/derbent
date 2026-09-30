@@ -41,5 +41,5 @@ never match anything.
 ## Consequences
 
 The rule that decided a call is one number, and every receipt records it. Reordering the file changes
-the policy, which the README says plainly. A call to a hidden tool by name still reaches the rules and
+the policy, which the rules page (docs/rules.md) says plainly. A call to a hidden tool by name still reaches the rules and
 is refused with a receipt; hiding is a convenience for the agent, not the protection.

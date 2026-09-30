@@ -425,7 +425,7 @@ func TestExplainEscapesAndRefusesBadInput(t *testing.T) {
 		want string
 	}{
 		{[]string{"explain", "--agent", "claude", "--tool", "native__Bash", "--args", "{command:git push}", "--config", cfg}, "--args is not JSON: {command:git push}"},
-		// PowerShell 5.1 splits \"-quoted JSON at a space, so the hint is the --% form the README gives.
+		// PowerShell 5.1 splits \"-quoted JSON at a space, so the hint is the --% form docs/rules.md gives.
 		{[]string{"explain", "--agent", "claude", "--tool", "native__Bash", "--args", "{command:git push}", "--config", cfg}, `put --% before --args, as the last flag, and write the JSON as "{\"command\":\"git push origin main\"}"`},
 		{[]string{"explain", "--tool", "native__Bash", "--config", cfg}, "--agent"},
 		{[]string{"explain", "--agent", "claude", "--config", cfg}, "--tool"},

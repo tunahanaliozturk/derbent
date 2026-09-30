@@ -64,7 +64,7 @@ The first release.
   `Process.StandardInput` when the console input encoding is UTF-8, instead of denying every call.
 - Release binaries for Windows, Linux and macOS on amd64 and arm64, with `SHA256SUMS`. Each binary is
   built twice and published only when both builds are identical, and a clean checkout of the tag rebuilds
-  the same bytes with Go 1.27.1 (see the README's Check a release).
+  the same bytes with Go 1.27.1 (see Check a release in docs/install.md).
 - Benchmarks of what the gate adds to an MCP call and what a hook call costs, with results from GitHub's
   Linux and Windows runners in
   [docs/benchmark-results](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/benchmark-results/README.md).
@@ -91,7 +91,7 @@ The first release.
   for standard input, checks such an export without the database: each line's hash, the links within each
   run of sequence numbers, and with `--head` the head against a hash you kept. A filtered export's gaps
   are reported, not failed, and a file Windows PowerShell 5.1 wrote as UTF-16 is read, though PowerShell
-  5.1 can change text outside ASCII on the way, which fails those lines (see the README)
+  5.1 can change text outside ASCII on the way, which fails those lines (see docs/receipts.md)
   ([ADR 0017](https://github.com/tunahanaliozturk/derbent/blob/v1.0.0/docs/adr/0017-verifiable-receipt-export.md)).
 - `derbent explain --agent <label> --tool <name> [--args <json>]` shows how Derbent would decide a call:
   each rule in order and why it matches or not, the project's rules, every budget that applies with its

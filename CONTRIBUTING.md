@@ -54,8 +54,9 @@ numbered after the last one, with its context, the decision and its consequences
 design's Decisions table. When a decision changes, a new ADR says what changed and why, and the old one's
 status names the ADR that replaced it.
 
-Documentation is plain English written for a user. Every claim in the README is backed by a test or a
-measurement (see the design's Evidence section); a claim with nothing behind it is left out.
+Documentation is plain English written for a user. Every claim in the README and the pages under
+`docs/` is backed by a test or a measurement (see the design's Evidence section); a claim with nothing
+behind it is left out.
 
 ## Sign your commits
 

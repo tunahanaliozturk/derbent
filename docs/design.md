@@ -25,7 +25,7 @@ differently gets an ADR under `docs/adr/`, listed under Decisions.
 ## Non-goals
 
 - Seeing calls that do not pass through it. Tools a CLI never shows its pre-tool hook, such as Codex's
-  hosted web search, are outside the gate, and the README states per CLI what is covered.
+  hosted web search, are outside the gate, and docs/built-in-tools.md states per CLI what is covered.
 - Model traffic. Derbent sits between agents and tools, not between agents and model providers.
 - Several users or machines. One person, one machine, no network listener.
 - Semantic search. Memory uses full-text search.
@@ -593,9 +593,9 @@ rule asks about under the same rules above it, for the rest of that Claude Code 
 
 Codex, GitHub Copilot CLI and Antigravity CLI have the same kind of hook, and `derbent gate` speaks
 each one's protocol (`--cli codex|copilot|antigravity`, which defaults to the `--agent` value). The
-README's quick start shows how each hook is installed with a timeout above `approvals.timeout`, and its
-coverage table says, per CLI, which tools the hook sees and which name each CLI gives Derbent's own
-tools (ADR 0006). One process runs per tool call, and for every CLI:
+install page (docs/install.md) shows how each hook is installed with a timeout above
+`approvals.timeout`, and the coverage table in docs/built-in-tools.md says, per CLI, which tools the hook
+sees and which name each CLI gives Derbent's own tools (ADR 0006). One process runs per tool call, and for every CLI:
 
 - A UTF-8 byte order mark at the start of the hook input is skipped. A .NET program that writes the
   input through `Process.StandardInput` sends one when the console input encoding is UTF-8, and the hook
@@ -973,7 +973,7 @@ migrates it inside `BEGIN IMMEDIATE`.
   the test process show that a hook whose context ends while it waits, as on a signal on Unix, withdraws
   its approval, and that a hook whose answer cannot be written returns the error that exits
   with status 2. A store test holds the write lock and opens a current database without waiting for
-  it. The README's coverage table records what a real session showed.
+  it. The coverage table in docs/built-in-tools.md records what a real session showed.
 - **Overhead.** One benchmark calls an echo MCP server directly and through the gate with an allow rule;
   another runs `derbent gate` as a CLI would, with an allowed call, against starting the same binary and
   exiting. Both report p50, p99 and calls per second, compared with `benchstat` over ten runs, on GitHub's
@@ -1011,7 +1011,9 @@ derbent/
 ├── internal/visible/             escaping text before it reaches a terminal
 ├── scripts/release.sh            reproducible release builds
 ├── .github/workflows/            ci, bench and release
-├── docs/adr/  docs/benchmark-results/  docs/design.md  docs/demo.md
+├── docs/adr/  docs/benchmark-results/  docs/assets/diagrams/  docs/design.md  docs/demo.md
+├── docs/*.md                     user docs: install, rules, approvals, built-in tools, servers, receipts,
+│                                 memory and handoffs
 ├── .golangci.yml  go.mod  go.sum
 └── README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md  LICENSE
 ```
