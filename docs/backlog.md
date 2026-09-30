@@ -6,12 +6,14 @@ and a choice someone could reasonably make differently gets an ADR in the change
 
 Updated 2026-10-01: items 2, 3 and 4 are built (the design's Setup and Built-in tools sections, ADRs
 0015 and 0016), and `derbent doctor` times a hook start, as item 1 asks. The rest of item 1 is open.
-Milestone 7, with handoffs and rule suggestions, is built too.
+Milestone 7, with handoffs and rule suggestions, is built too. In setup's exit check `derbent doctor`
+measured 103 ms for the hook start on the machine of item 1; why that differs from item 1's table is not
+known yet.
 
 ## Order
 
-1. Items 1 to 4, before Derbent is announced more widely: without them a new user on a managed Windows
-   machine, or one who never writes a config, meets Derbent at its worst.
+1. Item 1, the one of the first four still open: on a managed Windows machine every built-in call may
+   wait on the scanner.
 2. Items 5, 6, 8 and 10: small changes that close the gaps the Known limits in design.md name.
 3. Items 9 and 15, the two that no single agent CLI can offer.
 4. The rest as they are needed.
@@ -42,8 +44,8 @@ characters) and 15 (a reviewer agent).
 ### 1. Hook latency on managed Windows machines
 
 On one Windows 11 Enterprise machine (10.0.26100) with Microsoft Defender Antivirus real-time protection
-and Microsoft Defender for Endpoint running, every start of a new, unsigned binary of 2.6 MB or more took
-over a second. Each row is 12 to 15 launches after 3 warm-up launches, timed from process start to exit.
+and Microsoft Defender for Endpoint running, every start of a new, unsigned binary of 2.6 MB or more from the
+temp directory took over a second. Each row is 12 to 15 launches after 3 warm-up launches, timed from process start to exit.
 The Go binaries were built with Go 1.27.1 as `go build -trimpath -ldflags="-s -w -buildid="` with CGO off,
 `derbent` from commit 5d66222, and run from the user's temp directory:
 
@@ -73,8 +75,9 @@ Overhead), so CI does not show this.
   `actions/attest-build-provenance`, and measure again. A signed binary no longer matches a rebuild byte
   for byte, so the release has to publish the checksums of the unsigned binaries as well, or the check
   in the README has to strip the signature first.
-- Let `derbent doctor` (item 3) time one hook call on the user's own machine and say when it is slow.
-- Once measured on a second machine, add the finding to Known limits in design.md and to the README.
+- Let `derbent doctor` (item 3) time one hook call on the user's own machine and say when it is slow
+  (built).
+- Add the finding to the README once measured on a second machine; Known limits in design.md has it.
 - If signing does not help: a hook client under 1 MB that asks a running `derbent mcp` over a named pipe.
   It bends ADR 0001 and needs a security design of its own. It is also the one place where a language
   other than Go would earn its keep, since Go's smallest binary is already 1.2 MB.
@@ -86,8 +89,8 @@ Built. What follows is the idea as it was written down.
 `derbent gate` denies input that starts with a UTF-8 byte order mark (U+FEFF), with the reason "unusable
 hook input: invalid character ... looking for beginning of value", the character being the mark itself.
 A .NET Framework program that writes the hook input through `Process.StandardInput` sends one when the
-console input encoding is UTF-8, which is how it was found. Whether any of the four CLIs sends one is not known. The hook fails closed, so this
-is safe, but it would stop every built-in tool. Strip a leading `EF BB BF` before decoding the JSON.
+console input encoding is UTF-8, which is how it was found. Whether any of the four CLIs sends one is
+not known. The hook fails closed, so this is safe, but it would stop every built-in tool. Strip a leading `EF BB BF` before decoding the JSON.
 
 ### 3. `derbent init` and `derbent doctor`
 
@@ -200,7 +203,7 @@ The UI rings the terminal bell when a call starts waiting, which nobody hears wh
 other windows, and an unanswered call is denied at the timeout. A notification from the operating system
 (a Windows toast, macOS Notification Center, libnotify on Linux) naming the agent, the tool and the id
 would reach the user there. It stays on the machine, with no relay and no listener, so it needs none of
-the security design of Later item 4 in design.md; approving still happens in the UI or with
+the security design of Later item 2 in design.md; approving still happens in the UI or with
 `derbent approve`.
 
 ## Rules and receipts
@@ -220,7 +223,8 @@ rules safe:
 ### 14. The head hash kept somewhere else
 
 `derbent verify` catches a rewritten chain, or deleted newest receipts, only against a copy of the head
-hash kept elsewhere (ADR 0004), and today the user keeps that copy. Derbent could write a checkpoint, the
+hash kept elsewhere (ADR 0004), and today the user keeps that copy and checks an export with
+`derbent verify --file <path> --head <hash>` (ADR 0017). Derbent could write a checkpoint, the
 sequence number and the head hash, every so many receipts to a place that is harder to rewrite quietly:
 the Windows event log, syslog, or a git note in a repository the user pushes. `derbent verify` would then
 compare against the latest checkpoint. None of these holds against the user's own account, the limit
@@ -232,7 +236,8 @@ receipts already state.
 
 The user may want one model, such as Claude Opus in the session that plans the work, to look first at
 what the other agents ask to do: Codex asks to push, the reviewer reads the plan and the call, and denies
-it with a reason. No single CLI can do this across vendors, and the gate already holds every call in one
+it with a reason. Handoffs (ADR 0018) already let a `reviewer` agent take work; this item adds held
+calls. No single CLI can do this across vendors, and the gate already holds every call in one
 place.
 
 - A rule opts in with `reviewer = "opus"` on an `ask` rule. The reviewer sees only the calls such rules
@@ -271,7 +276,6 @@ Rewrites were considered on 2026-09-28 and not taken; ADR 0010 stands.
   load its modules on every call, and would need a runtime of the right version on the machine or ship as
   a single-file bundle that is as unsigned as Derbent's binary is today; single-file Python bundles are
   also often flagged by antivirus software. Both bring a larger dependency tree to a tool whose job is to
-  guard others. Most AI projects use these languages because they call models; Derbent calls none, and
-  the layer it works in, processes, stdio, SQLite and a terminal UI, is where the GitHub MCP server and
-  Ollama are written in Go.
+  guard others. Derbent calls no model. Its layer (processes, stdio, SQLite, a terminal UI) is one where
+  Go is common: the GitHub MCP server and Ollama are written in it.
 - The release build is reproducible without cgo (ADR 0008), which a rewrite would have to earn again.
