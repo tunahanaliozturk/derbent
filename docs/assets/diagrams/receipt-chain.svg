@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="960" height="360" rx="12" fill="#FFFFFF"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#0B0F14"/></marker>
+  </defs>
+
+  <g font-size="13" fill="#0B0F14">
+    <rect x="24" y="40" width="250" height="150" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+    <text x="44" y="68" font-size="16" font-weight="600">receipt #1</text>
+    <text x="44" y="94">claude  memory_write</text>
+    <text x="44" y="114">allow rule:3  ok</text>
+    <text x="44" y="134" fill="#5B6470">args (masked), result size and hash</text>
+    <text x="44" y="170" fill="#0F8B8D" font-weight="600">prev_hash: genesis</text>
+
+    <rect x="354" y="40" width="250" height="150" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+    <text x="374" y="68" font-size="16" font-weight="600">receipt #2</text>
+    <text x="374" y="94">claude  native__Bash</text>
+    <text x="374" y="114">allow user:4  gated (you approved)</text>
+    <text x="374" y="134" fill="#5B6470">args (masked), result size and hash</text>
+    <text x="374" y="170" fill="#0F8B8D" font-weight="600">prev_hash: hash of #1</text>
+
+    <rect x="684" y="40" width="250" height="150" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+    <text x="704" y="68" font-size="16" font-weight="600">receipt #3</text>
+    <text x="704" y="94">codex  github__issue_write</text>
+    <text x="704" y="114">deny rule:2  refused</text>
+    <text x="704" y="134" fill="#5B6470">args (masked), result size and hash</text>
+    <text x="704" y="170" fill="#0F8B8D" font-weight="600">prev_hash: hash of #2</text>
+  </g>
+
+  <g stroke="#0F8B8D" stroke-width="2" fill="none">
+    <line x1="274" y1="115" x2="352" y2="115" marker-end="url(#a)"/>
+    <line x1="604" y1="115" x2="682" y2="115" marker-end="url(#a)"/>
+  </g>
+
+  <g stroke="#0B0F14" stroke-width="1.5" fill="none">
+    <line x1="809" y1="190" x2="809" y2="236" marker-end="url(#a)"/>
+    <line x1="480" y1="190" x2="480" y2="236" marker-end="url(#a)"/>
+  </g>
+
+  <rect x="330" y="238" width="300" height="92" rx="8" fill="#0F8B8D"/>
+  <text x="480" y="268" text-anchor="middle" font-size="16" font-weight="600" fill="#FFFFFF">derbent verify</text>
+  <text x="480" y="292" text-anchor="middle" font-size="13" fill="#FFFFFF">recomputes every hash; names the first</text>
+  <text x="480" y="310" text-anchor="middle" font-size="13" fill="#FFFFFF">receipt that was edited, moved or removed</text>
+
+  <rect x="684" y="238" width="250" height="92" rx="8" fill="#0F8B8D"/>
+  <text x="809" y="268" text-anchor="middle" font-size="16" font-weight="600" fill="#FFFFFF">head hash</text>
+  <text x="809" y="292" text-anchor="middle" font-size="13" fill="#FFFFFF">keep it somewhere else; check an</text>
+  <text x="809" y="310" text-anchor="middle" font-size="13" fill="#FFFFFF">export with verify --file --head</text>
+
+  <text x="24" y="276" font-size="13" fill="#5B6470">Edit one receipt and its hash</text>
+  <text x="24" y="294" font-size="13" fill="#5B6470">no longer matches the prev_hash</text>
+  <text x="24" y="312" font-size="13" fill="#5B6470">stored in the next one.</text>
+</svg>

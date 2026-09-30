@@ -48,6 +48,6 @@ the hash was taken over. People also export part of the chain: one agent's calls
   bytes, and a project path that is not UTF-8 can hold them.
 - Windows PowerShell 5.1 re-encodes a native command's output through the console's code page when it
   redirects it, so text outside ASCII can change on its way to the file and fail its line. cmd, Git Bash
-  and PowerShell 7.4 or later keep the bytes, and the README says so.
+  and PowerShell 7.4 or later keep the bytes, and docs/receipts.md says so.
 - The field names are now an interface. A later field the hash covers makes a new export format, which an
   older verify refuses.

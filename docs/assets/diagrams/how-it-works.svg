@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="470" viewBox="0 0 960 470" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="960" height="470" rx="12" fill="#FFFFFF"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0B0F14"/></marker>
+  </defs>
+
+  <!-- Agent CLIs -->
+  <rect x="24" y="40" width="200" height="390" rx="10" fill="none" stroke="#5B6470" stroke-width="1" stroke-dasharray="4 4"/>
+  <text x="124" y="66" text-anchor="middle" font-size="13" fill="#5B6470">your coding agents</text>
+  <g font-size="16" fill="#0B0F14" text-anchor="middle">
+    <rect x="44" y="84" width="160" height="56" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+    <text x="124" y="118">Claude Code</text>
+    <rect x="44" y="164" width="160" height="56" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+    <text x="124" y="198">Codex</text>
+    <rect x="44" y="244" width="160" height="56" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+    <text x="124" y="278">Copilot CLI</text>
+    <rect x="44" y="324" width="160" height="56" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+    <text x="124" y="358">Antigravity CLI</text>
+  </g>
+
+  <!-- Derbent column -->
+  <rect x="330" y="60" width="250" height="76" rx="8" fill="#0F8B8D"/>
+  <text x="455" y="92" text-anchor="middle" font-size="17" font-weight="600" fill="#FFFFFF">derbent mcp</text>
+  <text x="455" y="116" text-anchor="middle" font-size="13" fill="#FFFFFF">MCP tools, memory, handoffs</text>
+
+  <rect x="330" y="200" width="250" height="70" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+  <text x="455" y="230" text-anchor="middle" font-size="16" fill="#0B0F14">derbent.db</text>
+  <text x="455" y="252" text-anchor="middle" font-size="13" fill="#5B6470">SQLite: receipts, approvals, notes</text>
+
+  <rect x="330" y="334" width="250" height="76" rx="8" fill="#0F8B8D"/>
+  <text x="455" y="366" text-anchor="middle" font-size="17" font-weight="600" fill="#FFFFFF">derbent gate</text>
+  <text x="455" y="390" text-anchor="middle" font-size="13" fill="#FFFFFF">pre-tool hook for built-in tools</text>
+
+  <!-- Right column -->
+  <rect x="700" y="60" width="236" height="76" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+  <text x="818" y="92" text-anchor="middle" font-size="16" fill="#0B0F14">your MCP servers</text>
+  <text x="818" y="116" text-anchor="middle" font-size="13" fill="#5B6470">github, docs, ...</text>
+
+  <rect x="700" y="200" width="236" height="70" rx="8" fill="#0F8B8D"/>
+  <text x="818" y="230" text-anchor="middle" font-size="17" font-weight="600" fill="#FFFFFF">derbent</text>
+  <text x="818" y="252" text-anchor="middle" font-size="13" fill="#FFFFFF">terminal UI: approve, watch</text>
+
+  <rect x="700" y="334" width="236" height="76" rx="8" fill="#F5F5F0" stroke="#0B0F14" stroke-width="1.5"/>
+  <text x="818" y="366" text-anchor="middle" font-size="16" fill="#0B0F14">the CLI runs its tool</text>
+  <text x="818" y="390" text-anchor="middle" font-size="13" fill="#5B6470">shell, file edits, ...</text>
+
+  <!-- Arrows -->
+  <g stroke="#0B0F14" stroke-width="1.5" fill="none">
+    <line x1="224" y1="98" x2="328" y2="98" marker-end="url(#a)"/>
+    <line x1="224" y1="372" x2="328" y2="372" marker-end="url(#a)"/>
+    <line x1="580" y1="98" x2="698" y2="98" marker-end="url(#a)"/>
+    <line x1="580" y1="372" x2="698" y2="372" marker-end="url(#a)"/>
+    <line x1="455" y1="136" x2="455" y2="198" marker-end="url(#a)"/>
+    <line x1="455" y1="334" x2="455" y2="272" marker-end="url(#a)"/>
+    <line x1="582" y1="235" x2="698" y2="235" marker-start="url(#a)" marker-end="url(#a)"/>
+  </g>
+  <g font-size="13" fill="#0B0F14" text-anchor="middle">
+    <text x="276" y="88">MCP calls</text>
+    <text x="276" y="344">built-in</text>
+    <text x="276" y="362">tool calls</text>
+    <text x="639" y="88">allowed calls</text>
+    <text x="639" y="362">allow or deny</text>
+    <text x="639" y="225">approvals</text>
+    <text x="470" y="172" text-anchor="start">receipt</text>
+    <text x="470" y="306" text-anchor="start">receipt</text>
+  </g>
+</svg>
