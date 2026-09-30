@@ -226,7 +226,7 @@ result, the duration, the previous receipt's hash, and this receipt's hash.
   are not in the file yet. SQLite may add its `-shm` index beside them, and beside a copy that has no
   `-wal` an empty `-wal` as well; both stay after the command exits. A file with tables but no Derbent
   schema version is another program's: every command given it refuses it and leaves it as it was,
-  `derbent mcp` and `derbent gate` included, which check it read-only before they write anything.
+  `derbent mcp` and `derbent gate` included, which check it before they write anything.
 - `derbent verify` opens the database read-only, never creates or migrates it, walks the chain and
   names the first sequence number whose hash, predecessor or position is wrong. It prints the head
   hash, and checks an export without the database with `--file` (see below). Someone able to write the

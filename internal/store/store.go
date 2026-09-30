@@ -12,8 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	_ "modernc.org/sqlite" // registers the "sqlite" driver
+	"modernc.org/sqlite" // also registers the "sqlite" driver
 )
 
 //go:embed migrations/*.sql
@@ -21,14 +22,29 @@ var migrations embed.FS
 
 // Open opens the database at path, creating it and its directory if needed, and applies any
 // migrations it has not seen. The per-connection pragmas are set in the DSN so that every pooled
-// connection gets them. Before anything writes, the file is checked as OpenExisting checks it, so another
-// program's SQLite file, or a schema newer than this binary knows, is refused before the WAL pragma or a
-// migration writes to it. Opening a current database takes no write lock.
+// connection gets them. Another program's SQLite file, or a schema newer than this binary knows, is
+// refused before the WAL pragma or a migration writes to it. Opening a current database takes no write
+// lock.
 //
-// The check runs on the read-write connection rather than on a separate read-only open: a read-only
-// open of a WAL database whose last writer has closed retries with short sleeps, which cost 10 ms of a
-// 17 ms hook call on Windows, and every hook call opens the database afresh.
+// A file with a -wal or -journal beside it is checked on a read-only open first, as OpenExisting checks
+// it: a read-write connection would fold that log into another program's file (a checkpoint when it
+// closes, or the rollback of a hot journal) before the check could refuse it. Any other file is checked
+// on the read-write connection, which reads it and writes nothing until the check has passed. That
+// matters for the hook, which opens the database afresh on every call: a read-only open of a WAL
+// database whose last writer has closed retries with short sleeps, which cost 10 ms of a 17 ms hook call
+// on Windows.
+// ponytail: a program that creates a -wal or -journal between the Stat and the open is not probed; that
+// takes a --db pointed at another program's file while that program writes it.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
+	if hasLog(path) {
+		probe, err := OpenExisting(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		if err = probe.Close(); err != nil {
+			return nil, fmt.Errorf("open database %s: %w", path, err)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
@@ -55,8 +71,23 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// hasLog reports whether a -wal or -journal file sits beside the database at path.
+func hasLog(path string) bool {
+	for _, suffix := range []string{"-wal", "-journal"} {
+		if _, err := os.Stat(path + suffix); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// walRetry is how long useWAL waits between tries while another connection holds the lock it needs.
+const walRetry = 10 * time.Millisecond
+
 // useWAL switches the database to write-ahead logging unless it is in it already, which it is after its
-// first open, so a current database is only read here.
+// first open, so a current database is only read here. Switching needs an exclusive lock and SQLite
+// does not wait for it under busy_timeout, so when several processes open a new database at once the
+// switch is tried again every walRetry until it holds or ctx or walWait runs out.
 func useWAL(ctx context.Context, db *sql.DB) error {
 	var mode string
 	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil {
@@ -65,13 +96,37 @@ func useWAL(ctx context.Context, db *sql.DB) error {
 	if strings.EqualFold(mode, "wal") {
 		return nil
 	}
-	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&mode); err != nil {
-		return fmt.Errorf("set journal mode: %w", err)
+	deadline := time.Now().Add(walWait)
+	for {
+		err := db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&mode)
+		if err == nil {
+			break
+		}
+		if !busy(err) || time.Now().After(deadline) {
+			return fmt.Errorf("set journal mode: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("set journal mode: %w", errors.Join(err, ctx.Err()))
+		case <-time.After(walRetry):
+		}
 	}
 	if !strings.EqualFold(mode, "wal") {
 		return fmt.Errorf("set journal mode: SQLite kept %q instead of wal", mode)
 	}
 	return nil
+}
+
+// walWait bounds useWAL's retries, as busy_timeout bounds every other wait for a lock.
+const walWait = 30 * time.Second
+
+// sqliteBusy is SQLite's primary result code SQLITE_BUSY; extended codes keep it in their low byte.
+const sqliteBusy = 5
+
+// busy reports whether err is SQLite's "database is locked".
+func busy(err error) bool {
+	var se *sqlite.Error
+	return errors.As(err, &se) && se.Code()&0xff == sqliteBusy
 }
 
 // OpenExistingWritable opens the database at path as Open does, migrating it if needed, but never
