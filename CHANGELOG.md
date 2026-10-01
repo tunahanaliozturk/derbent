@@ -6,6 +6,8 @@ Notable changes to Derbent, newest first. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-02
+
 The first release.
 
 ### Added
@@ -143,4 +145,5 @@ The first release.
   agents, tools and files before it reaches your terminal, and a suggested rule's strings are quoted so
   that they cannot end early.
 
+[Unreleased]: https://github.com/tunahanaliozturk/derbent/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/tunahanaliozturk/derbent/releases/tag/v1.0.0
