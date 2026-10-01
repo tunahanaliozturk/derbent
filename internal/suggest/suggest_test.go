@@ -193,6 +193,9 @@ func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
 		// cmd.exe ends a program's name at / , or =, so each of these runs cmd or PowerShell.
 		"cmd/c dir", "cmd,/c dir", "cmd=/c dir", "powershell/c dir", `C:\Windows\System32\cmd.exe/c dir`,
 		"FOO=1 cmd/c dir", "cmd=/c dir x y",
+		// cmd.exe also drops any @ , or = before the program's name.
+		"@cmd /c dir", "@cmd/c dir", "@@cmd /c dir", ",cmd /c dir", "=cmd /c dir", ",cmd/c dir",
+		"@powershell -c x", "@python a.py",
 		"go env", "go 'bash'", `go "node"`,
 		// The brief's spellings.
 		"/bin/sh -c", "FOO=1 sh -c", `C:\Windows\System32\cmd.exe /c`, "nice sudo sh -c",

@@ -245,14 +245,19 @@ func refused(p string) bool {
 	return (len(words) > 0 && cmdLauncher(words[0])) || len(words) < 2
 }
 
-// cmdLauncher reports whether cmd.exe, which ends a program's name at the first / , or =, reads word as a
-// launcher: cmd/c, cmd,/c and cmd=/c all run cmd with /c. Only a command's first word names its program,
-// so a later word, such as the path in go vet cmd/derbent, is left to program.
+// cmdLauncher reports whether cmd.exe, which drops any @ , or = before a program's name and ends the name
+// at the first / , or =, reads word as a launcher: cmd/c, cmd,/c, cmd=/c and @cmd all run cmd. Only a
+// command's first word names its program, so a later word, such as the path in go vet cmd/derbent, is
+// left to program. A word such as script/test or env/bin/pytest is refused too, since cmd.exe would run
+// script or env for it; refusing is the safe side, and the owner can still write that rule by hand.
 func cmdLauncher(word string) bool {
-	w := strings.TrimPrefix(strings.Trim(word, `"'`), `\`)
+	w := strings.TrimLeft(strings.TrimPrefix(strings.Trim(word, `"'`), `\`), "@,=")
 	i := strings.IndexAny(w, "/,=")
-	if i <= 0 {
-		return false // no such character, or a Unix path from the root, which program reads
+	if i < 0 {
+		i = len(w)
+	}
+	if i == 0 {
+		return false // nothing left, or a Unix path from the root, which program reads
 	}
 	name := base(w[strings.LastIndex(w[:i], `\`)+1 : i])
 	return name != "." && slices.Contains(launchers[:], name)
