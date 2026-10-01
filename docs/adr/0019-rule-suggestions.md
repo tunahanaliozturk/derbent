@@ -48,9 +48,10 @@ rule that lets far more through than the user ever looked at, a shell most of al
     first word is also read as cmd.exe reads it, without any `@`, `,` or `=` before it and up to the first
     `/`, `,` or `=`, so `cmd/c` and `@cmd` count (and so does `script/test`, a safe false refusal);
   - has a word that could name any program: one that still holds `$` or `%` (a variable), a backtick, a
-    quote inside it, `[` (a glob), `{` (a brace expansion), `^` (cmd's escape), `~` before a digit (a
-    Windows 8.3 short name such as `POWERS~1.EXE`), or one of the curly quotes U+2018 to U+201E, which
-    PowerShell reads as quotes even inside a command name.
+    quote inside it, `[` (a glob), `{` (a brace expansion), `^` (cmd's escape), `~` before a digit in
+    the program's own word (a Windows 8.3 short name such as `POWERS~1.EXE`; a later `HEAD~1` is fine),
+    or one of the curly quotes U+2018 to U+201E, which PowerShell reads as quotes even inside a command
+    name.
 - A shell's `allow` for a start comes after an `ask` for the same agent and tool for each operator:
   `<start>*;*`, `<start>*&*` and so on. `*` matches any run of characters, line breaks included, so each ask
   catches its operator anywhere after the start, and a command that starts as approved but chains, pipes,
