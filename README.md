@@ -172,8 +172,8 @@ The gate adds 499.5 µs to an MCP call on Linux and 616.0 µs on Windows, for th
 decision, the project rules check and the receipt written to SQLite. A hook call costs about 2.1 ms more
 than starting the binary on Linux and 24 ms more on Windows, where most of its cost is the process start.
 The numbers come from one run on shared runners, and runs differ by more than one run's intervals: the
-day before, the same code on the same Windows CPU model put the hook 33.5 ms over the start. The results
-page has p99, calls per second and the caveats.
+day before, the same code on the same Windows CPU model put the gate 459.5 µs over a direct MCP call,
+against 616.0 µs here. The results page has p99, calls per second and the caveats.
 
 ## Limits
 
