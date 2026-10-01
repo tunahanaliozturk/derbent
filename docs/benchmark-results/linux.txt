@@ -1,40 +1,40 @@
-runner-image: ubuntu24 20260920.314.1
+runner-image: ubuntu24 20260927.320.1
 goos: linux
 goarch: amd64
 pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
-cpu: AMD EPYC 7763 64-Core Processor                
-       │   direct    │                 gate                 │
-       │   sec/op    │   sec/op     vs base                 │
-Echo-4   351.1µ ± 1%   901.2µ ± 2%  +156.67% (p=0.000 n=10)
+cpu: AMD EPYC 9V45 96-Core Processor                
+       │   direct    │                 gate                  │
+       │   sec/op    │    sec/op     vs base                 │
+Echo-4   170.9µ ± 3%   749.9µ ± 94%  +338.83% (p=0.000 n=10)
 
-       │   direct    │                gate                 │
-       │   calls/s   │   calls/s    vs base                │
-Echo-4   2.848k ± 1%   1.109k ± 2%  -61.04% (p=0.000 n=10)
+       │   direct    │                 gate                 │
+       │   calls/s   │   calls/s     vs base                │
+Echo-4   5.851k ± 3%   1.336k ± 48%  -77.17% (p=0.000 n=10)
 
        │   direct   │                gate                 │
        │   p50-us   │   p50-us    vs base                 │
-Echo-4   304.5 ± 1%   825.5 ± 1%  +171.10% (p=0.000 n=10)
+Echo-4   144.0 ± 3%   470.0 ± 2%  +226.39% (p=0.000 n=10)
 
-       │   direct   │                 gate                 │
-       │   p99-us   │   p99-us     vs base                 │
-Echo-4   731.0 ± 4%   1565.5 ± 3%  +114.16% (p=0.000 n=10)
-runner-image: ubuntu24 20260920.314.1
+       │   direct   │                 gate                  │
+       │   p99-us   │    p99-us     vs base                 │
+Echo-4   413.5 ± 8%   1317.0 ± 20%  +218.50% (p=0.000 n=10)
+runner-image: ubuntu24 20260927.320.1
 goos: linux
 goarch: amd64
 pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
-cpu: AMD EPYC 7763 64-Core Processor                
-       │    spawn    │                hook                 │
-       │   sec/op    │   sec/op     vs base                │
-Hook-4   4.330m ± 1%   7.467m ± 1%  +72.44% (p=0.000 n=10)
-
-       │   spawn    │                hook                │
-       │  calls/s   │  calls/s    vs base                │
-Hook-4   230.9 ± 1%   133.9 ± 1%  -42.00% (p=0.000 n=10)
+cpu: AMD EPYC 9V45 96-Core Processor                
+       │    spawn    │                  hook                  │
+       │   sec/op    │    sec/op      vs base                 │
+Hook-4   3.342m ± 5%   19.542m ± 39%  +484.79% (p=0.000 n=10)
 
        │    spawn    │                hook                 │
-       │   p50-us    │   p50-us     vs base                │
-Hook-4   4.316k ± 1%   7.381k ± 2%  +71.03% (p=0.000 n=10)
+       │   calls/s   │   calls/s    vs base                │
+Hook-4   299.25 ± 5%   51.23 ± 54%  -82.88% (p=0.000 n=10)
 
-       │    spawn    │                 hook                  │
-       │   p99-us    │    p99-us     vs base                 │
-Hook-4   4.815k ± 1%   10.678k ± 6%  +121.77% (p=0.000 n=10)
+       │    spawn    │                 hook                 │
+       │   p50-us    │   p50-us     vs base                 │
+Hook-4   3.263k ± 4%   6.766k ± 7%  +107.37% (p=0.000 n=10)
+
+       │    spawn     │                   hook                   │
+       │    p99-us    │     p99-us      vs base                  │
+Hook-4   4.030k ± 12%   204.259k ± 62%  +4968.46% (p=0.000 n=10)

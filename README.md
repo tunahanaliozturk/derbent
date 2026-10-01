@@ -157,20 +157,22 @@ checked without the database.
 
 ## Overhead
 
-Measured on GitHub's hosted runners (AMD EPYC 7763, 4 vCPUs) on 2026-09-27, median of ten runs at p50,
+Measured on GitHub's hosted runners (AMD EPYC 9V45, 4 vCPUs) on 2026-10-01, median of ten runs at p50,
 from [docs/benchmark-results](docs/benchmark-results/README.md):
 
 | | Linux | Windows |
 |---|---|---|
-| MCP tool call, direct to the server | 304.5 µs | 353.0 µs |
-| MCP tool call, through the gate | 825.5 µs | 1033.0 µs |
-| Starting the binary and exiting | 4.316 ms | 46.91 ms |
-| Hook call, `derbent gate`, allowed | 7.381 ms | 83.03 ms |
+| MCP tool call, direct to the server | 144.0 µs | 146.5 µs |
+| MCP tool call, through the gate | 470.0 µs | 474.0 µs |
+| Starting the binary and exiting | 3.263 ms | 25.07 ms |
+| Hook call, `derbent gate`, allowed | 6.766 ms | 44.29 ms |
 
-The gate adds 521 µs to an MCP call on Linux and 680 µs on Windows, for the extra stdio hop, the rule
-decision, the project rules check and the receipt written to SQLite. A hook call costs about 3 ms more
-than starting the binary on Linux and 36 ms more on Windows, where most of its cost is the process start. The numbers come
-from one run on shared runners; the results page has p99, calls per second and the caveats.
+The gate adds 326.0 µs to an MCP call on Linux and 327.5 µs on Windows, for the extra stdio hop, the rule
+decision, the project rules check and the receipt written to SQLite. A hook call costs about 3.5 ms more
+than starting the binary on Linux and 19 ms more on Windows, where most of its cost is the process start.
+The numbers come from one run on shared runners, and a run of the same code on another runner the day
+before put the Windows hook 33.5 ms over the start. In this run the Linux hook's p99 was between 56 and
+248 ms, which the p50 hides; the results page has p99, calls per second and the caveats.
 
 ## Limits
 

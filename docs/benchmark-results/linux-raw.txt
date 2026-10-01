@@ -1,53 +1,53 @@
-runner-image: ubuntu24 20260920.314.1
+runner-image: ubuntu24 20260927.320.1
 goos: linux
 goarch: amd64
 pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
-cpu: AMD EPYC 7763 64-Core Processor                
-BenchmarkEcho/path=direct-4         	    2000	    352407 ns/op	      2838 calls/s	       308.0 p50-us	       715.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    352152 ns/op	      2840 calls/s	       308.0 p50-us	       712.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    351129 ns/op	      2848 calls/s	       302.0 p50-us	       751.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    351071 ns/op	      2848 calls/s	       304.0 p50-us	       727.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    349235 ns/op	      2863 calls/s	       306.0 p50-us	       705.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    351394 ns/op	      2846 calls/s	       305.0 p50-us	       758.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    348332 ns/op	      2871 calls/s	       303.0 p50-us	       693.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    350203 ns/op	      2855 calls/s	       304.0 p50-us	       747.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    352434 ns/op	      2837 calls/s	       306.0 p50-us	       736.0 p99-us
-BenchmarkEcho/path=direct-4         	    2000	    347212 ns/op	      2880 calls/s	       304.0 p50-us	       735.0 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    902615 ns/op	      1108 calls/s	       825.0 p50-us	      1558 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    947998 ns/op	      1055 calls/s	       845.0 p50-us	      2124 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    903768 ns/op	      1106 calls/s	       828.0 p50-us	      1544 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    895072 ns/op	      1117 calls/s	       818.0 p50-us	      1508 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    897227 ns/op	      1115 calls/s	       816.0 p50-us	      1529 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    895180 ns/op	      1117 calls/s	       817.0 p50-us	      1573 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    907015 ns/op	      1103 calls/s	       833.0 p50-us	      1575 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    920154 ns/op	      1087 calls/s	       837.0 p50-us	      1603 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    899434 ns/op	      1112 calls/s	       826.0 p50-us	      1616 p99-us
-BenchmarkEcho/path=gate-4           	    2000	    899732 ns/op	      1111 calls/s	       821.0 p50-us	      1523 p99-us
+cpu: AMD EPYC 9V45 96-Core Processor                
+BenchmarkEcho/path=direct-4         	    2000	    174582 ns/op	      5728 calls/s	       145.0 p50-us	       433.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    164155 ns/op	      6092 calls/s	       137.0 p50-us	       403.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    173602 ns/op	      5760 calls/s	       142.0 p50-us	       447.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    179966 ns/op	      5557 calls/s	       148.0 p50-us	       567.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    169912 ns/op	      5885 calls/s	       144.0 p50-us	       395.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    168230 ns/op	      5944 calls/s	       144.0 p50-us	       385.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    166229 ns/op	      6016 calls/s	       140.0 p50-us	       419.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    173482 ns/op	      5764 calls/s	       147.0 p50-us	       419.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    166782 ns/op	      5996 calls/s	       141.0 p50-us	       378.0 p99-us
+BenchmarkEcho/path=direct-4         	    2000	    171876 ns/op	      5818 calls/s	       144.0 p50-us	       408.0 p99-us
+BenchmarkEcho/path=gate-4           	    2000	   1452383 ns/op	       688.5 calls/s	       462.0 p50-us	      1922 p99-us
+BenchmarkEcho/path=gate-4           	    2000	   1730358 ns/op	       577.9 calls/s	       488.0 p50-us	      1383 p99-us
+BenchmarkEcho/path=gate-4           	    2000	    780735 ns/op	      1281 calls/s	       477.0 p50-us	      1138 p99-us
+BenchmarkEcho/path=gate-4           	    2000	    719126 ns/op	      1391 calls/s	       473.0 p50-us	      1140 p99-us
+BenchmarkEcho/path=gate-4           	    2000	    632608 ns/op	      1581 calls/s	       480.0 p50-us	      1574 p99-us
+BenchmarkEcho/path=gate-4           	    2000	    699515 ns/op	      1430 calls/s	       467.0 p50-us	      1127 p99-us
+BenchmarkEcho/path=gate-4           	    2000	    619994 ns/op	      1613 calls/s	       463.0 p50-us	      1318 p99-us
+BenchmarkEcho/path=gate-4           	    2000	    620839 ns/op	      1611 calls/s	       466.0 p50-us	      1050 p99-us
+BenchmarkEcho/path=gate-4           	    2000	   1352614 ns/op	       739.3 calls/s	       474.0 p50-us	      1411 p99-us
+BenchmarkEcho/path=gate-4           	    2000	   1215046 ns/op	       823.0 calls/s	       455.0 p50-us	      1316 p99-us
 PASS
-ok  	github.com/tunahanaliozturk/derbent/cmd/derbent	25.810s
+ok  	github.com/tunahanaliozturk/derbent/cmd/derbent	24.754s
 goos: linux
 goarch: amd64
 pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
-cpu: AMD EPYC 7763 64-Core Processor                
-BenchmarkHook/call=spawn-4         	     200	   4264603 ns/op	       234.5 calls/s	      4246 p50-us	      4702 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4328866 ns/op	       231.0 calls/s	      4313 p50-us	      4823 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4340220 ns/op	       230.4 calls/s	      4310 p50-us	      5974 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4332951 ns/op	       230.8 calls/s	      4330 p50-us	      4802 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4337345 ns/op	       230.6 calls/s	      4340 p50-us	      4789 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4339551 ns/op	       230.4 calls/s	      4341 p50-us	      4840 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4309337 ns/op	       232.1 calls/s	      4297 p50-us	      4855 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4331239 ns/op	       230.9 calls/s	      4325 p50-us	      4811 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4300627 ns/op	       232.5 calls/s	      4292 p50-us	      4804 p99-us
-BenchmarkHook/call=spawn-4         	     200	   4323733 ns/op	       231.3 calls/s	      4319 p50-us	      4819 p99-us
-BenchmarkHook/call=hook-4          	     200	   7603339 ns/op	       131.5 calls/s	      7532 p50-us	     10716 p99-us
-BenchmarkHook/call=hook-4          	     200	   7533910 ns/op	       132.7 calls/s	      7427 p50-us	     10867 p99-us
-BenchmarkHook/call=hook-4          	     200	   7502247 ns/op	       133.3 calls/s	      7416 p50-us	     10504 p99-us
-BenchmarkHook/call=hook-4          	     200	   7548262 ns/op	       132.5 calls/s	      7401 p50-us	     10860 p99-us
-BenchmarkHook/call=hook-4          	     200	   7512855 ns/op	       133.1 calls/s	      7429 p50-us	     10640 p99-us
-BenchmarkHook/call=hook-4          	     200	   7402075 ns/op	       135.1 calls/s	      7362 p50-us	      9404 p99-us
-BenchmarkHook/call=hook-4          	     200	   7431265 ns/op	       134.6 calls/s	      7262 p50-us	     12625 p99-us
-BenchmarkHook/call=hook-4          	     200	   7359650 ns/op	       135.9 calls/s	      7243 p50-us	     11268 p99-us
-BenchmarkHook/call=hook-4          	     200	   7387300 ns/op	       135.4 calls/s	      7225 p50-us	     10549 p99-us
-BenchmarkHook/call=hook-4          	     200	   7382124 ns/op	       135.5 calls/s	      7283 p50-us	     10493 p99-us
+cpu: AMD EPYC 9V45 96-Core Processor                
+BenchmarkHook/call=spawn-4         	     200	   3324016 ns/op	       300.8 calls/s	      3318 p50-us	      3935 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3173772 ns/op	       315.1 calls/s	      3164 p50-us	      3597 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3397875 ns/op	       294.3 calls/s	      3264 p50-us	      4528 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3194801 ns/op	       313.0 calls/s	      3174 p50-us	      3788 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3114405 ns/op	       321.1 calls/s	      3101 p50-us	      3484 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3359518 ns/op	       297.7 calls/s	      3262 p50-us	      8458 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3403563 ns/op	       293.8 calls/s	      3380 p50-us	      4320 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3462077 ns/op	       288.8 calls/s	      3406 p50-us	      4330 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3415558 ns/op	       292.8 calls/s	      3389 p50-us	      4112 p99-us
+BenchmarkHook/call=spawn-4         	     200	   3244833 ns/op	       308.2 calls/s	      3218 p50-us	      3948 p99-us
+BenchmarkHook/call=hook-4          	     200	  20399150 ns/op	        49.02 calls/s	      6697 p50-us	    248109 p99-us
+BenchmarkHook/call=hook-4          	     200	  12638267 ns/op	        79.12 calls/s	      6643 p50-us	     77415 p99-us
+BenchmarkHook/call=hook-4          	     200	  20228837 ns/op	        49.43 calls/s	      7216 p50-us	    224648 p99-us
+BenchmarkHook/call=hook-4          	     200	  15768590 ns/op	        63.42 calls/s	      6798 p50-us	    108970 p99-us
+BenchmarkHook/call=hook-4          	     200	  18856122 ns/op	        53.03 calls/s	      6685 p50-us	    210797 p99-us
+BenchmarkHook/call=hook-4          	     200	  10262154 ns/op	        97.45 calls/s	      6583 p50-us	     56353 p99-us
+BenchmarkHook/call=hook-4          	     200	  27076504 ns/op	        36.93 calls/s	      7114 p50-us	    245249 p99-us
+BenchmarkHook/call=hook-4          	     200	  27137554 ns/op	        36.85 calls/s	      8192 p50-us	    197721 p99-us
+BenchmarkHook/call=hook-4          	     200	  16357174 ns/op	        61.14 calls/s	      6735 p50-us	    170762 p99-us
+BenchmarkHook/call=hook-4          	     200	  27199496 ns/op	        36.77 calls/s	      7056 p50-us	    227796 p99-us
 PASS
-ok  	github.com/tunahanaliozturk/derbent/cmd/derbent	24.221s
+ok  	github.com/tunahanaliozturk/derbent/cmd/derbent	48.639s
