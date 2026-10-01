@@ -157,22 +157,23 @@ checked without the database.
 
 ## Overhead
 
-Measured on GitHub's hosted runners (AMD EPYC 9V45, 4 vCPUs) on 2026-10-01, median of ten runs at p50,
-from [docs/benchmark-results](docs/benchmark-results/README.md):
+Measured on GitHub's hosted runners on 2026-10-01 (Linux on an Intel Xeon Platinum 8370C, Windows on an
+AMD EPYC 9V74, 4 vCPUs each), median of ten runs at p50, from
+[docs/benchmark-results](docs/benchmark-results/README.md):
 
 | | Linux | Windows |
 |---|---|---|
-| MCP tool call, direct to the server | 144.0 µs | 146.5 µs |
-| MCP tool call, through the gate | 470.0 µs | 474.0 µs |
-| Starting the binary and exiting | 3.263 ms | 25.07 ms |
-| Hook call, `derbent gate`, allowed | 6.766 ms | 44.29 ms |
+| MCP tool call, direct to the server | 256.5 µs | 293.0 µs |
+| MCP tool call, through the gate | 756.0 µs | 909.0 µs |
+| Starting the binary and exiting | 4.292 ms | 40.40 ms |
+| Hook call, `derbent gate`, allowed | 6.421 ms | 64.51 ms |
 
-The gate adds 326.0 µs to an MCP call on Linux and 327.5 µs on Windows, for the extra stdio hop, the rule
-decision, the project rules check and the receipt written to SQLite. A hook call costs about 3.5 ms more
-than starting the binary on Linux and 19 ms more on Windows, where most of its cost is the process start.
-The numbers come from one run on shared runners, and a run of the same code on another runner the day
-before put the Windows hook 33.5 ms over the start. In this run the Linux hook's p99 was between 56 and
-248 ms, which the p50 hides; the results page has p99, calls per second and the caveats.
+The gate adds 499.5 µs to an MCP call on Linux and 616.0 µs on Windows, for the extra stdio hop, the rule
+decision, the project rules check and the receipt written to SQLite. A hook call costs about 2.1 ms more
+than starting the binary on Linux and 24 ms more on Windows, where most of its cost is the process start.
+The numbers come from one run on shared runners, and runs differ by more than one run's intervals: the
+day before, the same code on the same Windows CPU model put the hook 33.5 ms over the start. The results
+page has p99, calls per second and the caveats.
 
 ## Limits
 

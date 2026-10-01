@@ -2,39 +2,39 @@ runner-image: ubuntu24 20260927.320.1
 goos: linux
 goarch: amd64
 pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
-cpu: AMD EPYC 9V45 96-Core Processor                
-       │   direct    │                 gate                  │
-       │   sec/op    │    sec/op     vs base                 │
-Echo-4   170.9µ ± 3%   749.9µ ± 94%  +338.83% (p=0.000 n=10)
-
+cpu: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
        │   direct    │                 gate                 │
-       │   calls/s   │   calls/s     vs base                │
-Echo-4   5.851k ± 3%   1.336k ± 48%  -77.17% (p=0.000 n=10)
+       │   sec/op    │   sec/op     vs base                 │
+Echo-4   302.4µ ± 3%   816.6µ ± 3%  +170.04% (p=0.000 n=10)
+
+       │   direct    │                gate                 │
+       │   calls/s   │   calls/s    vs base                │
+Echo-4   3.307k ± 2%   1.224k ± 3%  -62.97% (p=0.000 n=10)
 
        │   direct   │                gate                 │
        │   p50-us   │   p50-us    vs base                 │
-Echo-4   144.0 ± 3%   470.0 ± 2%  +226.39% (p=0.000 n=10)
+Echo-4   256.5 ± 4%   756.0 ± 2%  +194.74% (p=0.000 n=10)
 
-       │   direct   │                 gate                  │
-       │   p99-us   │    p99-us     vs base                 │
-Echo-4   413.5 ± 8%   1317.0 ± 20%  +218.50% (p=0.000 n=10)
+       │   direct   │                 gate                 │
+       │   p99-us   │   p99-us     vs base                 │
+Echo-4   632.0 ± 6%   1522.5 ± 7%  +140.90% (p=0.000 n=10)
 runner-image: ubuntu24 20260927.320.1
 goos: linux
 goarch: amd64
 pkg: github.com/tunahanaliozturk/derbent/cmd/derbent
-cpu: AMD EPYC 9V45 96-Core Processor                
-       │    spawn    │                  hook                  │
-       │   sec/op    │    sec/op      vs base                 │
-Hook-4   3.342m ± 5%   19.542m ± 39%  +484.79% (p=0.000 n=10)
+cpu: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+       │    spawn    │                hook                 │
+       │   sec/op    │   sec/op     vs base                │
+Hook-4   4.340m ± 3%   6.510m ± 2%  +50.00% (p=0.000 n=10)
+
+       │   spawn    │                hook                │
+       │  calls/s   │  calls/s    vs base                │
+Hook-4   230.4 ± 3%   153.6 ± 2%  -33.33% (p=0.000 n=10)
 
        │    spawn    │                hook                 │
-       │   calls/s   │   calls/s    vs base                │
-Hook-4   299.25 ± 5%   51.23 ± 54%  -82.88% (p=0.000 n=10)
+       │   p50-us    │   p50-us     vs base                │
+Hook-4   4.292k ± 4%   6.421k ± 1%  +49.62% (p=0.000 n=10)
 
-       │    spawn    │                 hook                 │
-       │   p50-us    │   p50-us     vs base                 │
-Hook-4   3.263k ± 4%   6.766k ± 7%  +107.37% (p=0.000 n=10)
-
-       │    spawn     │                   hook                   │
-       │    p99-us    │     p99-us      vs base                  │
-Hook-4   4.030k ± 12%   204.259k ± 62%  +4968.46% (p=0.000 n=10)
+       │    spawn     │                 hook                 │
+       │    p99-us    │    p99-us     vs base                │
+Hook-4   5.357k ± 18%   7.895k ± 29%  +47.36% (p=0.000 n=10)
