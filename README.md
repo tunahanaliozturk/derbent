@@ -195,7 +195,8 @@ The ones to know first:
   open handoff addressed to `*`.
 - Approvals depend on you watching. Unattended, `ask` means denied after the timeout.
 - Pins trust the first definition they see, including a new tool that an update adds to a pinned server,
-  so name the tools you allow for a server whose updates you do not review. A budget can be passed by the calls in flight at the same moment.
+  so name the tools you allow for a server whose updates you do not review.
+- A budget can be passed by the calls in flight at the same moment.
 - CI runs the tests on Windows and Linux and only builds on macOS.
 
 ## Docs
