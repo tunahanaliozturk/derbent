@@ -1218,7 +1218,7 @@ Ideas found after this list, with the measurements behind them, are in [backlog.
 - The project rules file is kept by size and modification time. An edit that keeps both, which only a
   file system with a coarse clock allows within one tick, is not seen until the file changes again.
 - Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call
-  took 44.29 ms at p50, 25.07 ms of it for starting the binary; on Linux, 6.766 ms
+  took 64.51 ms at p50, 40.40 ms of it for starting the binary; on Linux, 6.421 ms
   (`docs/benchmark-results/`).
 - An endpoint scanner may slow the start of an unsigned binary. One measurement on a managed Windows 11
   machine with Microsoft Defender for Endpoint put `derbent version` (15 MB, unsigned, run from the temp

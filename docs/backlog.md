@@ -67,7 +67,7 @@ and a signed one of 99 MB starts in about 50 ms. The p90 near 11 seconds looks l
 running into its timeout, 10 seconds by default; that is a guess and has not been checked.
 
 The hook starts one process per built-in tool call, so on such a machine every shell command and file
-edit can wait between 1.4 and 11 seconds. GitHub's Windows runner took 25.07 ms for the same start (README,
+edit can wait between 1.4 and 11 seconds. GitHub's Windows runner took 40.40 ms for the same start (README,
 Overhead), so CI does not show this.
 
 - Run the same measurement on a Windows machine with only the default Defender, to learn whether managed
@@ -270,7 +270,7 @@ Rewrites were considered on 2026-09-28 and not taken; ADR 0010 stands.
 
 - **Rust.** The one cost that looked like Go's, the Windows hook start, is the scanner (item 1). A Rust
   hook with SQLite, TOML and regular expressions would likely still be larger than 1.2 MB, the largest
-  unsigned size measured without the cost. On Linux the hook adds about 3.5 ms to starting the binary
+  unsigned size measured without the cost. On Linux the hook adds about 2 ms to starting the binary
   (README, Overhead). Go is memory safe, and the parts that decide safety are rules and fail-closed paths
   that a rewrite would have to prove again.
 - **TypeScript and Python.** A signed interpreter starts fast on the managed machine (item 1), but that is
