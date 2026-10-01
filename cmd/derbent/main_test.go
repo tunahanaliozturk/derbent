@@ -161,8 +161,9 @@ func gateCommand(t testing.TB, dir, agent, configPath string) *exec.Cmd {
 
 func connectProcess(t *testing.T, dir, agent, configPath string) *mcp.ClientSession {
 	t.Helper()
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "0"}, nil).
-		Connect(t.Context(), &mcp.CommandTransport{Command: gateCommand(t, dir, agent, configPath)}, nil)
+	// A busy Windows runner has taken more than the default 5 s to checkpoint and delete the -wal at exit.
+	transport := &mcp.CommandTransport{Command: gateCommand(t, dir, agent, configPath), TerminateDuration: 15 * time.Second}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "0"}, nil).Connect(t.Context(), transport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
