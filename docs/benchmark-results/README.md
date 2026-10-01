@@ -1,11 +1,11 @@
 # Benchmark results
 
-These files hold what Derbent's gate costs per call, measured on GitHub's hosted Linux and Windows runners on 2026-09-27 (23:46 UTC), after milestone 6.
+These files hold what Derbent's gate costs per call, measured on GitHub's hosted Linux and Windows runners on 2026-10-01 (19:43 UTC), on the commit the v1.0.0 release is cut from.
 
-- Run: https://github.com/tunahanaliozturk/derbent/actions/runs/36359801469 (the `bench` workflow, `.github/workflows/bench.yml`, on the branch `m6/final-fixes`)
-- Commit measured: `0d5daa9bd432bfc6b81157d8249c61ddbd287331`
-- Linux: GitHub-hosted `ubuntu-latest`, which the run log names as image `ubuntu-24.04`, version `20260920.314.1`, on an AMD EPYC 7763 with 4 vCPUs
-- Windows: GitHub-hosted `windows-latest`, which the run log names as image `windows-2025-vs2026`, version `20260922.246.2`, on an AMD EPYC 7763 with 4 vCPUs
+- Run: https://github.com/tunahanaliozturk/derbent/actions/runs/36916385907 (the `bench` workflow, `.github/workflows/bench.yml`, on the branch `main`)
+- Commit measured: `54238a0f15714f5c4de2c2e0b4383d13d13a4a35`
+- Linux: GitHub-hosted `ubuntu-latest`, which the run log names as image `ubuntu-24.04`, version `20260927.320.1`, on an AMD EPYC 9V45 with 4 vCPUs
+- Windows: GitHub-hosted `windows-latest`, which the run log names as image `windows-2025-vs2026`, version `20260925.250.1`, on an AMD EPYC 9V45 with 4 vCPUs
 
 | File | What it is |
 |------|------------|
@@ -21,9 +21,13 @@ The benchmarks live in `cmd/derbent/bench_test.go`. Every process they talk to i
 
 Calls are made one after another on one session, so calls per second is the inverse of the mean latency, not throughput under concurrent load. The binary the benchmarks start, in both hook rows and as the gate, is the Go test binary of `cmd/derbent`, not a release build.
 
-All the numbers come from one workflow run on shared GitHub-hosted runners. On each OS, all ten runs of each benchmark ran in one job on one VM, so the confidence intervals only cover noise within that VM. Another run, or another runner, may differ by more than the intervals shown. Both jobs ran on an `AMD EPYC 7763 64-Core Processor`, as the raw files name it, but on different VMs under different operating systems. Compare the gate with its baseline within each OS, not one OS with the other.
+All the numbers come from one workflow run on shared GitHub-hosted runners. On each OS, all ten runs of each benchmark ran in one job on one VM, so the confidence intervals only cover noise within that VM. Another run, or another runner, may differ by more than the intervals shown, and the run the day before on the same code did (see Reading the numbers). Both jobs ran on an `AMD EPYC 9V45 96-Core Processor`, as the raw files name it, but on different VMs under different operating systems. Compare the gate with its baseline within each OS, not one OS with the other.
 
-The p99 of one run is a single sample: index `n*99/100` of that run's sorted latencies. An echo run has 2000 samples, so its p99 is about the 20th largest. A hook run has only 200, so its p99 is about the second largest. That is why the Windows hook p99 varies so much across runs: in four of the ten it was between 0.38 s and 1.71 s, in the other six between 0.11 s and 0.14 s, so its median has an interval of ±528%, while the p50 stays within ±4%.
+The p99 of one run is a single sample: index `n*99/100` of that run's sorted latencies. An echo run has 2000 samples, so its p99 is about the 20th largest. A hook run has only 200, so its p99 is about the second largest. Judge the hook by its p50, which stays within ±7% on both OSes in this run. The p99 and calls per second of the hook rows are noisy:
+
+- On Linux the hook's p99 was between 56.35 ms and 248.11 ms across the ten runs, and above 170 ms in seven of them, while its p50 stayed between 6.58 ms and 8.19 ms. Its mean, which calls per second inverts, was between 10.26 ms and 27.20 ms, so in most runs a share of calls took far longer than the p50. The spawn rows have no such tail (p99 4.030 ms), so it comes from the hook's own work rather than the process start. The run before (EPYC 7763) put the Linux hook's p99 at 10.678 ms. What the slow calls wait on has not been profiled.
+- On Linux the gate row of the echo benchmark shows the same shape in four of its ten runs: a mean between 1.215 ms and 1.730 ms, against 0.620 ms to 0.781 ms in the other six, while the p50 stayed between 455 µs and 488 µs and the p99 was at most 1.922 ms in every run. That points at a few slow calls above the p99, fewer than 20 of a run's 2000, and gives this row's calls per second its ±48%.
+- On Windows the hook's p99 was 1.85 s and 3.20 s in two runs and between 62.37 ms and 167.03 ms in the other eight, so its median has an interval of ±1819% and its calls per second ±52%.
 
 On Windows the clock behind `time.Since` moves in steps of 0.5 to 15.6 ms, which is coarser than one MCP call, so the per-call latencies there are read from the performance counter (`cmd/derbent/stopwatch_windows_test.go`).
 
@@ -47,15 +51,15 @@ From `linux.txt`. Each value is the median of ten runs with its 95% confidence i
 
 | MCP tool call | Direct | Through the gate |
 |---------------|--------|------------------|
-| p50 | 304.5 µs ± 1% | 825.5 µs ± 1% |
-| p99 | 731.0 µs ± 4% | 1565.5 µs ± 3% |
-| Calls per second | 2.848k ± 1% | 1.109k ± 2% |
+| p50 | 144.0 µs ± 3% | 470.0 µs ± 2% |
+| p99 | 413.5 µs ± 8% | 1317.0 µs ± 20% |
+| Calls per second | 5.851k ± 3% | 1.336k ± 48% |
 
 | Hook call | Spawn baseline | `derbent gate`, allowed |
 |-----------|----------------|-------------------------|
-| p50 | 4.316 ms ± 1% | 7.381 ms ± 2% |
-| p99 | 4.815 ms ± 1% | 10.678 ms ± 6% |
-| Calls per second | 230.9 ± 1% | 133.9 ± 1% |
+| p50 | 3.263 ms ± 4% | 6.766 ms ± 7% |
+| p99 | 4.030 ms ± 12% | 204.259 ms ± 62% |
+| Calls per second | 299.25 ± 5% | 51.23 ± 54% |
 
 ## Windows
 
@@ -63,20 +67,21 @@ From `windows.txt`. Each value is the median of ten runs with its 95% confidence
 
 | MCP tool call | Direct | Through the gate |
 |---------------|--------|------------------|
-| p50 | 353.0 µs ± 2% | 1033.0 µs ± 1% |
-| p99 | 941.0 µs ± 6% | 2212.0 µs ± 5% |
-| Calls per second | 2371.5 ± 2% | 643.8 ± 7% |
+| p50 | 146.5 µs ± 4% | 474.0 µs ± 3% |
+| p99 | 863.0 µs ± 40% | 2983.5 µs ± 9% |
+| Calls per second | 5.010k ± 2% | 1.011k ± 10% |
 
 | Hook call | Spawn baseline | `derbent gate`, allowed |
 |-----------|----------------|-------------------------|
-| p50 | 46.91 ms ± 1% | 83.03 ms ± 4% |
-| p99 | 57.64 ms ± 6% | 135.42 ms ± 528% |
-| Calls per second | 20.84 ± 1% | 11.79 ± 28% |
+| p50 | 25.07 ms ± 7% | 44.29 ms ± 5% |
+| p99 | 35.28 ms ± 30% | 96.54 ms ± 1819% |
+| Calls per second | 39.07 ± 8% | 20.88 ± 52% |
 
 ## Reading the numbers
 
 The differences below are between the medians in the tables above.
 
-- An MCP call through the gate takes 521.0 µs longer at p50 than a direct call on Linux, and 680.0 µs longer on Windows.
-- A hook call takes 3.065 ms longer at p50 than starting the binary and exiting on Linux, and 36.12 ms longer on Windows. On Windows most of a hook call's cost is the process start itself: 46.91 ms of its 83.03 ms.
-- The run before milestone 6 (run 36312269745, commit `529b2aa`) measured those differences at 467.5 µs and 619.5 µs for an MCP call, and at 2.092 ms and 22.09 ms for a hook call. Milestone 6 added to every hook call a read-only open of the database before the real one, a second walk up the directory tree for the checkout's root and a check of the project rules file, and to every MCP call that check too. The two runs used different Linux CPUs, so only the differences within each OS compare.
+- An MCP call through the gate takes 326.0 µs longer at p50 than a direct call on Linux, and 327.5 µs longer on Windows.
+- A hook call takes 3.503 ms longer at p50 than starting the binary and exiting on Linux, and 19.22 ms longer on Windows. On Windows most of a hook call's cost is the process start itself: 25.07 ms of its 44.29 ms.
+- The run published before this one (run 36359801469, commit `0d5daa9`, after milestone 6) measured those differences at 521.0 µs and 680.0 µs for an MCP call, and at 3.065 ms and 36.12 ms for a hook call. That run was on an AMD EPYC 7763 on both OSes, so part of the change is a different machine, not the code. Between the two commits milestone 7 landed, and commit `38e0ce7` dropped the read-only open of the database that milestone 6 had added to every hook call. With the CPU and the code both changing, these two runs cannot say how much of the change each one explains.
+- The day before, run 36783411007 measured commit `4c5d323`, which differs from this one only in `docs/backlog.md` and `docs/design.md`, on an AMD EPYC 9V74. It put those differences at 517.5 µs on Linux and 459.5 µs on Windows for an MCP call, and at 2.535 ms on Linux and 33.51 ms on Windows for a hook call (64.05 ms against 30.54 ms for the spawn). The same code, on another runner, moved by more than this run's intervals, so read every number here as one runner's, not as a bound.
