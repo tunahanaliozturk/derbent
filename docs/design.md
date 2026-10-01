@@ -1146,8 +1146,8 @@ anchor; an export with line 2's agent edited failed at line 2 (receipt 2) with e
 PowerShell 5.1 wrote in UTF-16, starting `ff fe`, verified against the kept head. Five `git log` commands
 with different options, sent through `derbent gate` in Claude Code's hook format and each approved once
 from another process, left five receipts `native__Bash allow user:<n> gated`, and `derbent suggest` gave
-the `allow` for `args = { command = "git log *" }` with the nine prefix-scoped asks above it. The model
-of the second session said in its reply that the note recorded a review it had not done, since the
+the `allow` for `args = { command = "git log *" }` with the nine prefix-scoped asks above it. The
+reviewer session's model said in its reply that the note recorded a review it had not done, since the
 prompt asked it only to mark the handoff done.
 
 ## Later
