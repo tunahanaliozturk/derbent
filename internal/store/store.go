@@ -37,6 +37,11 @@ var migrations embed.FS
 // takes a --db pointed at another program's file while that program writes it.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
 	if hasLog(path) {
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			// SQLite would replay the log into a new file, so refuse and say which files to remove.
+			return nil, fmt.Errorf("open database %s: it is missing but its -wal or -journal file is still there; "+
+				"remove %s-wal, %s-shm and %s-journal to start a new database", path, path, path, path)
+		}
 		probe, err := OpenExisting(ctx, path)
 		if err != nil {
 			return nil, err
