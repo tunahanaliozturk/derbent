@@ -193,7 +193,7 @@ func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
 		"Invoke-CimMethod run", "conhost run", "pcalua run", "msiexec run", "regsvr32 run",
 		// Windows drops a name's trailing dots and spaces, and an 8.3 short name can name any program.
 		"cmd. /c dir", "cmd.exe. /c dir", `C:\Windows\System32\cmd.exe.. /c dir`, "pwsh.exe. -c x",
-		"POWERS~1.EXE -c x", `C:\PROGRA~1\x.exe run`,
+		"POWERS~1.EXE -c x", `C:\PROGRA~1\x.exe run`, "FOO=1 POWERS~1.EXE -c x", "@ POWERS~1 -c x",
 		// cmd.exe ends a program's name at / , or =, so each of these runs cmd or PowerShell.
 		"cmd/c dir", "cmd,/c dir", "cmd=/c dir", "powershell/c dir", `C:\Windows\System32\cmd.exe/c dir`,
 		"FOO=1 cmd/c dir", "cmd=/c dir x y",
@@ -243,6 +243,8 @@ func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
 		// A later word is no program name to cmd.exe, so a path through a directory named cmd is fine.
 		{shell("command", "go vet cmd/a", "go vet cmd/b", "go vet cmd/a", "go vet cmd/b", "go vet cmd/a"), "go vet ", false},
 		{shell("command", "./build.sh test a", "./build.sh test b", "./build.sh test a", "./build.sh test b", "./build.sh test a"), "./build.sh test ", false},
+		// Only the program's word is read as a possible 8.3 short name.
+		{shell("command", "git diff HEAD~1 a", "git diff HEAD~1 b", "git diff HEAD~1 a", "git diff HEAD~1 b", "git diff HEAD~1 a"), "git diff HEAD~1 ", false},
 	} {
 		if got := suggest.From(tc.calls, suggest.Min); len(got) != 1 || got[0].Prefix != tc.prefix || got[0].Exact != tc.exact {
 			t.Errorf("%s: %+v, want %q, exact %v", tc.calls[1].Args, got, tc.prefix, tc.exact)

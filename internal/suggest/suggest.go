@@ -239,14 +239,14 @@ func refused(p string) bool {
 		}
 	}
 	words = dropMarkers(words)
-	if len(words) > 0 && cmdLauncher(words[0]) {
+	if len(words) > 0 && firstWord(words[0]) {
 		return true // cmd.exe has no NAME=value, so its program is the first word as written
 	}
 	for len(words) > 0 && assignment.MatchString(words[0]) {
 		words = words[1:]
 	}
 	words = dropMarkers(words)
-	return (len(words) > 0 && cmdLauncher(words[0])) || len(words) < 2
+	return (len(words) > 0 && firstWord(words[0])) || len(words) < 2
 }
 
 // dropMarkers is words without the leading words made only of @ , or =, which cmd.exe drops before a
@@ -276,7 +276,15 @@ func cmdLauncher(word string) bool {
 	return name != "." && slices.Contains(launchers[:], name)
 }
 
-// shortName is the ~ and digit of a Windows 8.3 short name, such as POWERS~1.EXE.
+// firstWord reports whether word, the one that names a command's program, could run any command: cmd.exe
+// reads it as a launcher (see cmdLauncher), or it holds the ~ and digit of a Windows 8.3 short name, such
+// as POWERS~1.EXE, which can name any program. Only the program's word is checked for the ~, so a later
+// word such as the HEAD~1 in git diff HEAD~1 keeps its suggestion.
+func firstWord(word string) bool {
+	return cmdLauncher(word) || shortName.MatchString(word)
+}
+
+// shortName is the ~ and digit of a Windows 8.3 short name.
 var shortName = regexp.MustCompile(`~[0-9]`)
 
 // assignment is a shell's NAME=value before a command, which sets a variable for it.
@@ -289,11 +297,10 @@ var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 // word is read once more with every \ dropped. ok is false when the word still holds a character that can
 // make it any program: $ and % for a variable, a backtick, a quote inside it, a glob's [, a brace
 // expansion's { and cmd's ^ escape. PowerShell also reads the curly quotes U+2018 to U+201E as quotes, even
-// inside a command name, so any of them refuses the word wherever it stands. So does a ~ before a digit,
-// as in POWERS~1.EXE, since a Windows 8.3 short name can name any program.
+// inside a command name, so any of them refuses the word wherever it stands.
 func program(word string) (name string, ok bool) {
 	w := strings.TrimPrefix(strings.Trim(word, `"'`), `\`)
-	if strings.ContainsAny(w, "$%`\"'[{^\u2018\u2019\u201a\u201b\u201c\u201d\u201e") || shortName.MatchString(w) {
+	if strings.ContainsAny(w, "$%`\"'[{^\u2018\u2019\u201a\u201b\u201c\u201d\u201e") {
 		return "", false
 	}
 	name = base(w[strings.LastIndexAny(w, `/\`)+1:])
