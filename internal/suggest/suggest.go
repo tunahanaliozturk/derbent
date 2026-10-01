@@ -52,7 +52,8 @@ var launchers = [...]string{
 	"builtin", ".", "source", "nohup", "nice", "ionice", "chrt", "taskset", "time", "timeout", "watch", "setsid",
 	"stdbuf", "flock", "script", "unshare", "nsenter", "chroot", "systemd-run", "ssh", "npx", "bunx", "pnpx", "uvx",
 	"pipx", "start", "start-process", "start-job", "sajb", "saps", "invoke-expression", "iex", "invoke-command", "icm",
-	"invoke-item", "ii", "call", "mshta", "rundll32", "cscript", "wscript",
+	"invoke-item", "ii", "call", "mshta", "rundll32", "cscript", "wscript", "wmic", "forfiles", "schtasks",
+	"invoke-wmimethod", "invoke-cimmethod", "conhost", "pcalua", "msiexec", "regsvr32",
 }
 
 // operators are what can end a command and start another, feed it, or run one inside it: the separators
@@ -275,6 +276,9 @@ func cmdLauncher(word string) bool {
 	return name != "." && slices.Contains(launchers[:], name)
 }
 
+// shortName is the ~ and digit of a Windows 8.3 short name, such as POWERS~1.EXE.
+var shortName = regexp.MustCompile(`~[0-9]`)
+
 // assignment is a shell's NAME=value before a command, which sets a variable for it.
 var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
@@ -285,10 +289,11 @@ var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 // word is read once more with every \ dropped. ok is false when the word still holds a character that can
 // make it any program: $ and % for a variable, a backtick, a quote inside it, a glob's [, a brace
 // expansion's { and cmd's ^ escape. PowerShell also reads the curly quotes U+2018 to U+201E as quotes, even
-// inside a command name, so any of them refuses the word wherever it stands.
+// inside a command name, so any of them refuses the word wherever it stands. So does a ~ before a digit,
+// as in POWERS~1.EXE, since a Windows 8.3 short name can name any program.
 func program(word string) (name string, ok bool) {
 	w := strings.TrimPrefix(strings.Trim(word, `"'`), `\`)
-	if strings.ContainsAny(w, "$%`\"'[{^\u2018\u2019\u201a\u201b\u201c\u201d\u201e") {
+	if strings.ContainsAny(w, "$%`\"'[{^\u2018\u2019\u201a\u201b\u201c\u201d\u201e") || shortName.MatchString(w) {
 		return "", false
 	}
 	name = base(w[strings.LastIndexAny(w, `/\`)+1:])
@@ -299,10 +304,14 @@ func program(word string) (name string, ok bool) {
 	return name, true
 }
 
-// base is a program's file name in lower case without a Windows extension, and without a version at its
-// end when that leaves a launcher's name: python3.12 is python, and rundll32 stays rundll32.
+// base is a program's file name in lower case without the trailing dots and spaces Windows drops (so
+// cmd.exe. runs cmd), without a Windows extension, and without a version at its end when that leaves a
+// launcher's name: python3.12 is python, and rundll32 stays rundll32.
 func base(file string) string {
 	name := strings.ToLower(file)
+	if n := strings.TrimRight(name, ". "); n != "" {
+		name = n
+	}
 	for _, ext := range [...]string{".exe", ".cmd", ".bat", ".com"} {
 		name = strings.TrimSuffix(name, ext)
 	}

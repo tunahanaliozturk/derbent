@@ -189,7 +189,11 @@ func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
 		"iex run", "Invoke-Command run", "call run", "mshta run", "rundll32 run", "cscript run", "wscript run",
 		"ash run", "mksh run", "yash run", "nu run", "xonsh run", "pythonw run", "nodejs run", "pypy run", "pypy3 run",
 		"ipython run", "ts-node run", "tsx run", "icm run", "saps run", "ii run", "Start-Job run",
-		"Invoke-Item run", "sajb run",
+		"Invoke-Item run", "sajb run", "wmic run", "forfiles run", "schtasks run", "Invoke-WmiMethod run",
+		"Invoke-CimMethod run", "conhost run", "pcalua run", "msiexec run", "regsvr32 run",
+		// Windows drops a name's trailing dots and spaces, and an 8.3 short name can name any program.
+		"cmd. /c dir", "cmd.exe. /c dir", `C:\Windows\System32\cmd.exe.. /c dir`, "pwsh.exe. -c x",
+		"POWERS~1.EXE -c x", `C:\PROGRA~1\x.exe run`,
 		// cmd.exe ends a program's name at / , or =, so each of these runs cmd or PowerShell.
 		"cmd/c dir", "cmd,/c dir", "cmd=/c dir", "powershell/c dir", `C:\Windows\System32\cmd.exe/c dir`,
 		"FOO=1 cmd/c dir", "cmd=/c dir x y",

@@ -163,8 +163,8 @@ A shell gets no suggestion when a command cannot be read or is not under the key
 or the start holds an operator such as `&&`, `;`, `|`, `>` or `$(`, has only one word (`git *` runs any
 command through `git -c alias.x='!cmd' x`), or names a shell, an interpreter or a launcher in any of its
 words, such as `sh`, `python`, `sudo`, `env`, `xargs`, `nice` or `Start-Process`, however it is spelled
-(`/bin/sh`, `CMD.EXE`, `python3.12`, `cmd/c` or `@cmd` as cmd.exe reads them, or with PowerShell's curly
-quotes inside it). Because cmd.exe ends a name at `/`, a first word that starts with a launcher's name and
+(`/bin/sh`, `CMD.EXE`, `cmd.exe.`, `POWERS~1.EXE`, `python3.12`, `cmd/c` or `@cmd` as cmd.exe reads
+them, or with PowerShell's curly quotes inside it). Because cmd.exe ends a name at `/`, a first word that starts with a launcher's name and
 a `/`, such as `script/test` or `env/bin/pytest`, is refused too; write that rule by hand if you want it.
 These are text checks, and their lists cannot be complete: an option of an ordinary program can run
 another one, as `go test -exec` does, and the `allow` lets any options through.
