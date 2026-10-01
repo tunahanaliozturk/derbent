@@ -164,9 +164,10 @@ or the start holds an operator such as `&&`, `;`, `|`, `>` or `$(`, has only one
 command through `git -c alias.x='!cmd' x`), or names a shell, an interpreter or a launcher in any of its
 words, such as `sh`, `python`, `sudo`, `env`, `xargs`, `nice` or `Start-Process`, however it is spelled
 (`/bin/sh`, `CMD.EXE`, `python3.12`, `cmd/c` or `@cmd` as cmd.exe reads them, or with PowerShell's curly
-quotes inside it). Because cmd.exe ends a name at `/`, a first word such as `script/test` or
-`env/bin/pytest` is refused too; write that rule by hand if you want it. These are text checks, and their lists cannot be complete: an option of an ordinary program
-can run another one, as `go test -exec` does, and the `allow` lets any options through.
+quotes inside it). Because cmd.exe ends a name at `/`, a first word that starts with a launcher's name and
+a `/`, such as `script/test` or `env/bin/pytest`, is refused too; write that rule by hand if you want it.
+These are text checks, and their lists cannot be complete: an option of an ordinary program can run
+another one, as `go test -exec` does, and the `allow` lets any options through.
 Read a snippet before you paste it, and narrow it.
 
 An `allow` for a tool that is not a shell lets every call through, whatever its arguments, and its comment
