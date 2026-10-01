@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -244,6 +245,26 @@ func TestOpenRefusesAnotherProgramsWALDatabaseWithoutCheckpointingIt(t *testing.
 		t.Fatalf("err = %v, want the file refused as not a Derbent database", err)
 	}
 	assertUnchanged(t, dir, before)
+}
+
+// A -wal left behind after the database was deleted would be replayed into a new file, so Open refuses
+// it and names the files to remove.
+func TestOpenRefusesALeftoverLogWithoutItsDatabase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "derbent.db")
+	if err := os.WriteFile(path+"-wal", []byte("left behind"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(t.Context(), path)
+	if err == nil || !strings.Contains(err.Error(), "remove "+path+"-wal") {
+		if db != nil {
+			db.Close()
+		}
+		t.Fatalf("err = %v, want the leftover -wal named", err)
+	}
+	if _, err = os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stat %s: %v, want no database created", path, err)
+	}
 }
 
 // A rollback-journal database copied in the middle of a write has a hot -journal. A read-write
