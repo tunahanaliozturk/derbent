@@ -196,6 +196,9 @@ func TestPrefixesThatRunAnyCommandAreRefused(t *testing.T) {
 		// cmd.exe also drops any @ , or = before the program's name.
 		"@cmd /c dir", "@cmd/c dir", "@@cmd /c dir", ",cmd /c dir", "=cmd /c dir", ",cmd/c dir",
 		"@powershell -c x", "@python a.py",
+		// Or as words of their own, also after an assignment.
+		"@ cmd/c dir", ", cmd/c dir", "= cmd/c dir", "@ @cmd /c dir", "@ , = cmd /c dir", "FOO=1 @ cmd/c dir",
+		"@ git", "FOO=1 @ git",
 		"go env", "go 'bash'", `go "node"`,
 		// The brief's spellings.
 		"/bin/sh -c", "FOO=1 sh -c", `C:\Windows\System32\cmd.exe /c`, "nice sudo sh -c",

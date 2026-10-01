@@ -223,8 +223,9 @@ func commonPrefix(cmds []string) string {
 // because the rule could then run any command. It is refused when it holds an operator, after which the *
 // would be a command of its own, as in "cd /work &&"; when it ends in $ or \, which join what the * adds to
 // the last word; when a word names a launcher or could name any program (see program); and when it has
-// fewer than two words after any leading NAME=value, since `git *`, `find *`, `make *`, `npm *`, `docker *`,
-// `rsync *` and `tar *` each run any command through an option. The same checks refuse an exact command.
+// fewer than two words after any leading NAME=value and any word of only @ , or =, which cmd.exe drops, since
+// `git *`, `find *`, `make *`, `npm *`, `docker *`, `rsync *` and `tar *` each run any command through an
+// option. The same checks refuse an exact command.
 func refused(p string) bool {
 	if strings.ContainsAny(p, operators) || strings.HasSuffix(p, "$") || strings.HasSuffix(p, `\`) {
 		return true
@@ -236,13 +237,24 @@ func refused(p string) bool {
 			return true
 		}
 	}
+	words = dropMarkers(words)
 	if len(words) > 0 && cmdLauncher(words[0]) {
 		return true // cmd.exe has no NAME=value, so its program is the first word as written
 	}
 	for len(words) > 0 && assignment.MatchString(words[0]) {
 		words = words[1:]
 	}
+	words = dropMarkers(words)
 	return (len(words) > 0 && cmdLauncher(words[0])) || len(words) < 2
+}
+
+// dropMarkers is words without the leading words made only of @ , or =, which cmd.exe drops before a
+// program's name, so in `@ cmd/c dir` it runs cmd.
+func dropMarkers(words []string) []string {
+	for len(words) > 0 && strings.Trim(words[0], "@,=") == "" {
+		words = words[1:]
+	}
+	return words
 }
 
 // cmdLauncher reports whether cmd.exe, which drops any @ , or = before a program's name and ends the name
