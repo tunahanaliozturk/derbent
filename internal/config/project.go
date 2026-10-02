@@ -216,11 +216,12 @@ func checkSmallFile(fi fs.FileInfo) error {
 
 // lstat is os.Lstat with the file's identity read at once. On Windows os.SameFile reads a FileInfo's file
 // ID from its path only when it is first compared, so a link swapped in between the Lstat and that
-// compare would be compared as itself and pass.
+// compare would be compared as itself and pass. When the ID cannot be read now, the file is refused,
+// since a later compare would read it again from whatever is at the path then.
 func lstat(path string) (fs.FileInfo, error) {
 	fi, err := os.Lstat(path)
-	if err == nil {
-		_ = os.SameFile(fi, fi)
+	if err == nil && !os.SameFile(fi, fi) {
+		return nil, errors.New("the file changed while it was being read")
 	}
 	return fi, err
 }
