@@ -405,7 +405,11 @@ func jsonHooks(file string, groups func(root map[string]any) []map[string]any, c
 				continue
 			}
 			command, _ := h["command"].(string)
-			if w, _ := h["commandWindows"].(string); codex && w != "" && runtime.GOOS == "windows" {
+			w, _ := h["commandWindows"].(string)
+			if w == "" {
+				w, _ = h["command_windows"].(string)
+			}
+			if codex && w != "" && runtime.GOOS == "windows" {
 				command = w // Codex's hooks.json: the line Codex runs instead of command on Windows
 			}
 			args, execForm := h["args"]

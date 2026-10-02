@@ -324,6 +324,10 @@ func TestHooksReadTheCLIsOtherUserFiles(t *testing.T) {
 	if hooks, err := Hooks("codex", codex); err != nil || len(hooks) != 1 || hooks[0].RunsGate() != (runtime.GOOS == "windows") {
 		t.Errorf("commandWindows: hooks %+v, err %v; want the gate on Windows only", hooks, err)
 	}
+	write(filepath.Join(dir, "codex", "hooks.json"), `{"hooks": {"PreToolUse": [{"hooks": [{"command": "echo hi", "command_windows": "derbent gate --agent codex"}]}]}}`)
+	if hooks, err := Hooks("codex", codex); err != nil || len(hooks) != 1 || hooks[0].RunsGate() != (runtime.GOOS == "windows") {
+		t.Errorf("command_windows: hooks %+v, err %v; want the gate on Windows only", hooks, err)
+	}
 	// An empty commandWindows runs command, and another CLI's file ignores the key, as that CLI does.
 	write(filepath.Join(dir, "codex", "hooks.json"), `{"hooks": {"PreToolUse": [{"hooks": [{"command": "derbent gate --agent codex", "commandWindows": ""}]}]}}`)
 	if hooks, err := Hooks("codex", codex); err != nil || len(hooks) != 1 || !hooks[0].RunsGate() {
