@@ -1236,9 +1236,9 @@ Ideas found after this list, with the measurements behind them, are in [backlog.
   `github__create_issue`, and denying `github__*` after them keeps a new tool out of the agents' lists.
 - The project rules file is kept by size and modification time. An edit that keeps both, which only a
   file system with a coarse clock allows within one tick, is not seen until the file changes again.
-- Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook call
-  took 64.51 ms at p50, 40.40 ms of it for starting the binary; on Linux, 6.421 ms
-  (`docs/benchmark-results/`).
+- Every built-in tool call starts a `derbent gate` process. On GitHub's Windows runner an allowed hook
+  call took 105.66 ms at p50, 50.99 ms of it for starting the binary, and 53.62 ms beside a running gate;
+  on Linux, 5.812 ms and 4.795 ms (`docs/benchmark-results/`).
 - An endpoint scanner may slow the start of an unsigned binary. One measurement on a managed Windows 11
   machine with Microsoft Defender for Endpoint put `derbent version` (15 MB, unsigned, run from the temp
   directory) at 1.8 seconds at p50, while a 1.2 MB unsigned binary and signed programs started in tens of
