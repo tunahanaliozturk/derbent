@@ -193,8 +193,9 @@ func openReadOnly(ctx context.Context, path, params string) (*sql.DB, error) {
 	return db, nil
 }
 
-// checkSchema refuses another program's file, one with tables but no Derbent schema version, and a
-// schema newer than this binary knows. It only reads: an empty or new file passes.
+// checkSchema refuses another program's file, one with tables but no Derbent schema version, or with a
+// version but no receipts table holding the hash chain, and a schema newer than this binary knows. It
+// only reads: an empty or new file passes.
 func checkSchema(ctx context.Context, db *sql.DB, path string) error {
 	var version, objects int
 	if err := db.QueryRowContext(ctx, "SELECT (SELECT user_version FROM pragma_user_version), (SELECT count(*) FROM sqlite_master)").
@@ -203,6 +204,20 @@ func checkSchema(ctx context.Context, db *sql.DB, path string) error {
 	}
 	if version == 0 && objects > 0 {
 		return fmt.Errorf("open database %s: it is not a Derbent database: it has tables but no Derbent schema version", path)
+	}
+	if version < 0 {
+		return fmt.Errorf("open database %s: it is not a Derbent database: schema version %d", path, version)
+	}
+	if version > 0 {
+		// Another program can use user_version too, so a version alone does not make the file Derbent's.
+		var chain int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('receipts') WHERE name IN ('prev_hash', 'hash')").
+			Scan(&chain); err != nil {
+			return fmt.Errorf("open database %s: read schema: %w", path, err)
+		}
+		if chain != 2 {
+			return fmt.Errorf("open database %s: it is not a Derbent database: schema version %d but no receipt chain", path, version)
+		}
 	}
 	names, err := fs.Glob(migrations, "migrations/*.sql")
 	if err != nil {
