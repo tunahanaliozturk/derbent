@@ -15,7 +15,9 @@ on Windows 11, in Git Bash.
 - The held call was approved with `derbent approve` from a second shell, by a loop that polled
   `derbent pending --json`. The `derbent` UI was not used. [Repeat it with the UI](#repeat-it-with-the-ui)
   gives the steps to press `a` there instead.
-- This page is a transcript. There is no screen recording; one can be added as `docs/assets/demo.gif`.
+- This page is a transcript, not a screen recording. The README's [GIF](assets/demo/demo.gif) is
+  rendered from [demo.tape](assets/demo/demo.tape) and shows `derbent explain`, the hook, receipts and
+  `verify` from a terminal, without an agent.
 - Commands and output are copied from the run. `<demo>` stands for the scratch folder, under the user's
   temp directory. The gate writes project paths in lower case on Windows, so in memory results and
   receipts `<demo>` replaces the lower-case path. Nothing else is changed.

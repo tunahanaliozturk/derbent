@@ -1,0 +1,12 @@
+[[rule]]
+tool   = "native__Bash"
+args   = { command = "git push*" }
+action = "ask"
+
+[[rule]]
+tool   = "native__Bash"
+args   = { command = "rm -rf*" }
+action = "deny"
+
+[[rule]]
+action = "allow"
