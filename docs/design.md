@@ -1097,7 +1097,8 @@ gate. Milestone 3's check ran with a real Claude Code session whose held call wa
 `derbent approve` from another process, not with Codex approved from the UI: the owner left Codex out,
 and the UI's keys are covered by tests instead. Milestone 4's coverage table has one real session,
 Claude Code's; Codex was left out, Copilot CLI's monthly quota ran out before any tool call, and
-Antigravity CLI was not installed, so those three rows come from each CLI's documentation.
+Antigravity CLI was not installed, so those three rows come from each CLI's documentation (Copilot
+CLI's row was checked in real sessions on 2026-10-02, see below).
 Milestone 5's demo ran with two real Claude Code sessions under two agent names, the held call approved
 with `derbent approve` from another shell, and is published as a transcript in demo.md, not as a
 recording of Codex approved from the UI.

@@ -82,8 +82,8 @@ derbent: ~/.config/derbent/config.toml
 
 It also adds the `derbent gate` hook to each CLI's settings; [Install and set up](docs/install.md) shows
 every entry. Start your agents as usual. Their calls now appear in the UI, and calls the rules ask about
-wait there for you. Only Claude Code has been checked in real sessions; the entries for the other three
-CLIs follow their documentation (see [Built-in tools](docs/built-in-tools.md)).
+wait there for you. Claude Code and Copilot CLI have been checked in real sessions; the entries for
+Codex and Antigravity CLI follow their documentation (see [Built-in tools](docs/built-in-tools.md)).
 
 To put your other MCP servers behind the gate, so each agent needs only the one `derbent` entry, see
 [Downstream servers](docs/servers.md).

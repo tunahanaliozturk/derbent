@@ -106,6 +106,9 @@ func TestParseRefusesWhatItCannotUse(t *testing.T) {
 		{"claude", `{"session_id":"s","tool_input":{}}`},
 		{"claude", `{"tool_name":"Bash","tool_input":{}}`},
 		{"copilot", `{"sessionId":"s","toolName":"bash","toolArgs":"{broken"}`},
+		// Only the exact name apply_patch takes raw patch text.
+		{"copilot", `{"sessionId":"s","toolName":"Apply_Patch","toolArgs":"*** Begin Patch"}`},
+		{"copilot", `{"sessionId":"s","toolName":"edit","toolArgs":"*** Begin Patch"}`},
 		{"antigravity", `{"toolCall":{"args":{}},"conversationId":"c"}`},
 	} {
 		if _, err := protocol(t, tc.cli).Parse([]byte(tc.in)); !errors.Is(err, hook.ErrInput) {
