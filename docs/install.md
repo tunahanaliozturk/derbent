@@ -26,6 +26,36 @@ go install github.com/tunahanaliozturk/derbent/cmd/derbent@latest
 
 `derbent version` prints the release, or `dev` for a build from source.
 
+### Homebrew
+
+On macOS and Linux:
+
+```bash
+brew install tunahanaliozturk/tap/derbent
+```
+
+The formula in [tunahanaliozturk/homebrew-tap](https://github.com/tunahanaliozturk/homebrew-tap)
+installs the release binary for your system and checks it against the hash in `SHA256SUMS`.
+
+### Scoop
+
+On Windows:
+
+```powershell
+scoop bucket add derbent https://github.com/tunahanaliozturk/scoop-bucket
+scoop install derbent
+```
+
+The manifest in [tunahanaliozturk/scoop-bucket](https://github.com/tunahanaliozturk/scoop-bucket)
+installs the release binary for amd64 or arm64 and checks it against the hash in `SHA256SUMS`.
+
+### MCP Registry
+
+Derbent is listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as
+`io.github.tunahanaliozturk/derbent`, from `server.json` in this repository. The listing names no
+package, because the registry has no package type for a plain binary on a release; it links to this
+page instead.
+
 ### Check a release
 
 A release can be rebuilt byte for byte. The release workflow runs vet, the tests and the linter on the

@@ -52,6 +52,9 @@ Or build it with Go 1.27 or later:
 go install github.com/tunahanaliozturk/derbent/cmd/derbent@latest
 ```
 
+Homebrew (`brew install tunahanaliozturk/tap/derbent`) and Scoop install it too; see
+[Install and set up](docs/install.md#homebrew).
+
 Every release can be rebuilt byte for byte from its tag. [Install and set up](docs/install.md) has the
 other systems, how to check a release, and each CLI's entries by hand.
 
