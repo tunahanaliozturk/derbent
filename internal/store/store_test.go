@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -146,6 +147,38 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	db.Close()
 	if _, err := store.Open(t.Context(), path); err == nil || !strings.Contains(err.Error(), "newer") {
 		t.Fatalf("err = %v, want a newer-schema error", err)
+	}
+}
+
+// Another program can set user_version too. A file whose version Derbent could migrate from, or a negative
+// one, is still refused when it has no receipts table with the hash chain, and left as it was.
+func TestOpenRefusesAnotherProgramsVersionedDatabase(t *testing.T) {
+	for _, version := range []int{3, -1} {
+		path := filepath.Join(t.TempDir(), "other.db")
+		other, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = other.ExecContext(t.Context(), fmt.Sprintf("CREATE TABLE receipts (body TEXT); PRAGMA user_version = %d", version))
+		other.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := store.Open(t.Context(), path)
+		if err == nil || !strings.Contains(err.Error(), "not a Derbent database") {
+			if db != nil {
+				db.Close()
+			}
+			t.Fatalf("version %d: err = %v, want the file refused as not a Derbent database", version, err)
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatalf("version %d: the other program's database changed: err %v", version, err)
+		}
 	}
 }
 
