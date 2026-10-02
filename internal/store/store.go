@@ -209,13 +209,17 @@ func checkSchema(ctx context.Context, db *sql.DB, path string) error {
 		return fmt.Errorf("open database %s: it is not a Derbent database: schema version %d", path, version)
 	}
 	if version > 0 {
-		// Another program can use user_version too, so a version alone does not make the file Derbent's.
-		var chain int
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('receipts') WHERE name IN ('prev_hash', 'hash')").
-			Scan(&chain); err != nil {
+		// Another program can use user_version too, so a version alone does not make the file Derbent's: it
+		// must have the receipts table every Derbent schema has had since the first, with all its columns
+		// (a view of that name lists columns too, so the table itself is looked up).
+		var columns int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('receipts')
+			WHERE name IN ('seq', 'at', 'project', 'agent', 'session', 'tool', 'args', 'args_sha256', 'decision',
+				'decided_by', 'outcome', 'result_size', 'result_sha256', 'duration_ms', 'prev_hash', 'hash')
+			AND EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'receipts')`).Scan(&columns); err != nil {
 			return fmt.Errorf("open database %s: read schema: %w", path, err)
 		}
-		if chain != 2 {
+		if columns != 16 {
 			return fmt.Errorf("open database %s: it is not a Derbent database: schema version %d but no receipt chain", path, version)
 		}
 	}

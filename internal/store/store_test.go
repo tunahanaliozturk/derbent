@@ -151,15 +151,25 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 }
 
 // Another program can set user_version too. A file whose version Derbent could migrate from, or a negative
-// one, is still refused when it has no receipts table with the hash chain, and left as it was.
+// one, is still refused when it has no receipts table with Derbent's columns, and left as it was; a view
+// named receipts with the chain's columns is no table.
 func TestOpenRefusesAnotherProgramsVersionedDatabase(t *testing.T) {
-	for _, version := range []int{3, -1} {
+	for _, tc := range []struct {
+		version int
+		schema  string
+	}{
+		{3, "CREATE TABLE receipts (body TEXT)"},
+		{-1, "CREATE TABLE receipts (body TEXT)"},
+		{7, "CREATE TABLE t (a, b); CREATE VIEW receipts AS SELECT a AS prev_hash, b AS hash FROM t"},
+		{3, "CREATE TABLE receipts (prev_hash TEXT, hash TEXT)"},
+	} {
+		version := tc.version
 		path := filepath.Join(t.TempDir(), "other.db")
 		other, err := sql.Open("sqlite", path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = other.ExecContext(t.Context(), fmt.Sprintf("CREATE TABLE receipts (body TEXT); PRAGMA user_version = %d", version))
+		_, err = other.ExecContext(t.Context(), fmt.Sprintf("%s; PRAGMA user_version = %d", tc.schema, version))
 		other.Close()
 		if err != nil {
 			t.Fatal(err)
