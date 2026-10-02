@@ -139,7 +139,7 @@ func TestPresetsDecideTheSampleCalls(t *testing.T) {
 		{"native__apply_patch", map[string]any{"command": "*** Begin Patch\n*** Update File: a.py\n+port = os.environ['PORT']\n*** End Patch"}, allow, ask, ask},
 		{"native__apply_patch", map[string]any{"command": "*** Begin Patch\n*** Delete File: src/main.go\n*** End Patch"}, allow, ask, ask},
 
-		// Copilot CLI: its apply_patch may send the patch as input or patch, and write_bash and
+		// Copilot CLI: derbent gate reads its apply_patch's raw patch as input, and write_bash and
 		// write_powershell type into a running shell.
 		{"native__apply_patch", map[string]any{"input": patch}, allow, allow, ask},
 		{"native__apply_patch", map[string]any{"input": "*** Begin Patch\n*** Delete File: src/main.go\n*** End Patch"}, allow, ask, ask},

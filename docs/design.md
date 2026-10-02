@@ -1151,6 +1151,22 @@ the `allow` for `args = { command = "git log *" }` with the nine prefix-scoped a
 reviewer session's model said in its reply that the note recorded a review it had not done, since the
 prompt asked it only to mark the handoff done.
 
+Copilot CLI's check ran on 2026-10-02 with real Copilot CLI 1.0.88 sessions (`copilot -p` on the owner's
+subscription with no API key), against a scratch config and database, the hook in the scratch
+repository's `.github/hooks/derbent.json` and the MCP entry passed with `--additional-mcp-config`; the
+owner's Copilot CLI files had the same hashes afterwards. `echo derbent-allow` ran with the receipt
+`native__powershell allow rule:3 gated`, and `echo derbent-deny` was blocked with `deny rule:1 refused`.
+Of two calls held by an `ask` rule with a 20 s timeout, the first was denied at the timeout, and the model
+called it once more, though the prompt said not to retry, and was denied again (`timeout:1`,
+`timeout:2`); the second was approved with `derbent approve` from another process and ran, `user:3`.
+`memory_write` got one receipt, `allow rule:3 ok` from the MCP gate; with the hook's `--server` set to
+another name, the same call also left `native__derbent-memory_write allow rule:3 gated`, which shows
+that Copilot CLI's hook sees MCP calls. `create` and `edit` reached the hook with readable arguments.
+`apply_patch`, which Copilot CLI gives GPT models, sends the patch as raw text, and the hook denied it as
+unreadable; after the fix that reads it as `input`, a `gpt-5.3-codex` session's patch to `notes.txt` ran
+(`allow rule:4 gated`) and its patch adding `secret.txt` was refused by a rule on `input`
+(`deny rule:3 refused`). `derbent verify` found the 13 receipts' chain intact.
+
 ## Later
 
 Not in v1, in rough order of value:
@@ -1188,8 +1204,9 @@ Ideas found after this list, with the measurements behind them, are in [backlog.
 - On Windows a CLI stops a hook with `TerminateProcess`, not a signal, so a hook stopped while it waits
   cannot withdraw its approval. The approval stays pending until its deadline and can still be approved,
   though no hook is left to act on it; an `A` there still grants the later calls.
-- Only Claude Code's hook has been checked in a real session. The Codex, Copilot CLI and Antigravity CLI
-  adapters follow each CLI's documentation, and Antigravity CLI's name for Derbent's tools is assumed.
+- Only Claude Code's and Copilot CLI's hooks have been checked in real sessions (Copilot CLI 1.0.88 on
+  2026-10-02). The Codex and Antigravity CLI adapters follow each CLI's documentation, and Antigravity
+  CLI's name for Derbent's tools is assumed.
 - Every agent session starts its own downstream servers. A server that keeps state in memory does not
   share it between agents.
 - The chain shows edits made without rewriting everything after them. A full rewrite, or deleting the

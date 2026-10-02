@@ -158,8 +158,8 @@ func answerClaude(a gate.HookAnswer) []byte {
 	return marshal(claudeOutput{claudeDecision{"PreToolUse", decision(a), reason(a)}})
 }
 
-// GitHub Copilot CLI: camelCase input with toolArgs as an object or a string of JSON, or the
-// PascalCase input it sends to hooks registered as PreToolUse.
+// GitHub Copilot CLI: camelCase input with toolArgs as an object or a string of JSON (apply_patch's is
+// the raw patch), or the PascalCase input it sends to hooks registered as PreToolUse.
 
 type copilotInput struct {
 	SessionID string          `json:"sessionId"`
@@ -182,10 +182,15 @@ func parseCopilot(in []byte) (Call, error) {
 	}
 	var s string
 	if json.Unmarshal(args, &s) == nil {
-		if !json.Valid([]byte(s)) {
+		switch {
+		case json.Valid([]byte(s)):
+			args = json.RawMessage(s)
+		case v.ToolName == "apply_patch":
+			// Copilot CLI 1.0.88 sends the patch as raw text; rules read it as input.
+			args = marshal(map[string]string{"input": s})
+		default:
 			return Call{}, errors.New("toolArgs is a string that does not hold JSON")
 		}
-		args = json.RawMessage(s)
 	}
 	return Call{Session: v.SessionID, Dir: v.Cwd, Tool: v.ToolName, Args: args}, nil
 }
