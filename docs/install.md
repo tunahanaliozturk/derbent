@@ -179,8 +179,9 @@ and in `~/.gemini/config/hooks.json`:
 }
 ```
 
-Only Claude Code has been checked in real sessions, through the MCP server and through the hook. The
-entries for the other three follow each CLI's documentation (see [Built-in tools](built-in-tools.md)).
+Claude Code and Copilot CLI have been checked in real sessions, through the MCP server and through the
+hook. The entries for Codex and Antigravity CLI follow each CLI's documentation (see
+[Built-in tools](built-in-tools.md)).
 
 Without a config file every call is allowed, and `derbent mcp` says so on stderr when it starts. Every
 call is recorded:
