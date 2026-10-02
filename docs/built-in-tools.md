@@ -9,8 +9,10 @@ call you approved (unless only a project rule asked about it, see [Project rules
 `deny` with the reason for anything refused ([ADR 0006](adr/0006-pre-tool-hooks.md)).
 
 Rules name a built-in tool by the CLI's own name for it, so they differ per CLI: `native__Bash` (Claude
-Code, Codex), `native__apply_patch` (Codex's file edits), `native__bash` and `native__powershell`
-(Copilot CLI) and `native__run_command` (Antigravity CLI). The arguments differ too:
+Code, Codex), `native__apply_patch` (file edits in Codex, and in Copilot CLI with GPT models),
+`native__bash` and `native__powershell` (Copilot CLI) and `native__run_command` (Antigravity CLI). The
+arguments differ too: Codex sends a patch in `command`, and Copilot CLI sends it as raw text, which
+`derbent gate` reads as `input`.
 
 ```toml
 [[rule]]
@@ -27,8 +29,9 @@ action = "ask"
 ```
 
 Derbent cannot hide a CLI's built-in tools from the model, so a `deny` on one refuses each call instead.
-In Claude Code and Codex, which send MCP calls to the hook too, a tool of an MCP server configured in the
-CLI directly is decided the same way, as `native__mcp__<server>__<tool>`.
+In Claude Code, Codex and Copilot CLI, which send MCP calls to the hook too, a tool of an MCP server
+configured in the CLI directly is decided the same way, as `native__mcp__<server>__<tool>`
+(`native__<server>-<tool>` in Copilot CLI).
 
 `A` on a built-in tool covers the rest of the CLI's session: its session id in Claude Code, Codex and
 Copilot CLI, its conversation id in Antigravity CLI. Every shell command is one tool, such as
@@ -65,5 +68,5 @@ What each CLI's hook covers, from its documentation and, where marked, a real se
 |---|---|---|---|---|
 | Claude Code | every tool, through PreToolUse | `mcp__derbent__*` | nothing known | Claude Code 2.1.283, on 2026-09-27, with `claude -p --settings`: `echo derbent-allow` ran with a receipt `native__Bash allow rule:2 gated`; `echo derbent-deny` was blocked with Derbent's reason and a receipt `deny rule:1 refused`; `memory_write` through the derbent MCP server, which Claude Code names `mcp__derbent__memory_write`, got one receipt, from the MCP gate, because the hook skipped it; other built-in tools such as ToolSearch reach the hook too, as `native__ToolSearch`. |
 | Codex | shell commands (`Bash`), `apply_patch` for every file edit, and other local function tools such as `update_plan` | `mcp__derbent__*` | hosted tools such as web search | Not checked: left out by the owner's choice. |
-| Copilot CLI | shell (`bash`, `powershell`), file tools (`view`, `create`, `edit`, `apply_patch`), `grep`, `glob`, `web_fetch`, `web_search` and its other documented tools | `derbent-*`, with names capped at 64 characters | possibly MCP calls: the documentation does not say whether the hook sees them | Not checked: Copilot CLI 1.0.88 stopped at "You have exceeded your monthly quota" before any tool call. |
+| Copilot CLI | shell (`bash`, `powershell`), file tools (`view`, `create`, `edit`, `apply_patch`), `grep`, `glob`, `web_fetch`, `web_search` and its other documented tools, and MCP calls | `derbent-*`, with names capped at 64 characters | nothing known | Copilot CLI 1.0.88, on 2026-10-02, with `copilot -p` and the hook in the scratch repository's `.github/hooks/`: `echo derbent-allow` ran with a receipt `native__powershell allow rule:3 gated`; `echo derbent-deny` was blocked with Derbent's reason and a receipt `deny rule:1 refused`; a held call nobody answered was denied at the 20 s approval timeout, and one approved with `derbent approve` from another process ran, with a receipt `allow user:3 gated`; `memory_write`, which Copilot CLI names `derbent-memory_write`, got one receipt, from the MCP gate, and with `--server` set to another name the hook recorded it as well, as `native__derbent-memory_write`, so the hook sees MCP calls; `create` and `edit` arrived with readable arguments (`path`, `old_str`, `new_str`); `apply_patch`, which GPT models use, sends the patch as raw text and was denied as unreadable until Derbent read it as `input`, after which one patch ran and one adding `secret.txt` was refused by a rule on `input`. |
 | Antigravity CLI | built-in tools such as `run_command`, `view_file`, `write_to_file` and `replace_file_content` | `mcp_derbent_*`, an assumption until checked | not documented | Not checked: not installed. |

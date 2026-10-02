@@ -30,7 +30,7 @@
 #   Copilot CLI      native__bash, native__powershell (command)
 #                    native__write_bash, native__write_powershell (input: text for a running shell)
 #                    native__create, native__edit (path)
-#                    native__apply_patch (the whole patch, in input or patch: not verified)
+#                    native__apply_patch (input: the whole patch)
 #   Antigravity CLI  native__run_command (CommandLine)
 #                    native__write_to_file, native__replace_file_content,
 #                    native__multi_replace_file_content (TargetFile)
@@ -216,9 +216,9 @@ action = "ask"
 
 # --- File edits sent as a patch, with each file's path inside it. A patch that touches a .env file
 # or ~/.ssh, or deletes a file, asks. `*.env*` reads the whole patch, so a patch whose code mentions
-# process.env or os.environ asks too. Codex sends the patch in `command`. Copilot CLI's runtime takes
-# it as raw text or in `input` or `patch`, and which one its hook sends is not verified, so both keys
-# are named here; raw text is not JSON, and derbent gate denies a call whose arguments it cannot read.
+# process.env or os.environ asks too. Codex sends the patch in `command`. Copilot CLI 1.0.88's hook
+# sends it as raw text, which derbent gate reads as `input`; its runtime also takes the patch in
+# `patch`, so that key is named here too.
 
 [[rule]]
 tool   = "native__apply_patch"

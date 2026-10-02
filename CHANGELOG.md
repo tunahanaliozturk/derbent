@@ -6,6 +6,12 @@ Notable changes to Derbent, newest first. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `derbent gate --cli copilot` no longer denies every `apply_patch` call as unreadable. Copilot CLI sends
+  that tool's patch as raw text, not JSON, and the hook now reads it as `input`, the key the balanced
+  preset's patch rules already name. Copilot CLI 1.0.88's hook was checked in real `copilot -p` sessions.
+
 ## [1.0.0] - 2026-10-02
 
 The first release.

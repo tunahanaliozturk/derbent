@@ -185,8 +185,8 @@ The ones to know first:
 
 - Only calls that pass through the gate are seen. Tools a CLI never shows its hook, such as Codex's hosted
   web search, are outside it.
-- Only Claude Code's hook has been checked in a real session. The Codex, Copilot CLI and Antigravity CLI
-  adapters follow each CLI's documentation.
+- Only Claude Code's and Copilot CLI's hooks have been checked in real sessions (Copilot CLI 1.0.88 on
+  2026-10-02). The Codex and Antigravity CLI adapters follow each CLI's documentation.
 - Argument globs match strings, not meaning: `git push*` does not match `cd repo && git push`.
 - Approvals guard against mistakes and prompt injection inside MCP. They do not stop an agent that can
   already run shell commands as you: it can run `derbent approve` itself.

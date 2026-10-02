@@ -57,6 +57,7 @@ func TestParse(t *testing.T) {
 		{"copilot", "copilot/bash-object.json", "cp-1", "/work/shop", "bash", `{"command":"git push"}`},
 		{"copilot", "copilot/bash-pascal.json", "cp-1", "/work/shop", "bash", `{"command":"git push"}`},
 		{"copilot", "copilot/null-args.json", "cp-1", "/work/shop", "list_files", `{}`},
+		{"copilot", "copilot/patch-raw.json", "cp-1", "/work/shop", "apply_patch", `{"input":"*** Begin Patch\n*** Update File: notes.txt\n@@\n-beta\n+gamma\n*** End Patch\n"}`},
 		{"antigravity", "antigravity/run.json", "conv-7", "/work/shop", "run_command", `{"CommandLine":"git push","Cwd":"/work/shop"}`},
 	}
 	for _, tc := range tests {
