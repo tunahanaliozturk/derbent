@@ -1,0 +1,13 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.tunahanaliozturk/derbent",
+  "title": "Derbent",
+  "description": "Gate for coding agents' MCP and built-in tool calls: rules, approvals and hash-chained receipts",
+  "version": "1.0.0",
+  "websiteUrl": "https://github.com/tunahanaliozturk/derbent/blob/main/docs/install.md",
+  "repository": {
+    "url": "https://github.com/tunahanaliozturk/derbent",
+    "source": "github",
+    "id": "1389625055"
+  }
+}
