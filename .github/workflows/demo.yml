@@ -1,0 +1,34 @@
+name: demo
+
+# Renders the README's demo GIF from docs/assets/demo/demo.tape. Download the demo-gif artefact and
+# commit it as docs/assets/demo/demo.gif.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build derbent and install sqlite3
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          go build -o "$RUNNER_TEMP/bin/derbent" ./cmd/derbent
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          sudo apt-get update -q
+          sudo apt-get install -y -q sqlite3
+      - uses: charmbracelet/vhs-action@v2.1.1
+        with:
+          version: v0.12.1
+          path: docs/assets/demo/demo.tape
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-gif
+          path: docs/assets/demo/demo.gif

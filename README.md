@@ -7,12 +7,26 @@
 
 One guarded pass for all your coding agents.
 
+Every tool call that reaches Derbent, MCP or a CLI's built-in tools, is decided by one policy and written
+to a tamper-evident log, and the calls you care about wait for you.
+
+![A terminal session: derbent explain shows that git push origin main matches an ask rule; Claude Code
+hook calls fed to derbent gate let go test run and deny rm -rf by a rule; derbent receipts lists both
+calls and derbent verify finds the chain intact; after one receipt is edited with sqlite3, derbent verify
+names receipt 2 as where the chain breaks](docs/assets/demo/demo.gif)
+
+Derbent guards against mistakes and prompt injection, and keeps an audit trail. It is not a sandbox: an
+agent that can already run shell commands as you can get around it (see [Limits](#limits)).
+
 In Turkish history, a derbent was a guarded post on a mountain pass: its keepers decided who went through
 and kept a record of everyone who did. Derbent does the same for your coding agents' tool calls.
 
 Claude Code, Codex, GitHub Copilot CLI and Antigravity CLI connect to Derbent as one MCP server, and your
 other MCP servers sit behind it. Each CLI's pre-tool hook sends its built-in tools, such as the shell and
 file edits, through the same gate. Every call is decided by your rules and written down.
+
+Support for Codex and Antigravity CLI is experimental (configured from their docs, not yet checked in a
+real session).
 
 ![Four coding agent CLIs send MCP calls to derbent mcp and built-in tool calls to the derbent gate hook; both write a receipt to derbent.db, which the derbent terminal UI reads to show and approve calls, allowed MCP calls go on to your MCP servers, and a built-in call that is not denied runs in the CLI, which still applies its own permission check to a rule allow](docs/assets/diagrams/how-it-works.png)
 
@@ -21,16 +35,20 @@ is the only shared state ([ADR 0001](docs/adr/0001-no-daemon.md)).
 
 ## What you get
 
-- **One gate for four CLIs.** The same rules apply to MCP tools and to built-in tools such as the shell.
-- **Rules that allow, deny or ask**, by agent, tool and argument. The first match wins.
+- **Rules that allow, deny or ask**, by agent, tool and argument. The first match wins. The same rules
+  apply to MCP tools and to built-in tools such as the shell, in all four CLIs, and a repository can add
+  project rules that only make them stricter.
 - **Approvals.** A call your rules ask about waits until you press `a` in the terminal UI, or is denied
   after 50 seconds by default.
 - **Receipts.** Every call gets a hash-chained receipt, and `derbent verify` names the first receipt
   where the chain breaks after one was edited, moved, inserted or removed. Keep the head hash it prints
   to catch the newest ones being deleted too.
+
+Also:
+
 - **Shared memory and handoffs.** Agents keep notes per repository and can leave tasks for each other.
-- **Guards for the long run:** budgets for agents stuck in a loop, pins that hold back a server's tool
-  when its definition changes, and project rules a repository can use to be stricter.
+- **Pins** hold back a downstream server's tool when its definition changes.
+- **Budgets** stop an agent stuck in a loop.
 
 ## Install
 
@@ -82,8 +100,7 @@ derbent: ~/.config/derbent/config.toml
 
 It also adds the `derbent gate` hook to each CLI's settings; [Install and set up](docs/install.md) shows
 every entry. Start your agents as usual. Their calls now appear in the UI, and calls the rules ask about
-wait there for you. Claude Code and Copilot CLI have been checked in real sessions; the entries for
-Codex and Antigravity CLI follow their documentation (see [Built-in tools](docs/built-in-tools.md)).
+wait there for you. [Built-in tools](docs/built-in-tools.md) says what each CLI's hook covers.
 
 To put your other MCP servers behind the gate, so each agent needs only the one `derbent` entry, see
 [Downstream servers](docs/servers.md).
@@ -185,8 +202,9 @@ The ones to know first:
 
 - Only calls that pass through the gate are seen. Tools a CLI never shows its hook, such as Codex's hosted
   web search, are outside it.
-- Only Claude Code's and Copilot CLI's hooks have been checked in real sessions (Copilot CLI 1.0.88 on
-  2026-10-02). The Codex and Antigravity CLI adapters follow each CLI's documentation.
+- The CLIs marked experimental at the top have entries and hook adapters that follow each CLI's
+  documentation and have not been checked in a real session. Claude Code and Copilot CLI (1.0.88, on
+  2026-10-02) have.
 - Argument globs match strings, not meaning: `git push*` does not match `cd repo && git push`.
 - Approvals guard against mistakes and prompt injection inside MCP. They do not stop an agent that can
   already run shell commands as you: it can run `derbent approve` itself.
@@ -201,6 +219,11 @@ The ones to know first:
   so name the tools you allow for a server whose updates you do not review.
 - A budget can be passed by the calls in flight at the same moment.
 - CI runs the tests on Windows and Linux and only builds on macOS.
+
+## For teams
+
+A team audit trail, with receipts synced off each machine and an export for a SIEM, is an idea, not a
+plan. If you would use it, say so in [this discussion](https://github.com/tunahanaliozturk/derbent/discussions/34).
 
 ## Docs
 
