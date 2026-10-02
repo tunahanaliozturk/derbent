@@ -326,7 +326,7 @@ func Hooks(cli string, p Paths) ([]Entry, error) {
 			}
 		}
 	case "claude":
-		return jsonHooks(p.Hook, eventGroups)
+		return jsonHooks(p.Hook, eventGroups, false)
 	case "copilot":
 		files, err := filepath.Glob(filepath.Join(p.HookDir, "*.json"))
 		if err != nil {
@@ -346,14 +346,14 @@ func Hooks(cli string, p Paths) ([]Entry, error) {
 		}
 		return out, nil
 	default: // Antigravity CLI
-		hooks, err := jsonHooks(p.Hook, namedGroups)
+		hooks, err := jsonHooks(p.Hook, namedGroups, false)
 		if err != nil {
 			return nil, err
 		}
 		out = hooks
 	}
 	if file, groups := lookupFile(cli, p); file != "" {
-		if more, err := jsonHooks(file, groups); err == nil { // else Unchecked names it
+		if more, err := jsonHooks(file, groups, cli == "codex"); err == nil { // else Unchecked names it
 			out = append(out, more...)
 		}
 	}
@@ -390,7 +390,9 @@ func Unchecked(cli string, p Paths) []string {
 }
 
 // jsonHooks reads the command hooks in a JSON file's PreToolUse groups, which groups finds in the file.
-func jsonHooks(file string, groups func(root map[string]any) []map[string]any) ([]Entry, error) {
+// Only Codex runs a hook's commandWindows instead of its command on Windows, so codex says whether a
+// commandWindows key counts; in another CLI's file it is a stray key the CLI ignores.
+func jsonHooks(file string, groups func(root map[string]any) []map[string]any, codex bool) ([]Entry, error) {
 	root, err := readJSON(file)
 	if err != nil {
 		return nil, err
@@ -403,7 +405,7 @@ func jsonHooks(file string, groups func(root map[string]any) []map[string]any) (
 				continue
 			}
 			command, _ := h["command"].(string)
-			if w, ok := h["commandWindows"].(string); ok && runtime.GOOS == "windows" {
+			if w, _ := h["commandWindows"].(string); codex && w != "" && runtime.GOOS == "windows" {
 				command = w // Codex's hooks.json: the line Codex runs instead of command on Windows
 			}
 			args, execForm := h["args"]
