@@ -35,7 +35,8 @@ brew install tunahanaliozturk/tap/derbent
 ```
 
 The formula in [tunahanaliozturk/homebrew-tap](https://github.com/tunahanaliozturk/homebrew-tap)
-installs the release binary for your system and checks it against the hash in `SHA256SUMS`.
+installs the release binary for your system and checks it against a hash taken from the release's
+`SHA256SUMS`.
 
 ### Scoop
 
@@ -47,7 +48,8 @@ scoop install derbent
 ```
 
 The manifest in [tunahanaliozturk/scoop-bucket](https://github.com/tunahanaliozturk/scoop-bucket)
-installs the release binary for amd64 or arm64 and checks it against the hash in `SHA256SUMS`.
+installs the release binary for amd64 or arm64 and checks it against a hash taken from the release's
+`SHA256SUMS`.
 
 ### MCP Registry
 
