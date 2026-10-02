@@ -140,7 +140,7 @@ func NewProjectRules(root string) *ProjectRules {
 // A file that cannot be read, is not a regular file of at most 64 KiB, or is invalid gives an error that
 // names it: the project's rules cannot be known, so the caller refuses the call.
 func (p *ProjectRules) Load() (rule.Set, error) {
-	fi, err := os.Lstat(p.path)
+	fi, err := lstat(p.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return rule.Set{}, nil
 	}
@@ -214,6 +214,17 @@ func checkSmallFile(fi fs.FileInfo) error {
 	return nil
 }
 
+// lstat is os.Lstat with the file's identity read at once. On Windows os.SameFile reads a FileInfo's file
+// ID from its path only when it is first compared, so a link swapped in between the Lstat and that
+// compare would be compared as itself and pass.
+func lstat(path string) (fs.FileInfo, error) {
+	fi, err := os.Lstat(path)
+	if err == nil {
+		_ = os.SameFile(fi, fi)
+	}
+	return fi, err
+}
+
 // readSmallFile reads the file at path that os.Lstat reported as checked and checkSmallFile accepted.
 // What was opened must be that same file, so a FIFO, a device or a symbolic link swapped in since the
 // check is refused rather than read: the open does not wait for a FIFO's writer (O_NONBLOCK, which
@@ -244,7 +255,7 @@ func readSmallFile(path string, checked fs.FileInfo) ([]byte, error) {
 
 // lstatAndReadSmallFile reads path if it is a regular file of at most maxSmallFile bytes.
 func lstatAndReadSmallFile(path string) ([]byte, error) {
-	fi, err := os.Lstat(path)
+	fi, err := lstat(path)
 	if err != nil {
 		return nil, err
 	}
