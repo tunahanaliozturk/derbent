@@ -38,6 +38,7 @@ characters) and 15 (a reviewer agent).
 | 13 | Replaying a config, and config tests | Rule edits checked before agents meet them |
 | 14 | The head hash kept somewhere else | A rewritten chain found without the user's copy |
 | 15 | A reviewer agent before the user | One agent checks the others' held calls |
+| 16 | Hook close cost | A lone hook call as cheap as one beside a running gate |
 
 ## Before a wider launch
 
@@ -67,7 +68,7 @@ and a signed one of 99 MB starts in about 50 ms. The p90 near 11 seconds looks l
 running into its timeout, 10 seconds by default; that is a guess and has not been checked.
 
 The hook starts one process per built-in tool call, so on such a machine every shell command and file
-edit can wait between 1.4 and 11 seconds. GitHub's Windows runner took 40.40 ms for the same start (README,
+edit can wait between 1.4 and 11 seconds. GitHub's Windows runner took 50.99 ms for the same start (README,
 Overhead), so CI does not show this.
 
 - Run the same measurement on a Windows machine with only the default Defender, to learn whether managed
@@ -264,13 +265,29 @@ place.
   it see that Codex was denied and why, and plan again. The orchestrator can also write its plan to
   memory, where the reviewer reads it.
 
+## Hook cost
+
+### 16. Hook close cost
+
+A lone hook call pays a WAL checkpoint and file deletes on close. Bench run 36979294321 put a lone hook
+call at 105.66 ms at p50 on GitHub's Windows runner and 5.812 ms on Linux, and one beside a running gate
+at 53.62 ms and 4.795 ms, against 50.99 ms and 3.443 ms for starting the binary
+(docs/benchmark-results). A lone call holds the database's last connection, so its close checkpoints the
+WAL and deletes the `-wal` and `-shm` files, which a call beside a running gate does not. That this is
+the cause is likely but not proven.
+
+- Try keeping the WAL file across closes (SQLite's persistent WAL) or skipping the checkpoint on close,
+  and leave checkpoints to the running gate or to SQLite's automatic ones.
+- Measure with `call=hook` against `call=hook-beside-gate` in `BenchmarkHook`; the change works when the
+  two come close, on both OSes, in more than one run.
+
 ## Language
 
 Rewrites were considered on 2026-09-28 and not taken; ADR 0010 stands.
 
 - **Rust.** The one cost that looked like Go's, the Windows hook start, is the scanner (item 1). A Rust
   hook with SQLite, TOML and regular expressions would likely still be larger than 1.2 MB, the largest
-  unsigned size measured without the cost. On Linux the hook adds about 2 ms to starting the binary
+  unsigned size measured without the cost. On Linux the hook adds about 2.4 ms to starting the binary
   (README, Overhead). Go is memory safe, and the parts that decide safety are rules and fail-closed paths
   that a rewrite would have to prove again.
 - **TypeScript and Python.** A signed interpreter starts fast on the managed machine (item 1), but that is

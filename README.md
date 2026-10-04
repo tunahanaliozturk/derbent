@@ -179,23 +179,27 @@ checked without the database.
 
 ## Overhead
 
-Measured on GitHub's hosted runners on 2026-10-01 (Linux on an Intel Xeon Platinum 8370C, Windows on an
-AMD EPYC 9V74, 4 vCPUs each), median of ten runs at p50, from
+Measured on GitHub's hosted runners on 2026-10-02 (Linux on an AMD EPYC 9V74, Windows on an AMD EPYC
+7763, 4 vCPUs each), median of ten runs at p50, from
 [docs/benchmark-results](docs/benchmark-results/README.md):
 
 | | Linux | Windows |
 |---|---|---|
-| MCP tool call, direct to the server | 256.5 µs | 293.0 µs |
-| MCP tool call, through the gate | 756.0 µs | 909.0 µs |
-| Starting the binary and exiting | 4.292 ms | 40.40 ms |
-| Hook call, `derbent gate`, allowed | 6.421 ms | 64.51 ms |
+| MCP tool call, direct to the server | 201.0 µs | 342.5 µs |
+| MCP tool call, through the gate | 609.5 µs | 1004.0 µs |
+| Starting the binary and exiting | 3.443 ms | 50.99 ms |
+| Hook call, `derbent gate`, allowed | 5.812 ms | 105.66 ms |
+| Hook call while a gate is running | 4.795 ms | 53.62 ms |
 
-The gate adds 499.5 µs to an MCP call on Linux and 616.0 µs on Windows, for the extra stdio hop, the rule
-decision, the project rules check and the receipt written to SQLite. A hook call costs about 2.1 ms more
-than starting the binary on Linux and 24 ms more on Windows, where most of its cost is the process start.
-The numbers come from one run on shared runners, and runs differ by more than one run's intervals: the
-day before, the same code on the same Windows CPU model put the gate 459.5 µs over a direct MCP call,
-against 616.0 µs here. The results page has p99, calls per second and the caveats.
+The gate adds 408.5 µs to an MCP call on Linux and 661.5 µs on Windows, for the extra stdio hop, the rule
+decision, the project rules check and the receipt written to SQLite. A lone hook call costs about 2.4 ms
+more than starting the binary on Linux and 55 ms more on Windows. Beside a running gate, as while a CLI
+has Derbent's MCP entry running, it costs 1.4 ms more on Linux and 2.6 ms more on Windows, where that is
+within the start's own noise. Why the lone call costs more is not proven yet; the likely cause is that it
+is the database's last connection, so its close checkpoints the WAL and deletes the `-wal` and `-shm`
+files. The numbers come from one run on shared runners, and runs differ by more than one run's intervals:
+the run before, with the same code on the lone hook's path and an EPYC 9V74 for Windows, put the Windows
+hook 24.11 ms over the start. The results page has p99, calls per second and the caveats.
 
 ## Limits
 

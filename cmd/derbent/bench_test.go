@@ -112,8 +112,10 @@ func checkReceipts(b *testing.B, dbPath string, want int) {
 // BenchmarkHook's call=hook measures one pre-tool hook call, `derbent gate`, allowed by a rule: a
 // process start, a config load, a database open, a decision and a receipt. call=spawn starts the same
 // binary as `derbent version` and exits at once, which is the part of the cost that any hook command pays.
+// call=hook-beside-gate is call=hook while another connection holds the database open, as a running
+// `derbent mcp` does: the -wal file is there, so each hook call checks the file on a read-only open first.
 func BenchmarkHook(b *testing.B) {
-	for _, name := range []string{"call=spawn", "call=hook"} {
+	for _, name := range []string{"call=spawn", "call=hook", "call=hook-beside-gate"} {
 		b.Run(name, func(b *testing.B) {
 			dir := b.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[[rule]]\naction = \"allow\"\n"), 0o600); err != nil {
@@ -129,13 +131,28 @@ func BenchmarkHook(b *testing.B) {
 			if name == "call=spawn" {
 				args = []string{"version"}
 			}
+			if name == "call=hook-beside-gate" {
+				db, err := store.Open(b.Context(), filepath.Join(dir, "p.db"))
+				if err != nil {
+					b.Fatal(err)
+				}
+				conn, err := db.Conn(b.Context()) // held for the whole run, so the -wal stays
+				if err != nil {
+					b.Fatal(err)
+				}
+				defer db.Close()
+				defer conn.Close()
+				if _, err = os.Stat(filepath.Join(dir, "p.db-wal")); err != nil {
+					b.Fatalf("want a -wal beside the database while it is open: %v", err)
+				}
+			}
 			timeRuns(b, func() error {
 				cmd := exec.CommandContext(b.Context(), os.Args[0], args...)
 				cmd.Env = append(os.Environ(), "DERBENT_TEST_MAIN=1")
 				cmd.Stdin = strings.NewReader(in)
 				return cmd.Run()
 			})
-			if name == "call=hook" {
+			if name != "call=spawn" {
 				checkReceipts(b, filepath.Join(dir, "p.db"), b.N+1)
 			}
 		})
