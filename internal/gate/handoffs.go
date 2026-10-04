@@ -88,21 +88,31 @@ func (g *Gate) addHandoffTools(s *mcp.Server) {
 	addTool(g, s, &mcp.Tool{
 		Name: create,
 		Description: "Leave a task for another agent working on this project, addressed to its agent label, such as " +
-			"reviewer, or to * for any agent. Returns the handoff's id.",
+			"reviewer, or to * for any agent. The handoff stays open in the local Derbent database until that " +
+			"agent claims it with handoff_take; handoff_list shows it to them, and to you with mine. Returns the " +
+			"handoff's id. To share a finding without assigning work, use memory_write instead.",
+		Annotations: &mcp.ToolAnnotations{Title: "Hand a task to another agent", DestructiveHint: new(false), OpenWorldHint: new(false)},
 	}, g.handoffCreate)
 	addTool(g, s, &mcp.Tool{
 		Name: list,
-		Description: "List this project's handoffs addressed to you or to any agent, open ones unless state says " +
-			"otherwise. mine lists the ones you created instead.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		Description: "List this project's handoffs addressed to you or to any agent, newest first, open ones unless " +
+			"state says otherwise. mine lists the ones you created instead, and all_projects every project's. " +
+			"Use handoff_take with an id to claim one.",
+		Annotations: &mcp.ToolAnnotations{Title: "List handoffs", ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, g.handoffList)
 	addTool(g, s, &mcp.Tool{
-		Name:        take,
-		Description: "Take an open handoff addressed to you or to any agent, by its id, and read it in full. Only one agent can take a handoff.",
+		Name: take,
+		Description: "Claim an open handoff addressed to you or to any agent, by the id handoff_list showed, and " +
+			"read it in full. It becomes taken by your agent label, so no other agent can take it; a handoff " +
+			"that is not open or is addressed to another agent is refused. Call handoff_done when the work is finished.",
+		Annotations: &mcp.ToolAnnotations{Title: "Take a handoff", DestructiveHint: new(false), OpenWorldHint: new(false)},
 	}, g.handoffTake)
 	addTool(g, s, &mcp.Tool{
-		Name:        done,
-		Description: "Mark a handoff you took as done, with an optional note on what you did.",
+		Name: done,
+		Description: "Mark a handoff you took with handoff_take as done, with an optional note on what you did. " +
+			"Only the agent that took it can finish it, and finishing is final: a handoff already done is " +
+			"refused, and it leaves handoff_list's open list.",
+		Annotations: &mcp.ToolAnnotations{Title: "Finish a handoff", DestructiveHint: new(false), OpenWorldHint: new(false)},
 	}, g.handoffDone)
 }
 
