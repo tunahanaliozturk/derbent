@@ -87,10 +87,16 @@ const instructions = "Derbent gates this session's tools. memory_write, memory_s
 	"share notes with the other agents working on this project, and handoff_create, handoff_list, " +
 	"handoff_take and handoff_done pass tasks between them."
 
+// markURL is Derbent's mark, which clients and directories show next to the server's name.
+const markURL = "https://raw.githubusercontent.com/tunahanaliozturk/derbent/main/docs/assets/derbent-mark.svg"
+
 // Server builds the MCP server for this session.
 func (g *Gate) Server() *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "derbent", Version: g.Version},
-		&mcp.ServerOptions{Instructions: instructions})
+	s := mcp.NewServer(&mcp.Implementation{
+		Name: "derbent", Title: "Derbent", Version: g.Version,
+		WebsiteURL: "https://github.com/tunahanaliozturk/derbent",
+		Icons:      []mcp.Icon{{Source: markURL, MIMEType: "image/svg+xml", Sizes: []string{"any"}}},
+	}, &mcp.ServerOptions{Instructions: instructions})
 	g.server, g.started = s, time.Now()
 	g.addMemoryTools(s)
 	g.addHandoffTools(s)

@@ -75,18 +75,24 @@ func (g *Gate) addMemoryTools(s *mcp.Server) {
 	write, search, read := MemoryTools[0], MemoryTools[1], MemoryTools[2]
 	addTool(g, s, &mcp.Tool{
 		Name: write,
-		Description: "Save a note for the other agents working on this project: a decision, a finding, " +
-			"a convention. Returns the note's id. Pass supersedes to replace an older note.",
+		Description: "Save a note that the other agents working on this project can find with memory_search " +
+			"and read with memory_read: a decision, a finding, a convention. Notes stay in the local Derbent " +
+			"database and are never deleted; pass supersedes with an older note's id to drop that note from " +
+			"search in favour of this one. Returns the new note's id.",
+		Annotations: &mcp.ToolAnnotations{Title: "Save a shared note", DestructiveHint: new(false), OpenWorldHint: new(false)},
 	}, g.memoryWrite)
 	addTool(g, s, &mcp.Tool{
-		Name:        search,
-		Description: "Search the notes agents have saved for this project. Returns ids, titles and snippets, best matches first.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		Name: search,
+		Description: "Search the notes agents have saved for this project, or every project with all_projects, " +
+			"for any of the query's words. Returns ids, titles and snippets, best matches first; superseded " +
+			"notes are left out. Use memory_read with an id for a note's full body.",
+		Annotations: &mcp.ToolAnnotations{Title: "Search shared notes", ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, g.memorySearch)
 	addTool(g, s, &mcp.Tool{
-		Name:        read,
-		Description: "Read one saved note in full by its id.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		Name: read,
+		Description: "Read one saved note in full by the id memory_search or memory_write returned. It reads " +
+			"notes of any project, and a superseded note too, whose superseded_by names the note that replaced it.",
+		Annotations: &mcp.ToolAnnotations{Title: "Read a shared note", ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, g.memoryRead)
 }
 
