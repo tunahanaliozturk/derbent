@@ -7,6 +7,8 @@
 
 One guarded pass for all your coding agents.
 
+[![Derbent MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/tunahanaliozturk/derbent/badges/card.svg)](https://glama.ai/mcp/servers/tunahanaliozturk/derbent)
+
 Every tool call that reaches Derbent, MCP or a CLI's built-in tools, is decided by one policy and written
 to a tamper-evident log, and the calls you care about wait for you.
 
