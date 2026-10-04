@@ -105,14 +105,14 @@ func (g *Gate) addHandoffTools(s *mcp.Server) {
 		Description: "Claim an open handoff addressed to you or to any agent, by the id handoff_list showed, and " +
 			"read it in full. It becomes taken by your agent label, so no other agent can take it; a handoff " +
 			"that is not open or is addressed to another agent is refused. Call handoff_done when the work is finished.",
-		Annotations: &mcp.ToolAnnotations{Title: "Take a handoff", DestructiveHint: new(false), OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{Title: "Take a handoff", DestructiveHint: new(true), OpenWorldHint: new(false)},
 	}, g.handoffTake)
 	addTool(g, s, &mcp.Tool{
 		Name: done,
 		Description: "Mark a handoff you took with handoff_take as done, with an optional note on what you did. " +
 			"Only the agent that took it can finish it, and finishing is final: a handoff already done is " +
 			"refused, and it leaves handoff_list's open list.",
-		Annotations: &mcp.ToolAnnotations{Title: "Finish a handoff", DestructiveHint: new(false), OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{Title: "Finish a handoff", DestructiveHint: new(true), OpenWorldHint: new(false)},
 	}, g.handoffDone)
 }
 

@@ -79,7 +79,7 @@ func (g *Gate) addMemoryTools(s *mcp.Server) {
 			"and read with memory_read: a decision, a finding, a convention. Notes stay in the local Derbent " +
 			"database and are never deleted; pass supersedes with an older note's id to drop that note from " +
 			"search in favour of this one. Returns the new note's id.",
-		Annotations: &mcp.ToolAnnotations{Title: "Save a shared note", DestructiveHint: new(false), OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{Title: "Save a shared note", DestructiveHint: new(true), OpenWorldHint: new(false)},
 	}, g.memoryWrite)
 	addTool(g, s, &mcp.Tool{
 		Name: search,
