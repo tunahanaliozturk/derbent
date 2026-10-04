@@ -9,9 +9,10 @@ Notable changes to Derbent, newest first. The format follows
 ### Changed
 
 - The memory and handoff tools describe what they change and which sibling tool comes next, and each
-  carries MCP annotations: a title, read-only for the three that only read, and not destructive and not
-  open-world for the four that write. Clients and directories that grade tool definitions can tell the
-  readers from the writers without calling them.
+  carries MCP annotations: a title, read-only for the three that only read, not open-world for all seven,
+  and destructive for the three that can change an existing record (`memory_write` with `supersedes`,
+  `handoff_take`, `handoff_done`) while `handoff_create` only adds. Clients and directories that grade
+  tool definitions can tell the readers from the writers without calling them.
 - `derbent mcp` sends a title, the repository URL and Derbent's mark as the server's icon in its
   `initialize` reply, so clients and directories can show the logo next to the name.
 
